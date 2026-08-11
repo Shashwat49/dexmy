@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str = ""
 
     # Email (Resend)
-    RESEND_API_KEY: str = "re_4d7EHyjk_PpNBq6VgYz6UGXDsqoc4VAEE"
+    RESEND_API_KEY: str = ""
     EMAIL_FROM_ADDRESS: str = "Dexmy <onboarding@resend.dev>"
 
     # CORS
