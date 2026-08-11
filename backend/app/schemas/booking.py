@@ -47,6 +47,7 @@ class BookingDetailRead(BaseModel):
 
     id: uuid.UUID
     student_id: uuid.UUID
+    student_name: str
     teacher_id: uuid.UUID
     teacher_name: str
     subject_id: int
