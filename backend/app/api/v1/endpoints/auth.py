@@ -14,13 +14,14 @@ import uuid
 
 router = APIRouter()
 
-
 @router.post("/signup", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 def signup(payload: UserCreate, db: Session = Depends(get_db)):
+     
     existing = db.query(User).filter(User.email == payload.email).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
+    print(payload)
     user = User(
         email=payload.email,
         password_hash=hash_password(payload.password),
