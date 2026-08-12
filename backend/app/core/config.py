@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     EMAIL_FROM_ADDRESS: str = "Dexmy <onboarding@resend.dev>"
 
     # CORS
-    FRONTEND_ORIGIN: str = "http://localhost:5173"
+    FRONTEND_ORIGIN: str = "https://dexmy.vercel.app"
 
     class Config:
         env_file = ".env"
