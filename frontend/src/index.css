@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Anton&family=Work+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-void text-chalk font-body;
+}
+
+/* ---- Custom effects used on the landing page (not expressible as plain Tailwind utilities) ---- */
+
+.chalk-underline path {
+  stroke: theme('colors.brand.red');
+  stroke-width: 6;
+  fill: none;
+  stroke-linecap: round;
+  stroke-dasharray: 400;
+  stroke-dashoffset: 400;
+  animation: draw-underline 1s ease-out 0.6s forwards;
+}
+
+@keyframes draw-underline {
+  to { stroke-dashoffset: 0; }
+}
+
+.btn-demo-pulse {
+  animation: gold-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes gold-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0.35); }
+  50% { box-shadow: 0 0 0 12px rgba(240, 180, 41, 0); }
+}
+
+.chalk-texture-bg {
+  background-image:
+    repeating-linear-gradient(0deg, #F2ECDD 0px, transparent 1px, transparent 40px),
+    repeating-linear-gradient(90deg, #F2ECDD 0px, transparent 1px, transparent 40px);
+  opacity: 0.035;
+}
