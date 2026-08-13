@@ -34,30 +34,3 @@ def create_email_verification_token(user_id: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=24)
     payload = {"sub": user_id, "purpose": "email_verification", "exp": expire}
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
-
-def create_phone_verification_token(user_id: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=15)
-
-    payload = {
-        "sub": user_id,
-        "purpose": "phone_verification",
-        "exp": expire,
-    }
-
-    return jwt.encode(
-        payload,
-        settings.JWT_SECRET_KEY,
-        algorithm=settings.JWT_ALGORITHM,
-    )
-
-def decode_phone_verification_token(token: str) -> dict:
-    payload = jwt.decode(
-        token,
-        settings.JWT_SECRET_KEY,
-        algorithms=[settings.JWT_ALGORITHM],
-    )
-
-    if payload.get("purpose") != "phone_verification":
-        raise ValueError("Invalid verification token")
-
-    return payload

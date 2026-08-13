@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 
-const WHATSAPP_NUMBER = "911234567890"; // TODO: replace with the real business number
+const WHATSAPP_NUMBER = "918929839177"; // TODO: replace with the real business number
 
 export default function Navbar() {
   return (

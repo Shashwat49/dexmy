@@ -19,9 +19,7 @@ export default function Hero() {
       </p>
 
       <h1 className="relative z-[3] font-display leading-[1.02] tracking-tight max-w-3xl text-[clamp(42px,7vw,84px)]">
-        Learn faster with a teacher
-        <br />
-        who's{" "}
+        Learn faster with a teacher who's{" "}
         <span className="relative inline-block">
           actually watching
           <svg

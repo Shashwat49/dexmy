@@ -30,7 +30,6 @@ class UserRead(UserBase):
     avatar_url: str | None = None
     is_active: bool
     email_verified: bool
-    phone_verified: bool
     created_at: datetime
 
 
@@ -40,19 +39,4 @@ class TokenResponse(BaseModel):
     user: UserRead
 
 class MessageResponse(BaseModel):
-    message: str
-
-class PhoneVerificationResponse(BaseModel):
-    message: str
-    verification_token: str
-    phone: str
-
-class VerifyPhoneRequest(BaseModel):
-    verification_token: str
-    otp: str
-
-class ResendPhoneOtpRequest(BaseModel):
-    verification_token: str
-
-class ResendPhoneOtpResponse(BaseModel):
     message: str

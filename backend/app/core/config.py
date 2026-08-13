@@ -33,10 +33,6 @@ class Settings(BaseSettings):
     STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
 
-    # SMS (Brevo)
-    BREVO_API_KEY: str = ""
-    BREVO_SMS_SENDER: str = "Dexmy"
-
     # CORS
     FRONTEND_ORIGIN: str = "https://dexmy.vercel.app"
 
