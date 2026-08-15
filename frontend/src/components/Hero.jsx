@@ -1,4 +1,5 @@
 import HeroScene from "./HeroScene";
+import { Link } from "react-router-dom";
 
 export default function Hero() {
   return (
@@ -39,12 +40,12 @@ export default function Hero() {
       </p>
 
       <div className="relative z-[3] flex gap-4 flex-wrap justify-center">
-        <a
-          href="#book-demo"
+        <Link
+          to="/login"
           className="btn-demo-pulse bg-brand-gold text-[#2C1E04] text-base font-bold px-8 py-4 rounded-lg hover:bg-[#FFC94D] transition-colors"
         >
-          Book a free demo
-        </a>
+          Book a Free Slot
+        </Link>
       </div>
     </section>
   );
