@@ -17,10 +17,6 @@ export default function Footer() {
                 alt="Dexmy"
                 className="w-10 h-10 object-contain"
               />
-
-              <span className="font-display text-2xl tracking-tight">
-                Dexmy
-              </span>
             </a>
 
             <p className="text-chalk-muted max-w-md leading-relaxed text-sm">

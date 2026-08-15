@@ -107,6 +107,37 @@ export default function Contact() {
                 </div>
               </a>
 
+              {/* Phone */}
+              <a
+                href="tel:+918929839177"
+                className="flex items-center gap-4 group"
+              >
+                <div className="w-11 h-11 shrink-0 rounded-[10px] bg-brand-red-soft text-brand-red flex items-center justify-center group-hover:bg-brand-red group-hover:text-white transition-colors">
+                  <svg
+                    width="21"
+                    height="21"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2A19.8 19.8 0 0 1 3.08 5.18 2 2 0 0 1 5.06 3h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.62 2.62a2 2 0 0 1-.45 2.11L9 10.73a16 16 0 0 0 4.27 4.27l1.28-1.28a2 2 0 0 1 2.11-.45c.85.29 1.72.5 2.62.62A2 2 0 0 1 21 15.9l1 .02Z" />
+                  </svg>
+                </div>
+
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-chalk-faint mb-1">
+                    Phone
+                  </p>
+
+                  <p className="text-chalk group-hover:text-brand-gold transition-colors">
+                    +91 89298 39177
+                  </p>
+                </div>
+              </a>
+
             </div>
 
             {/* Small note */}
