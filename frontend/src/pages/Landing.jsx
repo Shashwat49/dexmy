@@ -1,6 +1,9 @@
 import Navbar from "../components/Navbar";
 import Hero from "../components/Hero";
 import Features from "../components/Features";
+import About from "../components/About";
+import Contact from "../components/Contact";
+import Footer from "../components/Footer";
 
 export default function Landing() {
   return (
@@ -10,7 +13,10 @@ export default function Landing() {
 
       <Navbar />
       <Hero />
+      <About />
       <Features />
+      <Contact />
+      <Footer />
     </div>
   );
 }

@@ -1,26 +1,43 @@
 import { Link } from "react-router-dom";
 
-const WHATSAPP_NUMBER = "918929839177"; // TODO: replace with the real business number
+const WHATSAPP_NUMBER = "918929839177";
 
 export default function Navbar() {
   return (
     <nav className="sticky top-0 z-50 flex items-center justify-between px-6 md:px-12 py-5 bg-void/85 backdrop-blur-md border-b border-chalk-faint">
-      <Link to="/" className="font-display text-2xl text-brand-red -skew-x-6 inline-block">
+      {/* <Link to="/" className="font-display text-2xl text-brand-red -skew-x-6 inline-block">
         Dexmy
-      </Link>
+      </Link> */}
+      <img src="/dexmy-logo-bg-removed.png" alt="dexmy-logo"></img>
 
       <ul className="hidden md:flex gap-10 list-none">
-        {["Home", "About us", "Live sessions", "Contact"].map((label) => (
-          <li key={label}>
-            <a
-              href="#"
-              className="text-chalk-muted text-sm font-medium hover:text-chalk transition-colors relative group"
-            >
-              {label}
-              <span className="absolute left-0 -bottom-1.5 w-0 h-0.5 bg-brand-gold transition-all duration-200 group-hover:w-full" />
-            </a>
-          </li>
-        ))}
+        <li key="Home">
+          <a
+            href="#"
+            className="text-chalk-muted text-sm font-medium hover:text-chalk transition-colorsrelative group"
+          >
+            Home
+            <span className="absolute left-0 -bottom-1.5 w-0 h-0.5 bg-brand-gold transition-allduration-200 group-hover:w-full" />
+          </a>
+        </li>
+        <li key="About Us">
+          <a
+            href="#about"
+            className="text-chalk-muted text-sm font-medium hover:text-chalk transition-colorsrelative group"
+          >
+            About Us
+            <span className="absolute left-0 -bottom-1.5 w-0 h-0.5 bg-brand-gold transition-allduration-200 group-hover:w-full" />
+          </a>
+        </li>
+        <li key="Contact Us">
+          <a
+            href="#contact"
+            className="text-chalk-muted text-sm font-medium hover:text-chalk transition-colorsrelative group"
+          >
+            Contact Us
+            <span className="absolute left-0 -bottom-1.5 w-0 h-0.5 bg-brand-gold transition-allduration-200 group-hover:w-full" />
+          </a>
+        </li>
       </ul>
 
       <div className="flex items-center gap-3">
