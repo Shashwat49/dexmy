@@ -41,7 +41,7 @@ export default function Signup() {
 
       setError(
         err.response?.data?.detail ||
-          "Couldn't create your account — please try again."
+        "Couldn't create your account — please try again."
       );
     }
   }
@@ -62,11 +62,10 @@ export default function Signup() {
                 type="button"
                 key={r.value}
                 onClick={() => setRole(r.value)}
-                className={`flex-1 py-2 rounded-md text-sm font-semibold transition-colors ${
-                  role === r.value
+                className={`flex-1 py-2 rounded-md text-sm font-semibold transition-colors ${role === r.value
                     ? "bg-brand-red text-chalk"
                     : "text-chalk-muted hover:text-chalk"
-                }`}
+                  }`}
               >
                 {r.label}
               </button>
@@ -185,6 +184,9 @@ export default function Signup() {
                 </svg>
               )}
             </button>
+            <p className="text-xs text-chalk-muted mt-1.5">
+              Use at least 8 characters with uppercase, lowercase, and a number.
+            </p>
           </div>
         </div>
 

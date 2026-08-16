@@ -11,6 +11,7 @@ import AdminDashboard from "./pages/dashboard/AdminDashboard";
 import BookClass from "./pages/dashboard/student/BookClass";
 import MyNotes from "./pages/dashboard/student/MyNotes";
 import MyAccount from "./pages/dashboard/MyAccount";
+import TeacherProfile from "./pages/dashboard/teacher/TeacherProfile";
 
 export default function App() {
   return (
@@ -83,6 +84,16 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/dashboard/teacher/profile"
+        element={
+          <ProtectedRoute roles={["teacher"]}>
+            <TeacherProfile />
+          </ProtectedRoute>
+        }
+      />
+
     </Routes>
+
   );
 }

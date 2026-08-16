@@ -12,6 +12,8 @@ from app.api.v1.endpoints import (
     users,
     payments,
     system,
+    profiles,
+    subjects
 )
 
 api_router = APIRouter()
@@ -26,3 +28,5 @@ api_router.include_router(marketing.router, tags=["marketing"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
 api_router.include_router(system.router, prefix="/system", tags=["system"])
+api_router.include_router(profiles.router, prefix="/profiles", tags=["profiles"])
+api_router.include_router(subjects.router, prefix="/subjects", tags=["subjects"])
