@@ -1,224 +1,115 @@
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.core.constants import SLOT_DURATION_MINUTES
 from app.models.booking import Booking, BookingStatus
 from app.models.teacher import (
     Subject,
-    TeacherAvailability,
     TeacherProfile,
     TeacherSubject,
 )
 from app.models.user import User, UserRole
 from app.models.free_class import StudentFreeClassUse
 
-CLASS_SEARCH_DAYS = 30
+
+# ============================================================
+# BOOKING CONFIGURATION
+# ============================================================
+
+IST = ZoneInfo("Asia/Kolkata")
+
+BOOKING_START_HOUR = 10
+BOOKING_END_HOUR = 22
+
+# A slot starts every hour.
+# 10:00, 11:00, ..., 21:00
+BOOKING_SLOT_MINUTES = 60
+
+# Actual class duration.
+CLASS_DURATION_MINUTES = 55
+
 FREE_CLASS_LIMIT = 2
 
 
-def get_next_slot_for_teacher(
-    db: Session,
-    teacher_id: uuid.UUID,
-    duration_minutes: int = SLOT_DURATION_MINUTES,
-) -> datetime | None:
+# ============================================================
+# DATE / TIME HELPERS
+# ============================================================
 
-    now = datetime.now(timezone.utc)
-
-    bookings = (
-        db.query(Booking)
-        .filter(
-            Booking.teacher_id == teacher_id,
-
-            Booking.status.in_(
-                [
-                    BookingStatus.pending,
-                    BookingStatus.confirmed,
-                ]
-            ),
-
-            Booking.scheduled_at >= now,
-            Booking.scheduled_at
-            < now + timedelta(
-                days=CLASS_SEARCH_DAYS
-            ),
-        )
-        .order_by(
-            Booking.scheduled_at.asc()
-        )
-        .all()
-    )
-
-    booked_ranges = []
-
-    for booking in bookings:
-
-        start = booking.scheduled_at
-
-        end = (
-            start
-            + timedelta(
-                minutes=booking.duration_minutes
-            )
-        )
-
-        booked_ranges.append(
-            (start, end)
-        )
+def get_now_ist() -> datetime:
+    """
+    Return the current datetime in India Standard Time.
+    """
+    return datetime.now(IST)
 
 
-    availability = (
-        db.query(TeacherAvailability)
-        .filter(
-            TeacherAvailability.teacher_id
-            == teacher_id,
-            TeacherAvailability.is_recurring.is_(True),
-        )
-        .order_by(
-            TeacherAvailability.day_of_week,
-            TeacherAvailability.start_time,
-        )
-        .all()
-    )
+def get_tomorrow_ist() -> date:
+    """
+    Return tomorrow's calendar date according to IST.
+    """
+    return get_now_ist().date() + timedelta(days=1)
 
 
-    if not availability:
-        return None
+def generate_tomorrow_slots() -> list[datetime]:
+    """
+    Generate all valid booking start times for tomorrow.
 
+    Valid slots:
 
-    slot_duration = timedelta(
-        minutes=duration_minutes
-    )
+    10:00
+    11:00
+    12:00
+    13:00
+    14:00
+    15:00
+    16:00
+    17:00
+    18:00
+    19:00
+    20:00
+    21:00
 
-    slot_step = timedelta(
-        minutes=SLOT_DURATION_MINUTES
-    )
+    All times are represented as timezone-aware IST datetimes.
+    """
 
+    tomorrow = get_tomorrow_ist()
 
-    for day_offset in range(
-        CLASS_SEARCH_DAYS + 1
+    slots = []
+
+    for hour in range(
+        BOOKING_START_HOUR,
+        BOOKING_END_HOUR,
     ):
-
-        current_date = (
-            now.date()
-            + timedelta(
-                days=day_offset
-            )
+        slot = datetime.combine(
+            tomorrow,
+            time(hour, 0),
+            tzinfo=IST,
         )
 
-        # Database convention:
-        # 0 = Sunday
-        day_of_week = (
-            current_date.weekday() + 1
-        ) % 7
+        slots.append(slot)
+
+    return slots
 
 
-        day_windows = [
-            window
-            for window in availability
-            if window.day_of_week
-            == day_of_week
-        ]
+# ============================================================
+# TEACHER ELIGIBILITY
+# ============================================================
 
-
-        for window in day_windows:
-
-            window_start = datetime.combine(
-                current_date,
-                window.start_time,
-                tzinfo=timezone.utc,
-            )
-
-            window_end = datetime.combine(
-                current_date,
-                window.end_time,
-                tzinfo=timezone.utc,
-            )
-
-
-            cursor = window_start
-
-            if cursor < now:
-                cursor = now
-
-                # Round up to the next slot boundary.
-                minutes_since_midnight = (
-                    cursor.hour * 60
-                    + cursor.minute
-                )
-
-                remainder = (
-                    minutes_since_midnight
-                    % SLOT_DURATION_MINUTES
-                )
-
-                if remainder:
-                    cursor += timedelta(
-                        minutes=(
-                            SLOT_DURATION_MINUTES
-                            - remainder
-                        )
-                    )
-
-                cursor = cursor.replace(
-                    second=0,
-                    microsecond=0,
-                )
-
-
-            while (
-                cursor + slot_duration
-                <= window_end
-            ):
-
-                slot_end = (
-                    cursor
-                    + slot_duration
-                )
-
-
-                overlaps = any(
-                    cursor < booked_end
-                    and slot_end > booked_start
-                    for (
-                        booked_start,
-                        booked_end,
-                    )
-                    in booked_ranges
-                )
-
-
-                if not overlaps:
-                    return cursor
-
-
-                cursor += slot_step
-
-
-    return None
-
-
-def find_teacher_and_slot(
+def get_eligible_teacher_ids(
     db: Session,
     subject_id: int,
-) -> tuple[
-    uuid.UUID,
-    datetime,
-] | None:
+) -> list[uuid.UUID]:
+    """
+    Return active + verified teachers who teach the
+    requested subject.
 
-    subject = db.get(
-        Subject,
-        subject_id,
-    )
+    Students never receive this information directly.
+    """
 
-    if subject is None:
-        return None
-
-
-    teacher_profiles = (
-        db.query(TeacherProfile)
+    teachers = (
+        db.query(TeacherProfile.user_id)
         .join(
             TeacherSubject,
             TeacherSubject.teacher_id
@@ -242,52 +133,278 @@ def find_teacher_and_slot(
         .all()
     )
 
+    return [
+        teacher_id
+        for (teacher_id,) in teachers
+    ]
 
-    candidates = []
+
+# ============================================================
+# SLOT CAPACITY
+# ============================================================
+
+def get_slot_capacity(
+    db: Session,
+    subject_id: int,
+    slot: datetime,
+) -> int:
+    """
+    Calculate how many additional students can book
+    this subject at this slot.
+
+    Capacity is based on eligible teachers.
+
+    A teacher can only teach one class during a slot.
+
+    Assigned teacher bookings consume teacher capacity.
+
+    Unassigned bookings also reserve capacity because
+    they still need a teacher.
+    """
+
+    eligible_teacher_ids = get_eligible_teacher_ids(
+        db=db,
+        subject_id=subject_id,
+    )
+
+    total_teachers = len(
+        eligible_teacher_ids
+    )
+
+    if total_teachers == 0:
+        return 0
+
+    # --------------------------------------------------------
+    # Find all active bookings at this exact slot.
+    #
+    # These include:
+    #
+    # - confirmed bookings
+    # - pending bookings
+    #
+    # Cancelled/completed bookings don't consume capacity.
+    # --------------------------------------------------------
+
+    bookings = (
+        db.query(Booking)
+        .filter(
+            Booking.scheduled_at == slot,
+
+            Booking.status.in_(
+                [
+                    BookingStatus.pending,
+                    BookingStatus.confirmed,
+                ]
+            ),
+        )
+        .all()
+    )
+
+    # --------------------------------------------------------
+    # Teachers already occupied at this slot
+    #
+    # Only count assigned teachers who are eligible for
+    # the requested subject.
+    # --------------------------------------------------------
+
+    occupied_teacher_ids = {
+        booking.teacher_id
+        for booking in bookings
+        if booking.teacher_id is not None
+        and booking.teacher_id
+        in eligible_teacher_ids
+    }
+
+    occupied_assigned_teachers = len(
+        occupied_teacher_ids
+    )
+
+    # --------------------------------------------------------
+    # Unassigned bookings reserve capacity.
+    #
+    # A booking with teacher_id = NULL has already taken
+    # a student slot and still needs a teacher.
+    # --------------------------------------------------------
+
+    unassigned_bookings = sum(
+        1
+        for booking in bookings
+        if booking.teacher_id is None
+    )
+
+    capacity = (
+        total_teachers
+        - occupied_assigned_teachers
+        - unassigned_bookings
+    )
+
+    return max(capacity, 0)
 
 
-    for teacher in teacher_profiles:
+# ============================================================
+# AVAILABLE SLOTS
+# ============================================================
 
-        slot = get_next_slot_for_teacher(
+def get_available_slots(
+    db: Session,
+    subject_id: int,
+) -> list[dict]:
+    """
+    Return tomorrow's booking slots and their availability.
+
+    The student can only book tomorrow.
+
+    Scheduling window:
+        10:00 AM IST
+        through
+        10:00 PM IST
+
+    The final start time is 9:00 PM IST.
+    """
+
+    # --------------------------------------------------------
+    # Make sure subject exists.
+    # --------------------------------------------------------
+
+    subject = db.get(
+        Subject,
+        subject_id,
+    )
+
+    if subject is None:
+        return []
+
+    slots = generate_tomorrow_slots()
+
+    results = []
+
+    for slot in slots:
+
+        capacity = get_slot_capacity(
             db=db,
-            teacher_id=teacher.user_id,
+            subject_id=subject_id,
+            slot=slot,
         )
 
-        if slot is not None:
-
-            candidates.append(
-                (
-                    slot,
-                    teacher.user_id,
-                )
+        slot_end = (
+            slot
+            + timedelta(
+                minutes=BOOKING_SLOT_MINUTES
             )
+        )
+
+        results.append(
+            {
+                "start": slot,
+                "end": slot_end,
+                "available": capacity > 0,
+                "remaining_capacity": capacity,
+            }
+        )
+
+    return results
 
 
-    if not candidates:
-        return None
+# ============================================================
+# VALIDATE REQUESTED SLOT
+# ============================================================
 
+def validate_requested_slot(
+    requested_slot: datetime,
+) -> datetime:
+    """
+    Validate and normalize a student's requested booking slot.
 
-    # Earliest available class wins.
-    candidates.sort(
-        key=lambda item: item[0]
+    Rules:
+
+    1. Must represent tomorrow in IST.
+    2. Must be between 10 AM and 9 PM start time.
+    3. Must be exactly on an hourly boundary.
+    """
+
+    # --------------------------------------------------------
+    # Convert submitted timestamp to IST.
+    # --------------------------------------------------------
+
+    if requested_slot.tzinfo is None:
+        raise ValueError(
+            "scheduled_at must include a timezone."
+        )
+
+    requested_ist = requested_slot.astimezone(
+        IST
     )
 
+    tomorrow = get_tomorrow_ist()
 
-    selected_slot, selected_teacher = (
-        candidates[0]
-    )
+    # --------------------------------------------------------
+    # Tomorrow only.
+    # --------------------------------------------------------
+
+    if requested_ist.date() != tomorrow:
+        raise ValueError(
+            "Classes can only be booked for tomorrow."
+        )
+
+    # --------------------------------------------------------
+    # Exact hour.
+    #
+    # No:
+    # 6:15 PM
+    # 6:30 PM
+    # 6:45 PM
+    #
+    # Only:
+    # 6:00 PM
+    # --------------------------------------------------------
+
+    if (
+        requested_ist.minute != 0
+        or requested_ist.second != 0
+        or requested_ist.microsecond != 0
+    ):
+        raise ValueError(
+            "Please select one of the available hourly slots."
+        )
+
+    # --------------------------------------------------------
+    # 10 AM through 9 PM start time.
+    # --------------------------------------------------------
+
+    if not (
+        BOOKING_START_HOUR
+        <= requested_ist.hour
+        < BOOKING_END_HOUR
+    ):
+        raise ValueError(
+            "Classes can only be booked between "
+            "10:00 AM and 10:00 PM IST."
+        )
+
+    # --------------------------------------------------------
+    # Return normalized IST datetime.
+    # --------------------------------------------------------
+
+    return requested_ist
 
 
-    return (
-        selected_teacher,
-        selected_slot,
-    )
+# ============================================================
+# FREE CLASS STATUS
+# ============================================================
 
 def get_free_class_status(
     db: Session,
     student_id: uuid.UUID,
     subject_id: int,
 ) -> tuple[bool, int]:
+    """
+    Determine whether the student can use a free class.
+
+    Rules:
+
+    - Maximum 2 free classes.
+    - Free class cannot be reused for the same subject.
+    """
 
     used_subjects = (
         db.query(
@@ -305,7 +422,10 @@ def get_free_class_status(
         for row in used_subjects
     }
 
-    # Already used a free class for this subject.
+    # --------------------------------------------------------
+    # Already used free class for this subject.
+    # --------------------------------------------------------
+
     if subject_id in used_subject_ids:
         return False, 0
 

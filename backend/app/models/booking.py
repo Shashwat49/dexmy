@@ -27,15 +27,75 @@ class DemoStatus(str, enum.Enum):
 class Booking(Base):
     __tablename__ = "bookings"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    student_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    teacher_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("teacher_profiles.user_id", ondelete="CASCADE"), index=True)
-    subject_id: Mapped[int] = mapped_column(Integer, ForeignKey("subjects.id"))
-    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    duration_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
-    status: Mapped[BookingStatus] = mapped_column(Enum(BookingStatus, name="booking_status"), default=BookingStatus.pending)
-    price: Mapped[float | None] = mapped_column(Numeric(10, 2))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="CASCADE",
+        ),
+        index=True,
+        nullable=False,
+    )
+
+    teacher_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "teacher_profiles.user_id",
+            ondelete="CASCADE",
+        ),
+        index=True,
+        nullable=True,
+    )
+
+    subject_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("subjects.id"),
+        nullable=False,
+    )
+
+    scheduled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+    )
+
+    duration_minutes: Mapped[int] = mapped_column(
+        Integer,
+        default=60,
+        nullable=False,
+    )
+
+    status: Mapped[BookingStatus] = mapped_column(
+        Enum(
+            BookingStatus,
+            name="booking_status",
+        ),
+        default=BookingStatus.pending,
+        nullable=False,
+    )
+
+    price: Mapped[float | None] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    teacher_assignment_status: Mapped[str] = mapped_column(
+        String(20),
+        default="pending",
+        nullable=False,
+    )
 
 
 class DemoRequest(Base):

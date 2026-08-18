@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import (
     APIRouter,
@@ -20,13 +20,11 @@ from app.models.classroom import ClassSession
 from app.models.free_class import (
     StudentFreeClassUse,
 )
-from app.models.teacher import (
-    Subject,
-    TeacherProfile,
-)
+from app.models.teacher import Subject
 from app.models.user import User, UserRole
 
 from app.schemas.booking import (
+    AvailableSlotsRead,
     BookingCreate,
     BookingDetailRead,
     BookingRead,
@@ -37,12 +35,86 @@ from app.schemas.classroom import (
 )
 
 from app.services.booking_service import (
-    find_teacher_and_slot,
+    get_available_slots,
     get_free_class_status,
+    validate_requested_slot,
 )
 
 
 router = APIRouter()
+
+
+# ============================================================
+# AVAILABLE SLOTS
+# ============================================================
+
+@router.get(
+    "/available-slots",
+    response_model=AvailableSlotsRead,
+)
+def available_slots(
+    subject_id: int,
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    db: Session = Depends(get_db),
+):
+    """
+    Return available booking slots for tomorrow.
+
+    Scheduling rules:
+        - Tomorrow only
+        - 10 AM to 10 PM IST
+        - Student does not choose teacher
+    """
+
+    # --------------------------------------------------------
+    # Student-only
+    # --------------------------------------------------------
+
+    if current_user.role != UserRole.student:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can view booking slots.",
+        )
+
+    # --------------------------------------------------------
+    # Subject exists
+    # --------------------------------------------------------
+
+    subject = db.get(
+        Subject,
+        subject_id,
+    )
+
+    if subject is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subject not found.",
+        )
+
+    # --------------------------------------------------------
+    # Get available slots
+    # --------------------------------------------------------
+
+    slots = get_available_slots(
+        db=db,
+        subject_id=subject_id,
+    )
+
+    from app.services.booking_service import (
+        get_tomorrow_ist,
+    )
+
+    return AvailableSlotsRead(
+        date=str(
+            get_tomorrow_ist()
+        ),
+        timezone="Asia/Kolkata",
+        slots=slots,
+    )
 
 
 # ============================================================
@@ -56,11 +128,27 @@ router = APIRouter()
 )
 def create_booking(
     payload: BookingCreate,
+
     current_user: User = Depends(
         get_current_user
     ),
+
     db: Session = Depends(get_db),
 ):
+    """
+    Create a confirmed class booking.
+
+    The student chooses:
+        - subject
+        - time slot
+
+    The student does NOT choose:
+        - teacher
+        - price
+        - status
+
+    Teacher assignment happens later through admin.
+    """
 
     # --------------------------------------------------------
     # Student-only
@@ -71,7 +159,6 @@ def create_booking(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only students can book classes.",
         )
-
 
     # --------------------------------------------------------
     # Subject exists
@@ -88,58 +175,68 @@ def create_booking(
             detail="Subject not found.",
         )
 
+    # --------------------------------------------------------
+    # Validate requested slot
+    # --------------------------------------------------------
+
+    try:
+        scheduled_at = validate_requested_slot(
+            payload.scheduled_at
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+    # --------------------------------------------------------
+    # Check capacity
+    # --------------------------------------------------------
+
+    from app.services.booking_service import (
+        get_slot_capacity,
+    )
+
+    capacity = get_slot_capacity(
+        db=db,
+        subject_id=payload.subject_id,
+        slot=scheduled_at,
+    )
+
+    if capacity <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This time slot is no longer available "
+                "for this subject."
+            ),
+        )
 
     # --------------------------------------------------------
     # Determine free vs paid
     # --------------------------------------------------------
 
-    is_free, remaining_free = get_free_class_status(
+    is_free, remaining_free = (
+        get_free_class_status(
             db=db,
             student_id=current_user.id,
             subject_id=payload.subject_id,
         )
-
-
-    # --------------------------------------------------------
-    # Find teacher + earliest slot
-    # --------------------------------------------------------
-
-    allocation = find_teacher_and_slot(
-            db=db,
-            subject_id=payload.subject_id,
-        )
-
-
-    if allocation is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "No teacher is currently available "
-                "for this subject."
-            ),
-        )
-
-
-    teacher_id, scheduled_at = allocation
-
-
-    # --------------------------------------------------------
-    # Price
-    #
-    # TEMPORARY:
-    # Paid classes currently use the teacher hourly rate.
-    # Payment integration will be added in Phase 5.
-    # --------------------------------------------------------
-
-    teacher_profile = (
-        db.query(TeacherProfile)
-        .filter(
-            TeacherProfile.user_id
-            == teacher_id
-        )
-        .first()
     )
 
+    # --------------------------------------------------------
+    # Determine price
+    #
+    # IMPORTANT:
+    # Teacher is not assigned yet.
+    #
+    # Therefore paid pricing cannot depend on a selected
+    # teacher at this stage.
+    #
+    # For now we use the subject's future configured
+    # pricing system.
+    # --------------------------------------------------------
 
     if is_free:
 
@@ -147,27 +244,13 @@ def create_booking(
 
     else:
 
-        price = (
-            float(
-                teacher_profile.hourly_rate
-            )
-            if teacher_profile
-            and teacher_profile.hourly_rate
-            is not None
-            else None
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "Paid class booking will be enabled "
+                "after payment pricing is configured."
+            ),
         )
-
-
-        if price is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "This class requires payment, "
-                    "but a class price has not been "
-                    "configured."
-                ),
-            )
-
 
     # --------------------------------------------------------
     # Create booking
@@ -176,7 +259,9 @@ def create_booking(
     booking = Booking(
         student_id=current_user.id,
 
-        teacher_id=teacher_id,
+        # IMPORTANT:
+        # Teacher is intentionally NULL.
+        teacher_id=None,
 
         subject_id=payload.subject_id,
 
@@ -184,16 +269,18 @@ def create_booking(
 
         duration_minutes=60,
 
+        # Booking itself is immediately confirmed.
         status=BookingStatus.confirmed,
 
         price=price,
-    )
 
+        # Teacher assignment happens later.
+        teacher_assignment_status="pending",
+    )
 
     db.add(booking)
 
     db.flush()
-
 
     # --------------------------------------------------------
     # Consume free class
@@ -211,7 +298,6 @@ def create_booking(
 
         db.add(free_use)
 
-
     # --------------------------------------------------------
     # Create classroom session
     # --------------------------------------------------------
@@ -226,11 +312,9 @@ def create_booking(
 
     db.add(session)
 
-
     db.commit()
 
     db.refresh(booking)
-
 
     # --------------------------------------------------------
     # Build response
@@ -240,12 +324,6 @@ def create_booking(
         User,
         booking.student_id,
     )
-
-    teacher_user = db.get(
-        User,
-        booking.teacher_id,
-    )
-
 
     return BookingDetailRead(
         id=booking.id,
@@ -258,13 +336,9 @@ def create_booking(
             else "Unknown"
         ),
 
-        teacher_id=booking.teacher_id,
+        teacher_id=None,
 
-        teacher_name=(
-            teacher_user.full_name
-            if teacher_user
-            else "Unknown"
-        ),
+        teacher_name=None,
 
         subject_id=booking.subject_id,
 
@@ -278,9 +352,17 @@ def create_booking(
 
         status=booking.status,
 
-        price=booking.price,
+        price=(
+            float(booking.price)
+            if booking.price is not None
+            else None
+        ),
 
         created_at=booking.created_at,
+
+        teacher_assignment_status=(
+            booking.teacher_assignment_status
+        ),
     )
 
 
@@ -296,11 +378,18 @@ def list_my_bookings(
     current_user: User = Depends(
         get_current_user
     ),
+
     db: Session = Depends(get_db),
 ):
+    """
+    Return the current user's bookings.
+    """
 
     query = db.query(Booking)
 
+    # --------------------------------------------------------
+    # Teacher
+    # --------------------------------------------------------
 
     if current_user.role == UserRole.teacher:
 
@@ -308,6 +397,10 @@ def list_my_bookings(
             Booking.teacher_id
             == current_user.id
         )
+
+    # --------------------------------------------------------
+    # Student
+    # --------------------------------------------------------
 
     elif current_user.role == UserRole.student:
 
@@ -323,7 +416,6 @@ def list_my_bookings(
             detail="Not allowed.",
         )
 
-
     bookings = (
         query
         .order_by(
@@ -332,9 +424,7 @@ def list_my_bookings(
         .all()
     )
 
-
     results = []
-
 
     for booking in bookings:
 
@@ -343,16 +433,19 @@ def list_my_bookings(
             booking.student_id,
         )
 
-        teacher_user = db.get(
-            User,
-            booking.teacher_id,
-        )
+        teacher_user = None
+
+        if booking.teacher_id is not None:
+
+            teacher_user = db.get(
+                User,
+                booking.teacher_id,
+            )
 
         subject = db.get(
             Subject,
             booking.subject_id,
         )
-
 
         results.append(
             BookingDetailRead(
@@ -371,7 +464,7 @@ def list_my_bookings(
                 teacher_name=(
                     teacher_user.full_name
                     if teacher_user
-                    else "Unknown"
+                    else None
                 ),
 
                 subject_id=booking.subject_id,
@@ -392,12 +485,21 @@ def list_my_bookings(
 
                 status=booking.status,
 
-                price=booking.price,
+                price=(
+                    float(booking.price)
+                    if booking.price is not None
+                    else None
+                ),
 
-                created_at=booking.created_at,
+                created_at=(
+                    booking.created_at
+                ),
+
+                teacher_assignment_status=(
+                    booking.teacher_assignment_status
+                ),
             )
         )
-
 
     return results
 
@@ -419,30 +521,46 @@ def cancel_booking(
 
     db: Session = Depends(get_db),
 ):
+    """
+    Cancel a booking.
+    """
 
     booking = db.get(
         Booking,
         booking_id,
     )
 
-
     if booking is None:
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Booking not found",
         )
 
+    # --------------------------------------------------------
+    # Ownership
+    # --------------------------------------------------------
 
-    if current_user.id not in (
-        booking.student_id,
-        booking.teacher_id,
-    ):
+    allowed_ids = {
+        booking.student_id
+    }
+
+    if booking.teacher_id is not None:
+
+        allowed_ids.add(
+            booking.teacher_id
+        )
+
+    if current_user.id not in allowed_ids:
 
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not your booking",
         )
 
+    # --------------------------------------------------------
+    # Already closed
+    # --------------------------------------------------------
 
     if booking.status in (
         BookingStatus.cancelled,
@@ -454,11 +572,13 @@ def cancel_booking(
             detail="Booking already closed out",
         )
 
+    # --------------------------------------------------------
+    # Cancel
+    # --------------------------------------------------------
 
     booking.status = (
         BookingStatus.cancelled
     )
-
 
     db.commit()
 
@@ -484,12 +604,18 @@ def get_booking_session(
 
     db: Session = Depends(get_db),
 ):
+    """
+    Return the classroom session for a booking.
+
+    A student may access their session even before
+    a teacher has been assigned, but the actual JOIN
+    permission will be handled by the classroom layer.
+    """
 
     booking = db.get(
         Booking,
         booking_id,
     )
-
 
     if booking is None:
 
@@ -498,17 +624,30 @@ def get_booking_session(
             detail="Booking not found",
         )
 
+    # --------------------------------------------------------
+    # Ownership
+    # --------------------------------------------------------
 
-    if current_user.id not in (
-        booking.student_id,
-        booking.teacher_id,
-    ):
+    allowed_ids = {
+        booking.student_id
+    }
+
+    if booking.teacher_id is not None:
+
+        allowed_ids.add(
+            booking.teacher_id
+        )
+
+    if current_user.id not in allowed_ids:
 
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not your booking",
         )
 
+    # --------------------------------------------------------
+    # Find session
+    # --------------------------------------------------------
 
     session = (
         db.query(ClassSession)
@@ -519,7 +658,6 @@ def get_booking_session(
         .first()
     )
 
-
     if session is None:
 
         raise HTTPException(
@@ -528,6 +666,5 @@ def get_booking_session(
                 "Session not found for this booking"
             ),
         )
-
 
     return session
