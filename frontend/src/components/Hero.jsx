@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 export default function Hero() {
   return (
-    <section className="relative min-h-[88vh] flex flex-col items-center justify-center text-center px-6 pt-20 pb-16 overflow-hidden">
+    <section className="relative min-h-[78vh] sm:min-h-[82vh] md:min-h-[88vh] flex flex-col items-center justify-center text-center px-4 sm:px-6 pt-16 sm:pt-20 pb-12 sm:pb-16 overflow-hidden">
       {/* soft red vignette behind everything */}
       <div
         className="absolute inset-0 pointer-events-none"
@@ -19,7 +19,7 @@ export default function Hero() {
         1-on-1 live classes, any subject
       </p>
 
-      <h1 className="relative z-[3] font-display leading-[1.02] tracking-tight max-w-3xl text-[clamp(42px,7vw,84px)]">
+      <h1 className="relative z-[3] font-display leading-[1.02] tracking-tight max-w-3xl text-[clamp(38px,10vw,84px)]">
         Learn faster with a teacher who's{" "}
         <span className="relative inline-block">
           actually watching
@@ -34,7 +34,7 @@ export default function Hero() {
         you learn
       </h1>
 
-      <p className="relative z-[3] text-lg text-chalk-muted max-w-xl mx-auto mt-7 mb-10 leading-relaxed">
+      <p className="relative z-[3] text-base sm:text-lg text-chalk-muted max-w-xl mx-auto mt-6 sm:mt-7 mb-8 sm:mb-10 leading-relaxed">
         Dexmy pairs every student with a dedicated tutor for real one-on-one classes — live
         whiteboard, live doubts, zero crowd.
       </p>

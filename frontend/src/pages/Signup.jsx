@@ -196,10 +196,10 @@ return (
               </svg>
             )}
           </button>
-          <p className="text-xs text-chalk-muted mt-1.5">
-            Use at least 8 characters with uppercase, lowercase, and a number.
-          </p>
         </div>
+        <p className="text-xs text-chalk-muted mt-1.5">
+            Use at least 8 characters with uppercase, lowercase, and a number.
+        </p>
       </div>
 
       {/* Error */}

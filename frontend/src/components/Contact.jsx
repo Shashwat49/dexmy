@@ -64,12 +64,12 @@ export default function Contact() {
                   </svg>
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs uppercase tracking-wider text-chalk-faint mb-1">
                     General enquiries
                   </p>
 
-                  <p className="text-chalk group-hover:text-brand-gold transition-colors">
+                  <p className="text-chalk group-hover:text-brand-gold transition-colors max-w-[190px] break-all">
                     dexmyedu@gmail.com
                   </p>
                 </div>
