@@ -12,6 +12,7 @@ import BookClass from "./pages/dashboard/student/BookClass";
 import MyNotes from "./pages/dashboard/student/MyNotes";
 import MyAccount from "./pages/dashboard/MyAccount";
 import TeacherProfile from "./pages/dashboard/teacher/TeacherProfile";
+import TeacherCalendar from "./pages/dashboard/teacher/TeacherCalendar";
 
 export default function App() {
   return (
@@ -89,6 +90,14 @@ export default function App() {
         element={
           <ProtectedRoute roles={["teacher"]}>
             <TeacherProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dashboard/teacher/calendar"
+        element={
+          <ProtectedRoute roles={["teacher"]}>
+            <TeacherCalendar />
           </ProtectedRoute>
         }
       />
