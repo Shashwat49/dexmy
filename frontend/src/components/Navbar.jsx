@@ -118,12 +118,13 @@ export default function Navbar() {
               BECOME A TUTOR
               Laptop/Desktop only
           ===================================================== */}
-          <a
-            href="#"
+          <Link
+            to="/signup?role=teacher"
+            onClick={closeMenu}
             className="hidden lg:inline-flex items-center justify-center border border-chalk-muted hover:border-brand-gold hover:text-brand-gold transition-colors text-sm font-semibold px-4 py-2.5 rounded-md whitespace-nowrap"
           >
             Become a tutor
-          </a>
+          </Link>
 
 
           {/* =====================================================
@@ -350,13 +351,13 @@ export default function Navbar() {
 
 
               {/* Become a tutor */}
-              <a
-                href="#"
+              <Link
+                to="/signup?role=teacher"
                 onClick={closeMenu}
                 className="rounded-lg px-4 py-3 text-sm font-semibold text-brand-gold hover:bg-panel-2 transition-colors"
               >
                 Become a tutor
-              </a>
+              </Link>
 
             </div>
 

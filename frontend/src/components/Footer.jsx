@@ -121,7 +121,7 @@ export default function Footer() {
 
               <li>
                 <a
-                  href="/signup"
+                  href="/signup?role=teacher"
                   className="text-sm text-chalk-muted hover:text-chalk transition-colors"
                 >
                   Become a tutor
