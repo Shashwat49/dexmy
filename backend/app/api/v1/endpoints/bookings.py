@@ -40,9 +40,14 @@ from app.services.booking_service import (
     validate_requested_slot,
 )
 
+from app.core.constants import (
+    CLASS_DURATION_MINUTES,
+)
+from app.services.scheduling_service import (
+    can_accept_booking,
+)
 
 router = APIRouter()
-
 
 # ============================================================
 # AVAILABLE SLOTS
@@ -184,33 +189,26 @@ def create_booking(
             payload.scheduled_at
         )
 
+        can_book, scheduling_error = can_accept_booking(
+            db=db,
+            student_id=current_user.id,
+            subject_id=payload.subject_id,
+            slot_start=scheduled_at,
+        )
+
+        if not can_book:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    scheduling_error
+                    or "This time slot is no longer available."
+                ),
+            )
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
-        )
-
-    # --------------------------------------------------------
-    # Check capacity
-    # --------------------------------------------------------
-
-    from app.services.booking_service import (
-        get_slot_capacity,
-    )
-
-    capacity = get_slot_capacity(
-        db=db,
-        subject_id=payload.subject_id,
-        slot=scheduled_at,
-    )
-
-    if capacity <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "This time slot is no longer available "
-                "for this subject."
-            ),
         )
 
     # --------------------------------------------------------
@@ -267,7 +265,7 @@ def create_booking(
 
         scheduled_at=scheduled_at,
 
-        duration_minutes=60,
+        duration_minutes=CLASS_DURATION_MINUTES,
 
         # Booking itself is immediately confirmed.
         status=BookingStatus.confirmed,

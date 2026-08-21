@@ -139,7 +139,7 @@ export default function Signup() {
         {/* Phone */}
         <div>
           <label className="block text-sm font-medium mb-1.5">
-            Phone (optional)
+            Phone
           </label>
 
           <input

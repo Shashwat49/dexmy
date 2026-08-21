@@ -4,15 +4,34 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
-from app.core.constants import SLOT_DURATION_MINUTES
-from app.models.booking import Booking, BookingStatus
+from app.core.constants import (
+    CLASS_DURATION_MINUTES,
+    SLOT_DURATION_MINUTES,
+)
+
+from app.models.booking import (
+    Booking,
+    BookingStatus,
+)
+
 from app.models.teacher import (
     Subject,
     TeacherProfile,
     TeacherSubject,
 )
-from app.models.user import User, UserRole
-from app.models.free_class import StudentFreeClassUse
+
+from app.models.user import (
+    User,
+    UserRole,
+)
+
+from app.models.free_class import (
+    StudentFreeClassUse,
+)
+
+from app.services.scheduling_service import (
+    get_slot_capacity as calculate_scheduling_capacity,
+)
 
 
 # ============================================================
@@ -23,13 +42,6 @@ IST = ZoneInfo("Asia/Kolkata")
 
 BOOKING_START_HOUR = 10
 BOOKING_END_HOUR = 22
-
-# A slot starts every hour.
-# 10:00, 11:00, ..., 21:00
-BOOKING_SLOT_MINUTES = 60
-
-# Actual class duration.
-CLASS_DURATION_MINUTES = 55
 
 FREE_CLASS_LIMIT = 2
 
@@ -56,27 +68,25 @@ def generate_tomorrow_slots() -> list[datetime]:
     """
     Generate all valid booking start times for tomorrow.
 
-    Valid slots:
+    Valid start times:
 
-    10:00
-    11:00
-    12:00
-    13:00
-    14:00
-    15:00
-    16:00
-    17:00
-    18:00
-    19:00
-    20:00
-    21:00
+        10:00 AM
+        11:00 AM
+        12:00 PM
+        1:00 PM
+        ...
+        8:00 PM
+        9:00 PM
 
-    All times are represented as timezone-aware IST datetimes.
+    The booking window ends at 10:00 PM,
+    therefore 9:00 PM is the final start time.
+
+    All values are timezone-aware IST datetimes.
     """
 
     tomorrow = get_tomorrow_ist()
 
-    slots = []
+    slots: list[datetime] = []
 
     for hour in range(
         BOOKING_START_HOUR,
@@ -102,14 +112,24 @@ def get_eligible_teacher_ids(
     subject_id: int,
 ) -> list[uuid.UUID]:
     """
-    Return active + verified teachers who teach the
-    requested subject.
+    Return active + verified teachers who teach
+    the requested subject.
 
-    Students never receive this information directly.
+    IMPORTANT:
+
+    This answers only:
+
+        "Who is qualified to teach this subject?"
+
+    It does NOT mean those teachers are currently free.
+
+    Teacher occupancy is handled by scheduling_service.py.
     """
 
     teachers = (
-        db.query(TeacherProfile.user_id)
+        db.query(
+            TeacherProfile.user_id
+        )
         .join(
             TeacherSubject,
             TeacherSubject.teacher_id
@@ -124,18 +144,24 @@ def get_eligible_teacher_ids(
             TeacherSubject.subject_id
             == subject_id,
 
-            TeacherProfile.is_verified.is_(True),
+            TeacherProfile.is_verified.is_(
+                True
+            ),
 
             User.is_active.is_(True),
 
-            User.role == UserRole.teacher,
+            User.role
+            == UserRole.teacher,
         )
+        .distinct()
         .all()
     )
 
     return [
         teacher_id
-        for (teacher_id,) in teachers
+        for (
+            teacher_id,
+        ) in teachers
     ]
 
 
@@ -149,96 +175,33 @@ def get_slot_capacity(
     slot: datetime,
 ) -> int:
     """
-    Calculate how many additional students can book
-    this subject at this slot.
+    Calculate how many additional students can safely
+    book this subject at this slot.
 
-    Capacity is based on eligible teachers.
+    IMPORTANT:
 
-    A teacher can only teach one class during a slot.
+    Capacity is now delegated entirely to the centralized
+    scheduling engine.
 
-    Assigned teacher bookings consume teacher capacity.
+    The scheduling engine considers:
 
-    Unassigned bookings also reserve capacity because
-    they still need a teacher.
+        - teacher qualification
+        - multi-subject teachers
+        - occupied teachers
+        - assigned bookings
+        - unassigned bookings
+        - subject-specific matching
+        - maximum bipartite matching
+
+    This function intentionally contains NO duplicate
+    teacher-capacity algorithm.
     """
 
-    eligible_teacher_ids = get_eligible_teacher_ids(
+    return calculate_scheduling_capacity(
         db=db,
         subject_id=subject_id,
+        slot_start=slot,
     )
-
-    total_teachers = len(
-        eligible_teacher_ids
-    )
-
-    if total_teachers == 0:
-        return 0
-
-    # --------------------------------------------------------
-    # Find all active bookings at this exact slot.
-    #
-    # These include:
-    #
-    # - confirmed bookings
-    # - pending bookings
-    #
-    # Cancelled/completed bookings don't consume capacity.
-    # --------------------------------------------------------
-
-    bookings = (
-        db.query(Booking)
-        .filter(
-            Booking.scheduled_at == slot,
-
-            Booking.status.in_(
-                [
-                    BookingStatus.pending,
-                    BookingStatus.confirmed,
-                ]
-            ),
-        )
-        .all()
-    )
-
-    # --------------------------------------------------------
-    # Teachers already occupied at this slot
-    #
-    # Only count assigned teachers who are eligible for
-    # the requested subject.
-    # --------------------------------------------------------
-
-    occupied_teacher_ids = {
-        booking.teacher_id
-        for booking in bookings
-        if booking.teacher_id is not None
-        and booking.teacher_id
-        in eligible_teacher_ids
-    }
-
-    occupied_assigned_teachers = len(
-        occupied_teacher_ids
-    )
-
-    # --------------------------------------------------------
-    # Unassigned bookings reserve capacity.
-    #
-    # A booking with teacher_id = NULL has already taken
-    # a student slot and still needs a teacher.
-    # --------------------------------------------------------
-
-    unassigned_bookings = sum(
-        1
-        for booking in bookings
-        if booking.teacher_id is None
-    )
-
-    capacity = (
-        total_teachers
-        - occupied_assigned_teachers
-        - unassigned_bookings
-    )
-
-    return max(capacity, 0)
 
 
 # ============================================================
@@ -252,14 +215,14 @@ def get_available_slots(
     """
     Return tomorrow's booking slots and their availability.
 
-    The student can only book tomorrow.
+    Rules:
 
-    Scheduling window:
-        10:00 AM IST
-        through
-        10:00 PM IST
-
-    The final start time is 9:00 PM IST.
+        - Tomorrow only
+        - 10 AM through 9 PM start time
+        - 60-minute scheduling slots
+        - 55-minute actual class
+        - 5-minute buffer
+        - Teacher selection is handled by admin
     """
 
     # --------------------------------------------------------
@@ -276,7 +239,7 @@ def get_available_slots(
 
     slots = generate_tomorrow_slots()
 
-    results = []
+    results: list[dict] = []
 
     for slot in slots:
 
@@ -289,7 +252,7 @@ def get_available_slots(
         slot_end = (
             slot
             + timedelta(
-                minutes=BOOKING_SLOT_MINUTES
+                minutes=SLOT_DURATION_MINUTES
             )
         )
 
@@ -313,17 +276,18 @@ def validate_requested_slot(
     requested_slot: datetime,
 ) -> datetime:
     """
-    Validate and normalize a student's requested booking slot.
+    Validate and normalize a student's requested
+    booking slot.
 
     Rules:
 
-    1. Must represent tomorrow in IST.
-    2. Must be between 10 AM and 9 PM start time.
-    3. Must be exactly on an hourly boundary.
+        1. Must represent tomorrow in IST.
+        2. Must be between 10 AM and 9 PM start time.
+        3. Must be exactly on an hourly boundary.
     """
 
     # --------------------------------------------------------
-    # Convert submitted timestamp to IST.
+    # Timezone must be supplied.
     # --------------------------------------------------------
 
     if requested_slot.tzinfo is None:
@@ -331,8 +295,10 @@ def validate_requested_slot(
             "scheduled_at must include a timezone."
         )
 
-    requested_ist = requested_slot.astimezone(
-        IST
+    requested_ist = (
+        requested_slot.astimezone(
+            IST
+        )
     )
 
     tomorrow = get_tomorrow_ist()
@@ -347,15 +313,7 @@ def validate_requested_slot(
         )
 
     # --------------------------------------------------------
-    # Exact hour.
-    #
-    # No:
-    # 6:15 PM
-    # 6:30 PM
-    # 6:45 PM
-    #
-    # Only:
-    # 6:00 PM
+    # Exact hourly slot.
     # --------------------------------------------------------
 
     if (
@@ -402,8 +360,8 @@ def get_free_class_status(
 
     Rules:
 
-    - Maximum 2 free classes.
-    - Free class cannot be reused for the same subject.
+        - Maximum 2 free classes.
+        - A free class cannot be reused for the same subject.
     """
 
     used_subjects = (

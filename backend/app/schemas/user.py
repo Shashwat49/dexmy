@@ -18,8 +18,8 @@ class UserBase(BaseModel):
         min_length=2,
         max_length=255,
     )
-    phone: str | None = Field(
-        default=None,
+    phone: str = Field(
+        min_length=7,
         max_length=20,
     )
 

@@ -3,5 +3,7 @@
 # Slot math (scheduling, conflict-checking) uses SLOT_DURATION_MINUTES.
 # Anything about the actual live class itself (e.g. a future in-class
 # countdown/auto-end) should use CLASS_DURATION_MINUTES.
+BOOKING_START_HOUR = 10
+BOOKING_END_HOUR = 22
 SLOT_DURATION_MINUTES = 60
 CLASS_DURATION_MINUTES = 55

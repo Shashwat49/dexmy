@@ -57,7 +57,7 @@ def signup(
     # Duplicate phone
     # ---------------------------------------------------------
 
-    phone = payload.phone.strip() if payload.phone else None
+    phone = payload.phone.strip()
 
     if phone:
         existing_phone = (
