@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import DashboardLayout from "../../../components/dashboard/DashboardLayout";
 import { CalendarIcon, UsersIcon, BookIcon, GearIcon } from "../../../components/dashboard/icons";
