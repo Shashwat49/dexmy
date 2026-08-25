@@ -9,6 +9,44 @@ const ROLES = [
   { value: "teacher", label: "Teacher" },
 ];
 
+const COUNTRY_CODES = [
+  { code: "+91", country: "India", flag: "🇮🇳" },
+  { code: "+1", country: "United States", flag: "🇺🇸" },
+  { code: "+44", country: "United Kingdom", flag: "🇬🇧" },
+  { code: "+61", country: "Australia", flag: "🇦🇺" },
+  { code: "+64", country: "New Zealand", flag: "🇳🇿" },
+  { code: "+65", country: "Singapore", flag: "🇸🇬" },
+  { code: "+971", country: "United Arab Emirates", flag: "🇦🇪" },
+  { code: "+966", country: "Saudi Arabia", flag: "🇸🇦" },
+  { code: "+974", country: "Qatar", flag: "🇶🇦" },
+  { code: "+968", country: "Oman", flag: "🇴🇲" },
+  { code: "+965", country: "Kuwait", flag: "🇰🇼" },
+  { code: "+973", country: "Bahrain", flag: "🇧🇭" },
+  { code: "+27", country: "South Africa", flag: "🇿🇦" },
+  { code: "+234", country: "Nigeria", flag: "🇳🇬" },
+  { code: "+254", country: "Kenya", flag: "🇰🇪" },
+  { code: "+60", country: "Malaysia", flag: "🇲🇾" },
+  { code: "+62", country: "Indonesia", flag: "🇮🇩" },
+  { code: "+66", country: "Thailand", flag: "🇹🇭" },
+  { code: "+81", country: "Japan", flag: "🇯🇵" },
+  { code: "+82", country: "South Korea", flag: "🇰🇷" },
+  { code: "+86", country: "China", flag: "🇨🇳" },
+  { code: "+49", country: "Germany", flag: "🇩🇪" },
+  { code: "+33", country: "France", flag: "🇫🇷" },
+  { code: "+39", country: "Italy", flag: "🇮🇹" },
+  { code: "+34", country: "Spain", flag: "🇪🇸" },
+  { code: "+31", country: "Netherlands", flag: "🇳🇱" },
+  { code: "+41", country: "Switzerland", flag: "🇨🇭" },
+  { code: "+46", country: "Sweden", flag: "🇸🇪" },
+  { code: "+47", country: "Norway", flag: "🇳🇴" },
+  { code: "+45", country: "Denmark", flag: "🇩🇰" },
+  { code: "+7", country: "Russia", flag: "🇷🇺" },
+  { code: "+90", country: "Turkey", flag: "🇹🇷" },
+  { code: "+55", country: "Brazil", flag: "🇧🇷" },
+  { code: "+52", country: "Mexico", flag: "🇲🇽" },
+  { code: "+1", country: "Canada", flag: "🇨🇦" },
+];
+
 export default function Signup() {
   const { signup, loading } = useAuth();
 
@@ -25,6 +63,7 @@ export default function Signup() {
   const [role, setRole] = useState(initialRole);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [countryCode, setCountryCode] = useState("+91");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -41,7 +80,7 @@ export default function Signup() {
         role,
         full_name: fullName,
         email,
-        phone,
+        phone: `${countryCode}${phone}`,
         password,
       });
 
@@ -139,15 +178,43 @@ export default function Signup() {
         {/* Phone */}
         <div>
           <label className="block text-sm font-medium mb-1.5">
-            Phone
+            Phone <span className="text-brand-red">*</span>
           </label>
 
-          <input
-            type="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="w-full bg-panel-3 border border-chalk-faint rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-brand-gold"
-          />
+          <div className="flex gap-2">
+            {/* Country code */}
+            <select
+              value={countryCode}
+              onChange={(e) => setCountryCode(e.target.value)}
+              className="w-[125px] shrink-0 bg-panel-3 border border-chalk-faint rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-brand-gold"
+            >
+              {COUNTRY_CODES.map((country) => (
+                <option
+                  key={`${country.country}-${country.code}`}
+                  value={country.code}
+                >
+                  {country.flag} {country.code}
+                </option>
+              ))}
+            </select>
+
+            {/* Phone number */}
+            <input
+              type="tel"
+              required
+              value={phone}
+              onChange={(e) => {
+                const value = e.target.value.replace(/\D/g, "");
+                setPhone(value);
+              }}
+              placeholder="9876543210"
+              className="flex-1 min-w-0 bg-panel-3 border border-chalk-faint rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-brand-gold"
+            />
+          </div>
+
+          <p className="text-xs text-chalk-muted mt-1.5">
+            Select your country and enter your mobile number.
+          </p>
         </div>
 
         {/* Password */}
