@@ -10,14 +10,16 @@ from botocore.config import Config
 
 from app.core.config import settings
 
-_client = boto3.client(
-    "s3",
-    endpoint_url=f"https://{settings.R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
-    aws_access_key_id=settings.R2_ACCESS_KEY_ID,
-    aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
-    config=Config(signature_version="s3v4"),
-    region_name="auto",
-)
+def _get_client():
+    account_id = settings.R2_ACCOUNT_ID or "dummy"
+    return boto3.client(
+        "s3",
+        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
+        aws_access_key_id=settings.R2_ACCESS_KEY_ID or "dummy",
+        aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY or "dummy",
+        config=Config(signature_version="s3v4"),
+        region_name="auto",
+    )
 
 BUCKET = settings.R2_BUCKET_NAME
 
@@ -27,7 +29,7 @@ def _content_type_for(extension: str) -> str:
 
 
 def _upload(file_bytes: bytes, key: str, extension: str) -> str:
-    _client.put_object(Bucket=BUCKET, Key=key, Body=file_bytes, ContentType=_content_type_for(extension))
+    _get_client().put_object(Bucket=BUCKET, Key=key, Body=file_bytes, ContentType=_content_type_for(extension))
     return key
 
 
@@ -45,11 +47,13 @@ def save_bytes_file(file_bytes: bytes, filename_prefix: str, extension: str) -> 
 
 
 def download_bytes(key: str) -> bytes:
-    obj = _client.get_object(Bucket=BUCKET, Key=key)
+    obj = _get_client().get_object(Bucket=BUCKET, Key=key)
     return obj["Body"].read()
 
 
 def get_presigned_url(key: str, expires_in: int = 3600) -> str:
-    return _client.generate_presigned_url(
-        "get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=expires_in
+    return _get_client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": BUCKET, "Key": key},
+        ExpiresIn=expires_in,
     )
