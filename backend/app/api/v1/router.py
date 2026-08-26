@@ -13,7 +13,8 @@ from app.api.v1.endpoints import (
     payments,
     system,
     profiles,
-    subjects
+    subjects,
+    whatsapp
 )
 
 api_router = APIRouter()
@@ -30,3 +31,4 @@ api_router.include_router(payments.router, prefix="/payments", tags=["payments"]
 api_router.include_router(system.router, prefix="/system", tags=["system"])
 api_router.include_router(profiles.router, prefix="/profiles", tags=["profiles"])
 api_router.include_router(subjects.router, prefix="/subjects", tags=["subjects"])
+api_router.include_router(whatsapp.router, prefix='/whatsapp', tags=["whatsapp"])

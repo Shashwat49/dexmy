@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
 
+    # WhatsApp OTP System
+    WHATSAPP_VERIFY_TOKEN: str = ""
+    META_APP_SECRET: str = ""
+
     # CORS
     FRONTEND_ORIGIN: str = "https://dexmy.vercel.app"
 

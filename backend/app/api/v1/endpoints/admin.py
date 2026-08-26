@@ -36,6 +36,9 @@ from app.schemas.booking import (
 )
 from app.schemas.user import UserRead
 
+from app.services.scheduling_service import (
+    can_assign_teacher,
+)
 
 router = APIRouter()
 
@@ -261,15 +264,29 @@ def list_eligible_teachers(
     db: Session = Depends(get_db),
 ):
     """
-    Return teachers who can be assigned to this booking.
+    Return teachers who can safely be assigned to this
+    booking.
 
-    Requirements:
-        - teacher account
-        - active
-        - verified
-        - teaches the subject
-        - no overlapping class
+    A teacher is eligible only when:
+
+        1. Teacher account exists.
+        2. Teacher is actually a teacher.
+        3. Teacher is active.
+        4. Teacher profile exists.
+        5. Teacher is verified.
+        6. Teacher teaches the booking subject.
+        7. Teacher is not occupied at this time.
+        8. Assigning this teacher would not make another
+           pending booking at the same slot impossible
+           to assign.
+
+    The final scheduling decision is delegated to the
+    centralized scheduling engine.
     """
+
+    # ========================================================
+    # GET BOOKING
+    # ========================================================
 
     booking = db.get(
         Booking,
@@ -279,8 +296,12 @@ def list_eligible_teachers(
     if booking is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Booking not found",
+            detail="Booking not found.",
         )
+
+    # ========================================================
+    # VALIDATE BOOKING STATUS
+    # ========================================================
 
     if booking.status != BookingStatus.confirmed:
         raise HTTPException(
@@ -291,11 +312,22 @@ def list_eligible_teachers(
             ),
         )
 
+    # ========================================================
+    # VALIDATE ASSIGNMENT STATE
+    # ========================================================
+
     if booking.teacher_id is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A teacher is already assigned.",
+            detail=(
+                "A teacher is already assigned "
+                "to this booking."
+            ),
         )
+
+    # ========================================================
+    # FIND BASIC QUALIFIED TEACHERS
+    # ========================================================
 
     teachers = (
         db.query(User)
@@ -324,61 +356,28 @@ def list_eligible_teachers(
         .all()
     )
 
-    available_teachers = []
+    eligible_teachers: list[User] = []
 
-    booking_start = booking.scheduled_at
-
-    booking_end = (
-        booking_start
-        + timedelta(
-            minutes=booking.duration_minutes
-        )
-    )
+    # ========================================================
+    # RUN THE CENTRALIZED SCHEDULING CHECK
+    # ========================================================
 
     for teacher in teachers:
 
-        existing_bookings = (
-            db.query(Booking)
-            .filter(
-                Booking.teacher_id
-                == teacher.id,
-
-                Booking.status.in_(
-                    [
-                        BookingStatus.pending,
-                        BookingStatus.confirmed,
-                    ]
-                ),
-
-                Booking.id != booking.id,
-
-                Booking.scheduled_at
-                < booking_end,
+        can_assign, reason = (
+            can_assign_teacher(
+                db=db,
+                booking=booking,
+                teacher_id=teacher.id,
             )
-            .all()
         )
 
-        has_conflict = False
-
-        for existing in existing_bookings:
-
-            existing_end = (
-                existing.scheduled_at
-                + timedelta(
-                    minutes=existing.duration_minutes
-                )
-            )
-
-            if existing_end > booking_start:
-                has_conflict = True
-                break
-
-        if not has_conflict:
-            available_teachers.append(
+        if can_assign:
+            eligible_teachers.append(
                 teacher
             )
 
-    return available_teachers
+    return eligible_teachers
 
 
 # ============================================================
