@@ -35,17 +35,17 @@ from app.schemas.classroom import (
 )
 
 from app.services.booking_service import (
+    create_booking_atomic,
+    cancel_booking_atomic,
     get_available_slots,
     get_free_class_status,
     validate_requested_slot,
 )
 
-from app.core.constants import (
-    CLASS_DURATION_MINUTES,
-)
 from app.services.scheduling_service import (
     can_accept_booking,
 )
+
 
 router = APIRouter()
 
@@ -148,11 +148,20 @@ def create_booking(
         - time slot
 
     The student does NOT choose:
-        - teacher
+        - teacher (admin assigns later)
         - price
         - status
 
-    Teacher assignment happens later through admin.
+    Concurrency safety:
+        This endpoint delegates to create_booking_atomic(),
+        which acquires a SELECT FOR UPDATE row lock on the
+        student row before re-validating the slot. This
+        prevents duplicate bookings from concurrent requests.
+
+    Idempotency:
+        Provide idempotency_key (UUID) to make retries safe.
+        If a booking with the same key already exists, it is
+        returned without creating a new one.
     """
 
     # --------------------------------------------------------
@@ -181,30 +190,16 @@ def create_booking(
         )
 
     # --------------------------------------------------------
-    # Validate requested slot
+    # Validate requested slot (timezone + date + boundary).
+    #
+    # This is a lightweight check. The authoritative capacity
+    # check happens INSIDE the lock in create_booking_atomic().
     # --------------------------------------------------------
 
     try:
         scheduled_at = validate_requested_slot(
             payload.scheduled_at
         )
-
-        can_book, scheduling_error = can_accept_booking(
-            db=db,
-            student_id=current_user.id,
-            subject_id=payload.subject_id,
-            slot_start=scheduled_at,
-        )
-
-        if not can_book:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    scheduling_error
-                    or "This time slot is no longer available."
-                ),
-            )
-
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -224,24 +219,15 @@ def create_booking(
     )
 
     # --------------------------------------------------------
-    # Determine price
+    # Determine price.
     #
-    # IMPORTANT:
-    # Teacher is not assigned yet.
-    #
-    # Therefore paid pricing cannot depend on a selected
-    # teacher at this stage.
-    #
-    # For now we use the subject's future configured
-    # pricing system.
+    # IMPORTANT: teacher is not assigned yet so paid pricing
+    # cannot depend on teacher rate at this stage.
     # --------------------------------------------------------
 
     if is_free:
-
         price = 0
-
     else:
-
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail=(
@@ -251,67 +237,31 @@ def create_booking(
         )
 
     # --------------------------------------------------------
-    # Create booking
+    # Create booking atomically.
+    #
+    # create_booking_atomic():
+    #   1. Checks idempotency key.
+    #   2. Acquires SELECT FOR UPDATE on student row.
+    #   3. Re-validates slot inside the lock.
+    #   4. Inserts Booking + StudentFreeClassUse + ClassSession.
     # --------------------------------------------------------
 
-    booking = Booking(
-        student_id=current_user.id,
-
-        # IMPORTANT:
-        # Teacher is intentionally NULL.
-        teacher_id=None,
-
-        subject_id=payload.subject_id,
-
-        scheduled_at=scheduled_at,
-
-        duration_minutes=CLASS_DURATION_MINUTES,
-
-        # Booking itself is immediately confirmed.
-        status=BookingStatus.confirmed,
-
-        price=price,
-
-        # Teacher assignment happens later.
-        teacher_assignment_status="pending",
-    )
-
-    db.add(booking)
-
-    db.flush()
-
-    # --------------------------------------------------------
-    # Consume free class
-    # --------------------------------------------------------
-
-    if is_free:
-
-        free_use = StudentFreeClassUse(
+    try:
+        booking = create_booking_atomic(
+            db=db,
             student_id=current_user.id,
-
             subject_id=payload.subject_id,
-
-            booking_id=booking.id,
+            scheduled_at=scheduled_at,
+            price=price,
+            idempotency_key=payload.idempotency_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
         )
 
-        db.add(free_use)
-
-    # --------------------------------------------------------
-    # Create classroom session
-    # --------------------------------------------------------
-
-    session = ClassSession(
-        booking_id=booking.id,
-
-        livekit_room_name=(
-            f"dexmy-class-{booking.id}"
-        ),
-    )
-
-    db.add(session)
-
     db.commit()
-
     db.refresh(booking)
 
     # --------------------------------------------------------
@@ -361,7 +311,10 @@ def create_booking(
         teacher_assignment_status=(
             booking.teacher_assignment_status
         ),
+
+        idempotency_key=booking.idempotency_key,
     )
+
 
 
 # ============================================================
@@ -521,6 +474,13 @@ def cancel_booking(
 ):
     """
     Cancel a booking.
+
+    Atomically:
+        1. Acquires a row lock on the booking.
+        2. Validates the booking is cancellable.
+        3. Sets booking.status = cancelled.
+        4. Sets the linked ClassSession.status = cancelled.
+        5. Restores free-class credit if the booking was free.
     """
 
     booking = db.get(
@@ -536,7 +496,7 @@ def cancel_booking(
         )
 
     # --------------------------------------------------------
-    # Ownership
+    # Ownership — only the student or teacher may cancel
     # --------------------------------------------------------
 
     allowed_ids = {
@@ -557,32 +517,25 @@ def cancel_booking(
         )
 
     # --------------------------------------------------------
-    # Already closed
+    # Cancel atomically (row lock + session sync + credit)
     # --------------------------------------------------------
 
-    if booking.status in (
-        BookingStatus.cancelled,
-        BookingStatus.completed,
-    ):
-
+    try:
+        booking = cancel_booking_atomic(
+            db=db,
+            booking=booking,
+        )
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Booking already closed out",
+            detail=str(exc),
         )
 
-    # --------------------------------------------------------
-    # Cancel
-    # --------------------------------------------------------
-
-    booking.status = (
-        BookingStatus.cancelled
-    )
-
     db.commit()
-
     db.refresh(booking)
 
     return booking
+
 
 
 # ============================================================
