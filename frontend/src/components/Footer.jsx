@@ -91,6 +91,24 @@ export default function Footer() {
                 </svg>
               </a>
 
+              {/* YouTube */}
+              <a
+                href="https://youtube.com/@dexmy_edu?si=Rhvum_wFvJ4KBhOf"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="YouTube"
+                className="w-10 h-10 rounded-lg border border-chalk-faint flex items-center justify-center text-chalk-muted hover:text-chalk hover:border-brand-red hover:bg-brand-red-soft transition-all duration-200"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.9V8.1l6.5 3.9-6.5 3.9Z" />
+                </svg>
+              </a>
+
             </div>
           </div>
 
