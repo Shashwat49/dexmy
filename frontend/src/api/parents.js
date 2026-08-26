@@ -14,3 +14,6 @@ export const getStudentBookings = (studentId) =>
   api
     .get(`/parents/me/students/${studentId}/bookings`)
     .then((r) => r.data);
+
+export const unlinkStudent = (studentId) =>
+  api.delete(`/parents/me/students/${studentId}`).then((r) => r.data);
