@@ -44,6 +44,22 @@ def link_student(
     return LinkedStudentRead(id=student.id, full_name=student.full_name, email=student.email)
 
 
+@router.delete("/me/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
+def unlink_student(
+    student_id: uuid.UUID,
+    current_user: User = Depends(require_role(UserRole.parent)),
+    db: Session = Depends(get_db),
+):
+    link = db.get(ParentStudentLink, (current_user.id, student_id))
+    if not link:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student not linked",
+        )
+    db.delete(link)
+    db.commit()
+
+
 @router.get("/me/students/{student_id}/bookings", response_model=list[BookingDetailRead])
 def list_student_bookings(
     student_id: uuid.UUID,

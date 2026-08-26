@@ -2,6 +2,7 @@ import uuid
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.constants import (
@@ -12,6 +13,11 @@ from app.core.constants import (
 from app.models.booking import (
     Booking,
     BookingStatus,
+    TeacherAssignmentStatus,
+)
+
+from app.models.classroom import (
+    ClassSession,
 )
 
 from app.models.teacher import (
@@ -31,7 +37,9 @@ from app.models.free_class import (
 
 from app.services.scheduling_service import (
     get_slot_capacity as calculate_scheduling_capacity,
+    can_accept_booking,
 )
+
 
 
 # ============================================================
@@ -397,3 +405,303 @@ def get_free_class_status(
         remaining > 0,
         remaining,
     )
+
+
+# ============================================================
+# ATOMIC BOOKING CREATION
+# ============================================================
+
+def create_booking_atomic(
+    db: Session,
+    *,
+    student_id: uuid.UUID,
+    subject_id: int,
+    scheduled_at: datetime,
+    price: float,
+    idempotency_key: uuid.UUID | None = None,
+) -> Booking:
+    """
+    Create a booking atomically, preventing race conditions.
+
+    This function owns the complete transactional flow:
+
+        1. Idempotency check — return existing booking if key matches.
+        2. SELECT FOR UPDATE on the student row — serializes
+           concurrent requests from the same student.
+        3. Re-validate slot inside the lock — ensures the slot
+           is still available after acquiring the lock.
+        4. Insert Booking + StudentFreeClassUse + ClassSession
+           in a single flush before commit.
+
+    The caller is responsible for:
+        - Validating the requested slot BEFORE calling this.
+        - Determining the price.
+        - Calling db.commit() after this function returns.
+
+    Raises:
+        ValueError: if the slot is no longer bookable
+                    (student conflict or no eligible teacher).
+
+    IMPORTANT:
+        The database-level exclusion constraint (added in PR #4)
+        is the final safety net. This function is the second
+        line of defence at the application layer.
+    """
+
+    # --------------------------------------------------------
+    # Idempotency check.
+    #
+    # If the client already submitted this request and received
+    # a response (or the response was lost), return the existing
+    # booking instead of creating a duplicate.
+    # --------------------------------------------------------
+
+    if idempotency_key is not None:
+
+        existing = (
+            db.query(Booking)
+            .filter(
+                Booking.idempotency_key
+                == idempotency_key,
+            )
+            .first()
+        )
+
+        if existing is not None:
+            return existing
+
+    # --------------------------------------------------------
+    # Acquire a row-level lock on the student's user record.
+    #
+    # WHY:
+    #   Two concurrent booking requests from the same student
+    #   could both pass can_accept_booking() before either
+    #   commits, resulting in duplicate bookings.
+    #
+    #   Locking the student row serializes requests — the
+    #   second request blocks here until the first has
+    #   committed, then sees the first booking and fails the
+    #   capacity check below.
+    #
+    # NOTE:
+    #   This does NOT prevent two DIFFERENT students from
+    #   simultaneously filling the last slot. The DB-level
+    #   exclusion constraint (PR #4) handles that case.
+    # --------------------------------------------------------
+
+    db.execute(
+        select(User)
+        .where(User.id == student_id)
+        .with_for_update()
+    )
+
+    # --------------------------------------------------------
+    # Re-validate inside the lock.
+    #
+    # The slot must still be available after acquiring the lock.
+    # --------------------------------------------------------
+
+    can_book, scheduling_error = can_accept_booking(
+        db=db,
+        student_id=student_id,
+        subject_id=subject_id,
+        slot_start=scheduled_at,
+    )
+
+    if not can_book:
+        raise ValueError(
+            scheduling_error
+            or "This time slot is no longer available."
+        )
+
+    # --------------------------------------------------------
+    # Create the booking.
+    # --------------------------------------------------------
+
+    booking = Booking(
+        student_id=student_id,
+
+        # Teacher is intentionally NULL.
+        # Admin assigns teacher later.
+        teacher_id=None,
+
+        subject_id=subject_id,
+
+        scheduled_at=scheduled_at,
+
+        duration_minutes=CLASS_DURATION_MINUTES,
+
+        # Booking is immediately confirmed.
+        # Pending → Confirmed is the first lifecycle step.
+        status=BookingStatus.confirmed,
+
+        price=price,
+
+        # Teacher assignment is pending.
+        teacher_assignment_status=(
+            TeacherAssignmentStatus.pending.value
+        ),
+
+        idempotency_key=idempotency_key,
+    )
+
+    db.add(booking)
+
+    # flush to get booking.id before creating dependent records
+    db.flush()
+
+    # --------------------------------------------------------
+    # Consume the free class entitlement.
+    # --------------------------------------------------------
+
+    if price == 0:
+
+        free_use = StudentFreeClassUse(
+            student_id=student_id,
+            subject_id=subject_id,
+            booking_id=booking.id,
+        )
+
+        db.add(free_use)
+
+    # --------------------------------------------------------
+    # Create the classroom session.
+    # --------------------------------------------------------
+
+    session = ClassSession(
+        booking_id=booking.id,
+        livekit_room_name=(
+            f"dexmy-class-{booking.id}"
+        ),
+    )
+
+    db.add(session)
+
+    # --------------------------------------------------------
+    # Flush all changes.
+    #
+    # The caller must call db.commit() to finalize.
+    # --------------------------------------------------------
+
+    db.flush()
+
+    return booking
+
+
+# ============================================================
+# CANCEL BOOKING (atomic helper)
+# ============================================================
+
+def cancel_booking_atomic(
+    db: Session,
+    *,
+    booking: Booking,
+) -> Booking:
+    """
+    Cancel a booking and synchronize all dependent records
+    in a single atomic operation.
+
+    Actions:
+        1. Acquire SELECT FOR UPDATE lock on the booking row.
+        2. Set booking.status = cancelled.
+        3. Set the linked ClassSession.status = cancelled.
+        4. Delete the StudentFreeClassUse record if the booking
+           was free — restoring the student's free-class credit.
+
+    The caller is responsible for:
+        - Verifying ownership before calling this.
+        - Calling db.commit() after this function returns.
+
+    Raises:
+        ValueError: if the booking is already in a terminal
+                    state (cancelled / completed).
+    """
+
+    # --------------------------------------------------------
+    # Acquire row-level lock on the booking.
+    #
+    # WHY:
+    #   Two concurrent cancel requests (or a cancel racing with
+    #   a teacher assignment) could create inconsistent state.
+    #   The lock ensures only one writer proceeds at a time.
+    # --------------------------------------------------------
+
+    locked_booking = db.execute(
+        select(Booking)
+        .where(Booking.id == booking.id)
+        .with_for_update()
+    ).scalar_one()
+
+    # --------------------------------------------------------
+    # Guard against invalid status transitions.
+    # --------------------------------------------------------
+
+    if locked_booking.status in (
+        BookingStatus.cancelled,
+        BookingStatus.completed,
+    ):
+        raise ValueError(
+            "Booking is already in a terminal state "
+            f"({locked_booking.status.value}) "
+            "and cannot be cancelled."
+        )
+
+    # --------------------------------------------------------
+    # Cancel the booking.
+    # --------------------------------------------------------
+
+    locked_booking.status = BookingStatus.cancelled
+
+    # --------------------------------------------------------
+    # Cancel the linked classroom session.
+    #
+    # WHY:
+    #   Without this, the ClassSession remains in 'scheduled'
+    #   state, giving the impression of an active class.
+    #   The classroom layer must respect booking status.
+    # --------------------------------------------------------
+
+    from app.models.classroom import SessionStatus
+
+    session = (
+        db.query(ClassSession)
+        .filter(
+            ClassSession.booking_id
+            == locked_booking.id
+        )
+        .first()
+    )
+
+    if session is not None:
+        session.status = SessionStatus.cancelled
+
+    # --------------------------------------------------------
+    # Restore free-class credit.
+    #
+    # BUSINESS RULE:
+    #   If the student cancels a booking that used their free
+    #   class, the free-class entitlement is restored.
+    #   This lets the student rebook for free later.
+    #
+    #   This is safe because StudentFreeClassUse has a UNIQUE
+    #   constraint on (student_id, subject_id), so the credit
+    #   can only be re-consumed once per subject.
+    # --------------------------------------------------------
+
+    if locked_booking.price == 0:
+
+        free_use = (
+            db.query(StudentFreeClassUse)
+            .filter(
+                StudentFreeClassUse.booking_id
+                == locked_booking.id
+            )
+            .first()
+        )
+
+        if free_use is not None:
+            db.delete(free_use)
+
+    db.flush()
+
+    return locked_booking

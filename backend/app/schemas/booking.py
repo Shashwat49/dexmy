@@ -10,6 +10,7 @@ from pydantic import (
 from app.models.booking import (
     BookingStatus,
     DemoStatus,
+    TeacherAssignmentStatus,
 )
 
 
@@ -28,10 +29,17 @@ class BookingCreate(BaseModel):
         - price
         - booking status
         - duration
+
+    Optional:
+        - idempotency_key: supply a UUID to make retries safe.
+          If a booking with the same key already exists for this
+          student, the existing booking is returned unchanged.
+          Omit the key for single-request scenarios.
     """
 
     subject_id: int
     scheduled_at: datetime
+    idempotency_key: uuid.UUID | None = None
 
 
 # ============================================================
@@ -93,7 +101,10 @@ class BookingRead(BaseModel):
 
     created_at: datetime
 
-    teacher_assignment_status: str
+    teacher_assignment_status: TeacherAssignmentStatus
+
+    # Included for idempotency debugging / client reconciliation.
+    idempotency_key: uuid.UUID | None = None
 
 
 # ============================================================
@@ -126,7 +137,10 @@ class BookingDetailRead(BaseModel):
 
     created_at: datetime
 
-    teacher_assignment_status: str
+    teacher_assignment_status: TeacherAssignmentStatus
+
+    # Included for idempotency debugging / client reconciliation.
+    idempotency_key: uuid.UUID | None = None
 
 
 # ============================================================
@@ -179,7 +193,7 @@ class PendingTeacherAssignmentRead(BaseModel):
     scheduled_at: datetime
     duration_minutes: int
 
-    teacher_assignment_status: str
+    teacher_assignment_status: TeacherAssignmentStatus
 
 
 class TeacherAssignmentRead(BaseModel):
@@ -201,4 +215,4 @@ class TeacherAssignmentRead(BaseModel):
     scheduled_at: datetime
     duration_minutes: int
 
-    teacher_assignment_status: str
+    teacher_assignment_status: TeacherAssignmentStatus

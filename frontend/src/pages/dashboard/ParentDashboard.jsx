@@ -88,6 +88,20 @@ export default function ParentDashboard() {
     }
   };
 
+  const handleUnlinkChild = async (childId) => {
+    if (!window.confirm("Are you sure you want to unlink this child?")) return;
+    try {
+      await parentsApi.unlinkStudent(childId);
+      const newChildren = children.filter((c) => c.id !== childId);
+      setChildren(newChildren);
+      if (selectedChildId === childId) {
+        setSelectedChildId(newChildren.length > 0 ? newChildren[0].id : null);
+      }
+    } catch (err) {
+      alert(err.response?.data?.detail || "Failed to unlink child.");
+    }
+  };
+
   const selectedChild = children.find((c) => c.id === selectedChildId);
   const now = new Date();
   const upcoming = bookings
@@ -148,9 +162,21 @@ export default function ParentDashboard() {
                     >
                       <div className="flex items-center justify-between">
                         <p className="font-semibold text-sm sm:text-base truncate">{child.full_name}</p>
-                        {selectedChildId === child.id && (
-                          <span className="w-2 h-2 rounded-full bg-brand-gold shrink-0 ml-2" />
-                        )}
+                        <div className="flex items-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUnlinkChild(child.id);
+                            }}
+                            className="text-brand-red text-[11px] sm:text-xs font-medium hover:underline ml-2"
+                            title="Unlink child"
+                          >
+                            Unlink
+                          </button>
+                          {selectedChildId === child.id && (
+                            <span className="w-2 h-2 rounded-full bg-brand-gold shrink-0 ml-3" />
+                          )}
+                        </div>
                       </div>
                       <p className="text-xs text-chalk-muted mt-1 truncate">{child.email}</p>
                     </button>
