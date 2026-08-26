@@ -704,4 +704,219 @@ def cancel_booking_atomic(
 
     db.flush()
 
-    return locked_booking
+    return locked_booking
+
+
+# ============================================================
+# ASSIGN TEACHER (atomic)
+# ============================================================
+
+def assign_teacher_atomic(
+    db: Session,
+    *,
+    booking: Booking,
+    teacher_id: uuid.UUID,
+    admin_id: uuid.UUID,
+) -> Booking:
+    """
+    Assign a teacher to a confirmed booking atomically.
+
+    This is the single canonical source of truth for teacher
+    assignment.  The admin endpoint must call this function
+    instead of performing its own validation.
+
+    Actions (all inside a single row lock + flush):
+        1. SELECT FOR UPDATE on the booking row — prevents
+           two admins from assigning different teachers
+           simultaneously.
+        2. Re-validate booking is still in 'confirmed' status
+           and has no teacher yet.
+        3. Delegate all eligibility checks to can_assign_teacher()
+           — teacher qualification, subject, overlap, future-
+           feasibility matching — one canonical check, no
+           duplication.
+        4. Set booking.teacher_id and teacher_assignment_status.
+        5. Upsert the StudentSubjectTeacher persistent relationship.
+        6. Insert a BookingAssignmentAudit row.
+        7. flush() — caller must call db.commit().
+
+    The caller is responsible for:
+        - Verifying the admin role before calling this.
+        - Calling db.commit() after this function returns.
+
+    Raises:
+        ValueError: with a descriptive message if the assignment
+                    is not valid (booking state, teacher eligibility,
+                    conflict, future-feasibility).
+
+    IMPORTANT:
+        The DB-level exclusion constraint (PR #4) is the final
+        safety net for concurrent slot-booking conflicts.
+        This function is the application-layer defence.
+    """
+
+    from sqlalchemy import select as sa_select
+
+    from app.models.booking_audit import BookingAssignmentAudit
+    from app.models.student_subject_teacher import StudentSubjectTeacher
+    from app.models.booking import TeacherAssignmentStatus
+    from app.services.scheduling_service import can_assign_teacher
+
+    # --------------------------------------------------------
+    # Acquire a row-level lock on the booking.
+    #
+    # WHY:
+    #   Two admins could simultaneously fetch the same booking
+    #   (both see teacher_id=None), pass validation, and both
+    #   attempt to commit — leaving the booking with one teacher
+    #   and discarding the other silently.
+    #
+    #   The lock serializes them: the second admin's request
+    #   blocks here until the first commits, then sees
+    #   teacher_id is no longer None and raises below.
+    # --------------------------------------------------------
+
+    locked_booking = db.execute(
+        sa_select(Booking)
+        .where(Booking.id == booking.id)
+        .with_for_update()
+    ).scalar_one()
+
+    # --------------------------------------------------------
+    # Booking must still be in a valid state for assignment.
+    # --------------------------------------------------------
+
+    from app.models.booking import BookingStatus
+
+    if locked_booking.status != BookingStatus.confirmed:
+        raise ValueError(
+            f"Booking is in '{locked_booking.status.value}' "
+            "status and cannot receive a teacher assignment. "
+            "Only 'confirmed' bookings can be assigned."
+        )
+
+    # --------------------------------------------------------
+    # Race-condition guard: teacher already assigned?
+    #
+    # This catches the case where two admins raced to assign
+    # a teacher to the same booking.  After the lock is
+    # acquired, the second admin will see teacher_id != None.
+    # --------------------------------------------------------
+
+    prev_teacher = locked_booking.teacher_id
+
+    if prev_teacher is not None:
+        raise ValueError(
+            "A teacher has already been assigned to this "
+            "booking. If you need to reassign, please use "
+            "the reassignment endpoint."
+        )
+
+    # --------------------------------------------------------
+    # Delegate all eligibility checks to can_assign_teacher().
+    #
+    # WHY:
+    #   can_assign_teacher() is the single canonical check for:
+    #     - Teacher account active + verified
+    #     - Teacher teaches booking subject
+    #     - Teacher has no overlapping booking
+    #     - Student has no conflicting booking
+    #     - Future-feasibility: assignment won't strand
+    #       another pending booking without a teacher
+    #
+    #   We do NOT duplicate these checks here.
+    # --------------------------------------------------------
+
+    can_assign, reason = can_assign_teacher(
+        db=db,
+        booking=locked_booking,
+        teacher_id=teacher_id,
+    )
+
+    if not can_assign:
+        raise ValueError(
+            reason
+            or "Teacher cannot be assigned to this booking."
+        )
+
+    # --------------------------------------------------------
+    # Perform the assignment.
+    # --------------------------------------------------------
+
+    locked_booking.teacher_id = teacher_id
+
+    locked_booking.teacher_assignment_status = (
+        TeacherAssignmentStatus.assigned.value
+    )
+
+    # --------------------------------------------------------
+    # Upsert the persistent student-subject-teacher
+    # relationship.
+    #
+    # This records the long-term pairing of this student
+    # with this teacher for this subject, independent of
+    # any single booking.
+    # --------------------------------------------------------
+
+    relationship = (
+        db.query(StudentSubjectTeacher)
+        .filter(
+            StudentSubjectTeacher.student_id
+            == locked_booking.student_id,
+
+            StudentSubjectTeacher.subject_id
+            == locked_booking.subject_id,
+        )
+        .first()
+    )
+
+    if relationship is None:
+
+        relationship = StudentSubjectTeacher(
+            student_id=locked_booking.student_id,
+            subject_id=locked_booking.subject_id,
+            teacher_id=teacher_id,
+            status="active",
+        )
+
+        db.add(relationship)
+
+    else:
+
+        relationship.teacher_id = teacher_id
+        relationship.status = "active"
+
+    # --------------------------------------------------------
+    # Insert the audit record.
+    #
+    # WHY:
+    #   This creates an immutable record of every assignment
+    #   action: who did it, when, what changed.
+    #   No data is ever deleted or updated in this table.
+    # --------------------------------------------------------
+
+    action = (
+        "assigned"
+        if prev_teacher is None
+        else "reassigned"
+    )
+
+    audit = BookingAssignmentAudit(
+        booking_id=locked_booking.id,
+        admin_id=admin_id,
+        prev_teacher=prev_teacher,
+        new_teacher=teacher_id,
+        action=action,
+    )
+
+    db.add(audit)
+
+    # --------------------------------------------------------
+    # Flush all changes.
+    # Caller must call db.commit() to finalize.
+    # --------------------------------------------------------
+
+    db.flush()
+
+    return locked_booking
+
