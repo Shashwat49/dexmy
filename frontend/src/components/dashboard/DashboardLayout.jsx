@@ -127,7 +127,7 @@ export default function DashboardLayout({ navItems, children }) {
       )}
 
       {/* Desktop Fixed Sidebar */}
-      <aside className="hidden md:flex w-60 shrink-0 bg-panel border-r border-chalk-faint flex-col p-7 min-h-screen sticky top-0 h-screen overflow-y-auto">
+      <aside className="hidden md:flex w-60 shrink-0 bg-panel border-r border-chalk-faint flex-col p-7 min-h-screen">
         {renderNavContent()}
       </aside>
 
