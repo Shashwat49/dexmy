@@ -18,17 +18,6 @@ class BookingStatus(str, enum.Enum):
 
 
 class TeacherAssignmentStatus(str, enum.Enum):
-    """
-    Tracks the teacher-assignment lifecycle for a booking.
-
-    pending  — booking confirmed, no teacher yet assigned
-    assigned — admin has assigned a teacher
-    failed   — assignment could not be completed (no eligible teacher)
-
-    Stored as a plain string in the DB (VARCHAR 20) until PR #4
-    adds the CHECK constraint / enum migration.
-    """
-
     pending = "pending"
     assigned = "assigned"
     failed = "failed"
@@ -44,92 +33,39 @@ class DemoStatus(str, enum.Enum):
 class Booking(Base):
     __tablename__ = "bookings"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 
     student_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey(
-            "users.id",
-            ondelete="CASCADE",
-        ),
-        index=True,
-        nullable=False,
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
     )
 
     teacher_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey(
-            "teacher_profiles.user_id",
-            ondelete="CASCADE",
-        ),
-        index=True,
-        nullable=True,
+        UUID(as_uuid=True), ForeignKey("teacher_profiles.user_id", ondelete="CASCADE"), index=True, nullable=True
     )
 
-    subject_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("subjects.id"),
-        nullable=False,
+    subject_id: Mapped[int] = mapped_column(Integer, ForeignKey("subjects.id"), nullable=False)
+
+    student_package_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("student_packages.id", ondelete="RESTRICT"), index=True, nullable=True
     )
 
-    scheduled_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        index=True,
-    )
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
-    # IMPORTANT:
-    # Python-layer default is 55 (CLASS_DURATION_MINUTES — 55 min class
-    # + 5 min buffer = 60 min scheduling slot).
-    # The DB column default is 60; PR #4 will align it to 55.
-    duration_minutes: Mapped[int] = mapped_column(
-        Integer,
-        default=60,
-        nullable=False,
-    )
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
 
     status: Mapped[BookingStatus] = mapped_column(
-        Enum(
-            BookingStatus,
-            name="booking_status",
-        ),
-        default=BookingStatus.pending,
-        nullable=False,
+        Enum(BookingStatus, name="booking_status"), default=BookingStatus.pending, nullable=False
     )
 
-    price: Mapped[float | None] = mapped_column(
-        Numeric(10, 2),
-        nullable=True,
-    )
+    price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    # Stored as VARCHAR(20) in the DB.
-    # Application layer enforces TeacherAssignmentStatus values.
-    # PR #4 will add a CHECK constraint at the DB level.
     teacher_assignment_status: Mapped[str] = mapped_column(
-        String(20),
-        default=TeacherAssignmentStatus.pending.value,
-        nullable=False,
+        String(20), default=TeacherAssignmentStatus.pending.value, nullable=False
     )
 
-    # Optional client-supplied idempotency key.
-    # If a booking with this key already exists, the creation
-    # endpoint returns it instead of creating a duplicate.
-    # UNIQUE constraint added in PR #4.
-    idempotency_key: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        nullable=True,
-        index=True,
-    )
+    idempotency_key: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
 
 
 class DemoRequest(Base):
