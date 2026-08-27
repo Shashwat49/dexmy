@@ -1,8 +1,4 @@
-# Calls Razorpay's REST API directly instead of using the razorpay SDK —
-# the SDK depends on pkg_resources (from setuptools), which isn't bundled
-# by default in newer Python installs and has caused repeated import
-# failures. This is a thin wrapper around the same two operations the SDK
-# was providing: creating an order and verifying a payment signature.
+# Thin wrapper around the Razorpay REST API.
 import hashlib
 import hmac
 
@@ -23,6 +19,16 @@ def create_order(amount_in_paise: int, currency: str, receipt: str) -> dict:
             "receipt": receipt,
             "payment_capture": 1,
         },
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_order(order_id: str) -> dict:
+    response = requests.get(
+        f"{RAZORPAY_BASE_URL}/orders/{order_id}",
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET),
         timeout=10,
     )
     response.raise_for_status()
