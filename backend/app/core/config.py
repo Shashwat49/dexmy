@@ -5,39 +5,32 @@ class Settings(BaseSettings):
     APP_NAME: str = "Dexmy API"
     ENVIRONMENT: str = "development"
 
-    # Database
-    DATABASE_URL: str  # postgresql+psycopg://user:pass@host:5432/dexmy
+    DATABASE_URL: str
 
-    # Auth
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 1 day
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
-    # LiveKit
     LIVEKIT_API_KEY: str
     LIVEKIT_API_SECRET: str
-    LIVEKIT_URL: str  # wss://your-project.livekit.cloud
+    LIVEKIT_URL: str
 
-    # Cloudflare R2 (S3-compatible)
     R2_ACCOUNT_ID: str = ""
     R2_ACCESS_KEY_ID: str = ""
     R2_SECRET_ACCESS_KEY: str = ""
     R2_BUCKET_NAME: str = "dexmy-storage"
 
-    # Razorpay
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
 
-    # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_PUBLISHABLE_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
 
-    # WhatsApp OTP System
     WHATSAPP_VERIFY_TOKEN: str = ""
     META_APP_SECRET: str = ""
 
-    # CORS
     FRONTEND_ORIGIN: str = "https://dexmy.vercel.app"
 
     class Config:
