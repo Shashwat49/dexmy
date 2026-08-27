@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
 from app.db.session import get_db
-from app.models.admin import AdminRolePermission
+from app.models.admin import AdminPermission, AdminRolePermission
 from app.models.user import User, UserRole
 
 bearer_scheme = HTTPBearer()
@@ -23,8 +23,6 @@ ADMIN_ROLES = {
 }
 
 
-# Kept as a compatibility layer for existing endpoints while the admin
-# surface is migrated to permission-based authorization.
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
@@ -81,24 +79,8 @@ def require_permission(permission: str):
                 detail="Admin access required",
             )
 
-        # Super admin is the platform-wide administrative role.
         if current_user.role == UserRole.super_admin:
             return current_user
-
-        allowed = db.scalar(
-            select(AdminRolePermission.id).where(
-                AdminRolePermission.role == current_user.role.value,
-                AdminRolePermission.permission_id.in_(
-                    select(AdminRolePermission.permission_id).where(
-                        AdminRolePermission.role == current_user.role.value
-                    )
-                ),
-            ).limit(1)
-        )
-
-        # The permission lookup below is intentionally performed by key in
-        # a separate query to keep the role/permission relationship explicit.
-        from app.models.admin import AdminPermission
 
         has_permission = db.scalar(
             select(AdminRolePermission.id)
