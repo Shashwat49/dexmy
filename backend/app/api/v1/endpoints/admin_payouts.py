@@ -1,17 +1,14 @@
 from datetime import datetime
-from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_permission
 from app.db.session import get_db
-from app.models.booking import Booking, BookingStatus
-from app.models.payout import TeacherPayout, TeacherPayoutAccount, TeacherPayoutItem
-from app.models.teacher import TeacherProfile
-from app.models.user import User, UserRole
+from app.models.payout import TeacherPayout, TeacherPayoutAccount
+from app.models.user import User
 from app.schemas.admin_payouts import PayoutAccountRead, PayoutAccountVerification, PayoutRead
 from app.services.audit_service import record_admin_action
 
@@ -132,6 +129,50 @@ def hold_payout(
         resource_type="teacher_payout",
         resource_id=payout.id,
         new_values={"status": "held"},
+    )
+    db.commit()
+    db.refresh(payout)
+    return payout
+
+
+@router.post("/{payout_id}/mark-paid", response_model=PayoutRead)
+def mark_payout_paid(
+    payout_id: UUID,
+    external_reference: str,
+    current_user: User = Depends(require_permission("payout.approve")),
+    db: Session = Depends(get_db),
+):
+    """Record a payout as completed after an external transfer succeeds.
+
+    This endpoint does not move money itself. The external transfer must be
+    completed through the configured bank/UPI process first, and its reference
+    must be supplied for reconciliation.
+    """
+    reference = external_reference.strip()
+    if not reference:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="External payout reference is required")
+
+    payout = db.execute(
+        select(TeacherPayout).where(TeacherPayout.id == payout_id).with_for_update()
+    ).scalar_one_or_none()
+    if payout is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payout not found")
+    if payout.status != "approved":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only approved payouts can be marked paid")
+    if payout.external_reference:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payout already has an external reference")
+
+    payout.status = "paid"
+    payout.external_reference = reference
+    payout.paid_at = datetime.now().astimezone()
+    db.flush()
+    record_admin_action(
+        db,
+        admin_user_id=current_user.id,
+        action="payout.mark_paid",
+        resource_type="teacher_payout",
+        resource_id=payout.id,
+        new_values={"status": "paid", "external_reference": reference},
     )
     db.commit()
     db.refresh(payout)
