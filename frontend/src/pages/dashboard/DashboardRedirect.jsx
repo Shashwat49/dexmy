@@ -6,10 +6,13 @@ const DASHBOARD_BY_ROLE = {
   student: "/dashboard/student",
   parent: "/dashboard/parent",
   admin: "/dashboard/admin",
+  super_admin: "/dashboard/admin",
+  academic_manager: "/dashboard/admin",
+  teacher_manager: "/dashboard/admin",
+  finance_manager: "/dashboard/admin",
+  support_agent: "/dashboard/admin",
 };
 
-// Landing spot for /dashboard — sends the user to their actual role
-// dashboard so nothing needs to hardcode which one to show.
 export default function DashboardRedirect() {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
