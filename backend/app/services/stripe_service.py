@@ -17,5 +17,9 @@ def create_payment_intent(amount_in_cents: int, currency: str, metadata: dict, i
     return stripe.PaymentIntent.create(**kwargs)
 
 
+def retrieve_payment_intent(payment_intent_id: str):
+    return stripe.PaymentIntent.retrieve(payment_intent_id)
+
+
 def construct_webhook_event(payload: bytes, sig_header: str):
     return stripe.Webhook.construct_event(payload, sig_header, settings.STRIPE_WEBHOOK_SECRET)
