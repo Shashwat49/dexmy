@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,10 @@ router = APIRouter()
 
 
 @router.post("/razorpay/webhook")
-async def razorpay_package_webhook(request: Request, db: Session = __import__("fastapi").Depends(get_db)):
+async def razorpay_package_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
     body = await request.body()
     signature = request.headers.get("x-razorpay-signature")
     if not signature or not settings.RAZORPAY_WEBHOOK_SECRET:
