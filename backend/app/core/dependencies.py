@@ -47,11 +47,17 @@ def get_current_user(
 
 def require_role(*allowed_roles: UserRole):
     def _dependency(current_user: User = Depends(get_current_user)) -> User:
+        # Super admins retain access to legacy role-protected admin endpoints
+        # while those endpoints are migrated to fine-grained permissions.
+        if current_user.role == UserRole.super_admin:
+            return current_user
+
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient permissions",
             )
+
         return current_user
 
     return _dependency
