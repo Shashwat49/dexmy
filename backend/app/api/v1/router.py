@@ -9,6 +9,7 @@ from app.api.v1.endpoints import (
     admin_packages,
     admin_student_packages,
     admin_payouts,
+    admin_finance,
     package_payments,
     package_payment_webhooks,
     auth,
@@ -43,6 +44,7 @@ api_router.include_router(admin_bookings.router, prefix="/admin/bookings", tags=
 api_router.include_router(admin_packages.router, prefix="/admin/packages", tags=["admin-packages"])
 api_router.include_router(admin_student_packages.router, prefix="/admin/students", tags=["admin-student-packages"])
 api_router.include_router(admin_payouts.router, prefix="/admin/payouts", tags=["admin-payouts"])
+api_router.include_router(admin_finance.router, prefix="/admin/finance", tags=["admin-finance"])
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
 api_router.include_router(package_payments.router, prefix="/payments/packages", tags=["package-payments"])
 api_router.include_router(package_payment_webhooks.router, prefix="/payments/packages", tags=["package-payment-webhooks"])
