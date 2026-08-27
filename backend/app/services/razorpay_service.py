@@ -39,3 +39,8 @@ def verify_signature(order_id: str, payment_id: str, signature: str) -> bool:
     payload = f"{order_id}|{payment_id}".encode()
     expected = hmac.new(settings.RAZORPAY_KEY_SECRET.encode(), payload, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
+
+def verify_webhook_signature(payload: bytes, signature: str) -> bool:
+    expected = hmac.new(settings.RAZORPAY_WEBHOOK_SECRET.encode(), payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
