@@ -7,7 +7,7 @@ from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.dependencies import require_role
 from app.db.session import get_db
@@ -36,11 +36,15 @@ from app.schemas.booking import (
 )
 from app.schemas.user import UserRead
 
+from app.services.booking_service import (
+    assign_teacher_atomic,
+)
 from app.services.scheduling_service import (
     can_assign_teacher,
 )
 
 router = APIRouter()
+
 
 
 # ============================================================
@@ -178,74 +182,67 @@ def list_pending_teacher_assignments(
     """
     Return confirmed bookings that have not yet
     been assigned a teacher.
+
+    Uses a single joined query to avoid N+1 database
+    calls when iterating over the booking list.
     """
 
-    bookings = (
-        db.query(Booking)
-        .filter(
-            Booking.status
-            == BookingStatus.confirmed,
+    # --------------------------------------------------------
+    # Single query with eager-loaded student and subject.
+    #
+    # WHY:
+    #   The original implementation called db.get(User, ...)
+    #   and db.get(Subject, ...) per booking row — an N+1
+    #   query pattern.
+    #
+    #   joinedload fetches all related data in one SQL JOIN,
+    #   regardless of the number of bookings returned.
+    # --------------------------------------------------------
 
-            Booking.teacher_id.is_(None),
+    from sqlalchemy import select
+    from app.models.user import User as UserModel
+    from app.models.teacher import Subject as SubjectModel
 
-            Booking.teacher_assignment_status
-            == "pending",
-        )
-        .order_by(
-            Booking.scheduled_at.asc()
+    rows = (
+        db.execute(
+            select(
+                Booking,
+                UserModel.full_name.label("student_name"),
+                SubjectModel.name.label("subject_name"),
+            )
+            .join(
+                UserModel,
+                UserModel.id == Booking.student_id,
+            )
+            .join(
+                SubjectModel,
+                SubjectModel.id == Booking.subject_id,
+            )
+            .where(
+                Booking.status == BookingStatus.confirmed,
+                Booking.teacher_id.is_(None),
+            )
+            .order_by(Booking.scheduled_at.asc())
         )
         .all()
     )
 
-    results = []
-
-    for booking in bookings:
-
-        student = db.get(
-            User,
-            booking.student_id,
+    return [
+        PendingTeacherAssignmentRead(
+            booking_id=booking.id,
+            student_id=booking.student_id,
+            student_name=student_name,
+            subject_id=booking.subject_id,
+            subject_name=subject_name,
+            scheduled_at=booking.scheduled_at,
+            duration_minutes=booking.duration_minutes,
+            teacher_assignment_status=(
+                booking.teacher_assignment_status
+            ),
         )
+        for booking, student_name, subject_name in rows
+    ]
 
-        subject = db.get(
-            Subject,
-            booking.subject_id,
-        )
-
-        results.append(
-            PendingTeacherAssignmentRead(
-                booking_id=booking.id,
-
-                student_id=booking.student_id,
-
-                student_name=(
-                    student.full_name
-                    if student
-                    else "Unknown"
-                ),
-
-                subject_id=booking.subject_id,
-
-                subject_name=(
-                    subject.name
-                    if subject
-                    else "Unknown"
-                ),
-
-                scheduled_at=(
-                    booking.scheduled_at
-                ),
-
-                duration_minutes=(
-                    booking.duration_minutes
-                ),
-
-                teacher_assignment_status=(
-                    booking.teacher_assignment_status
-                ),
-            )
-        )
-
-    return results
 
 
 # ============================================================
@@ -403,10 +400,29 @@ def assign_teacher(
     Assign a teacher to an already-confirmed booking.
 
     This is performed only by an administrator.
+
+    Concurrency safety:
+        This endpoint delegates to assign_teacher_atomic(),
+        which acquires a SELECT FOR UPDATE row lock on the
+        booking before performing any validation or mutation.
+        Two simultaneous assignment requests will be serialized
+        — the second will see the booking is already assigned
+        and receive a 409 response.
+
+    Validation:
+        All eligibility checks (teacher qualification, subject,
+        overlap, future-feasibility) are performed inside
+        assign_teacher_atomic() via the single canonical
+        can_assign_teacher() function.
+
+    Audit:
+        Every successful assignment is recorded in the
+        booking_assignment_audits table.
     """
 
     # --------------------------------------------------------
-    # Booking
+    # Load the booking (non-locking read — the lock is
+    # acquired inside assign_teacher_atomic).
     # --------------------------------------------------------
 
     booking = db.get(
@@ -421,257 +437,45 @@ def assign_teacher(
         )
 
     # --------------------------------------------------------
-    # Booking status
+    # Atomic assignment.
+    #
+    # assign_teacher_atomic():
+    #   1. SELECT FOR UPDATE on booking row.
+    #   2. Re-validates booking status and assignment state.
+    #   3. Calls can_assign_teacher() — single canonical check.
+    #   4. Sets teacher_id + teacher_assignment_status.
+    #   5. Upserts StudentSubjectTeacher relationship.
+    #   6. Inserts BookingAssignmentAudit row.
     # --------------------------------------------------------
 
-    if booking.status != BookingStatus.confirmed:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Only confirmed bookings can "
-                "receive a teacher."
-            ),
+    try:
+        booking = assign_teacher_atomic(
+            db=db,
+            booking=booking,
+            teacher_id=payload.teacher_id,
+            admin_id=current_user.id,
         )
-
-    # --------------------------------------------------------
-    # Already assigned
-    # --------------------------------------------------------
-
-    if booking.teacher_id is not None:
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "A teacher is already assigned "
-                "to this booking."
-            ),
+            detail=str(exc),
         )
-
-    # --------------------------------------------------------
-    # Teacher
-    # --------------------------------------------------------
-
-    teacher = db.get(
-        User,
-        payload.teacher_id,
-    )
-
-    if teacher is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Teacher not found.",
-        )
-
-    if teacher.role != UserRole.teacher:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Selected user is not a teacher.",
-        )
-
-    if not teacher.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Teacher is inactive.",
-        )
-
-    # --------------------------------------------------------
-    # Teacher profile
-    # --------------------------------------------------------
-
-    teacher_profile = db.get(
-        TeacherProfile,
-        teacher.id,
-    )
-
-    if teacher_profile is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Teacher profile not found.",
-        )
-
-    if not teacher_profile.is_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Teacher is not verified.",
-        )
-
-    # --------------------------------------------------------
-    # Subject eligibility
-    # --------------------------------------------------------
-
-    teaches_subject = (
-        db.query(TeacherSubject)
-        .filter(
-            TeacherSubject.teacher_id
-            == teacher.id,
-
-            TeacherSubject.subject_id
-            == booking.subject_id,
-        )
-        .first()
-    )
-
-    if teaches_subject is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Teacher does not teach "
-                "this subject."
-            ),
-        )
-
-    # --------------------------------------------------------
-    # Teacher scheduling conflict
-    # --------------------------------------------------------
-
-    booking_start = booking.scheduled_at
-
-    booking_end = (
-        booking_start
-        + timedelta(
-            minutes=booking.duration_minutes
-        )
-    )
-
-    existing_bookings = (
-        db.query(Booking)
-        .filter(
-            Booking.teacher_id
-            == teacher.id,
-
-            Booking.status.in_(
-                [
-                    BookingStatus.pending,
-                    BookingStatus.confirmed,
-                ]
-            ),
-
-            Booking.id != booking.id,
-
-            Booking.scheduled_at
-            < booking_end,
-        )
-        .all()
-    )
-
-    for existing in existing_bookings:
-
-        existing_end = (
-            existing.scheduled_at
-            + timedelta(
-                minutes=existing.duration_minutes
-            )
-        )
-
-        if existing_end > booking_start:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Teacher is already assigned "
-                    "to another class at this time."
-                ),
-            )
-
-    # --------------------------------------------------------
-    # Student scheduling conflict
-    # --------------------------------------------------------
-
-    student_conflicts = (
-        db.query(Booking)
-        .filter(
-            Booking.student_id
-            == booking.student_id,
-
-            Booking.status.in_(
-                [
-                    BookingStatus.pending,
-                    BookingStatus.confirmed,
-                ]
-            ),
-
-            Booking.id != booking.id,
-
-            Booking.scheduled_at
-            < booking_end,
-        )
-        .all()
-    )
-
-    for existing in student_conflicts:
-
-        existing_end = (
-            existing.scheduled_at
-            + timedelta(
-                minutes=existing.duration_minutes
-            )
-        )
-
-        if existing_end > booking_start:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Student already has "
-                    "another class at this time."
-                ),
-            )
-
-    # --------------------------------------------------------
-    # Assign teacher to booking
-    # --------------------------------------------------------
-
-    booking.teacher_id = teacher.id
-
-    booking.teacher_assignment_status = (
-        "assigned"
-    )
-
-    # --------------------------------------------------------
-    # Maintain persistent student-subject-teacher
-    # relationship
-    # --------------------------------------------------------
-
-    relationship = (
-        db.query(StudentSubjectTeacher)
-        .filter(
-            StudentSubjectTeacher.student_id
-            == booking.student_id,
-
-            StudentSubjectTeacher.subject_id
-            == booking.subject_id,
-        )
-        .first()
-    )
-
-    if relationship is None:
-
-        relationship = StudentSubjectTeacher(
-            student_id=booking.student_id,
-
-            subject_id=booking.subject_id,
-
-            teacher_id=teacher.id,
-
-            status="active",
-        )
-
-        db.add(relationship)
-
-    else:
-
-        relationship.teacher_id = teacher.id
-
-        relationship.status = "active"
 
     db.commit()
-
     db.refresh(booking)
 
     # --------------------------------------------------------
-    # Response data
+    # Build response
     # --------------------------------------------------------
 
     student = db.get(
         User,
         booking.student_id,
+    )
+
+    teacher = db.get(
+        User,
+        booking.teacher_id,
     )
 
     subject = db.get(
@@ -698,9 +502,13 @@ def assign_teacher(
             else "Unknown"
         ),
 
-        teacher_id=teacher.id,
+        teacher_id=booking.teacher_id,
 
-        teacher_name=teacher.full_name,
+        teacher_name=(
+            teacher.full_name
+            if teacher
+            else "Unknown"
+        ),
 
         scheduled_at=booking.scheduled_at,
 
@@ -709,4 +517,4 @@ def assign_teacher(
         teacher_assignment_status=(
             booking.teacher_assignment_status
         ),
-    )
+    )

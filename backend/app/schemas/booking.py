@@ -216,3 +216,34 @@ class TeacherAssignmentRead(BaseModel):
     duration_minutes: int
 
     teacher_assignment_status: TeacherAssignmentStatus
+
+
+# ============================================================
+# BOOKING ASSIGNMENT AUDIT
+# ============================================================
+
+class BookingAssignmentAuditRead(BaseModel):
+    """
+    Represents one immutable audit record for a teacher
+    assignment action.
+
+    Returned when querying the assignment history for a booking.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+
+    booking_id: uuid.UUID
+
+    admin_id: uuid.UUID
+
+    # NULL on the first assignment (no previous teacher).
+    prev_teacher: uuid.UUID | None
+
+    new_teacher: uuid.UUID
+
+    # "assigned" | "reassigned"
+    action: str
+
+    created_at: datetime
