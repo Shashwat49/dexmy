@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
     admin,
+    admin_dashboard,
     auth,
     bookings,
     classroom,
@@ -27,6 +28,7 @@ api_router.include_router(parents.router, prefix="/parents", tags=["parents"])
 api_router.include_router(bookings.router, prefix="/bookings", tags=["bookings"])
 api_router.include_router(marketing.router, tags=["marketing"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+api_router.include_router(admin_dashboard.router, prefix="/admin/dashboard", tags=["admin-dashboard"])
 api_router.include_router(payments.router, prefix="/payments", tags=["payments"])
 api_router.include_router(system.router, prefix="/system", tags=["system"])
 api_router.include_router(profiles.router, prefix="/profiles", tags=["profiles"])
