@@ -11,6 +11,7 @@ import AdminDashboard from "./pages/dashboard/AdminDashboard";
 import AdminStudents from "./pages/dashboard/AdminStudents";
 import AdminTeachers from "./pages/dashboard/admin/AdminTeachers";
 import AdminPackages from "./pages/dashboard/AdminPackages";
+import AdminPayments from "./pages/dashboard/AdminPayments";
 import BookClass from "./pages/dashboard/student/BookClass";
 import MyNotes from "./pages/dashboard/student/MyNotes";
 import MyAccount from "./pages/dashboard/MyAccount";
@@ -35,6 +36,7 @@ export default function App() {
     <Route path="/dashboard/admin/students" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminStudents /></ProtectedRoute>} />
     <Route path="/dashboard/admin/teachers" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminTeachers /></ProtectedRoute>} />
     <Route path="/dashboard/admin/packages" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminPackages /></ProtectedRoute>} />
+    <Route path="/dashboard/admin/payments" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminPayments /></ProtectedRoute>} />
     <Route path="/dashboard/teacher/profile" element={<ProtectedRoute roles={["teacher"]}><TeacherProfile /></ProtectedRoute>} />
     <Route path="/dashboard/teacher/calendar" element={<ProtectedRoute roles={["teacher"]}><TeacherCalendar /></ProtectedRoute>} />
   </Routes>;
