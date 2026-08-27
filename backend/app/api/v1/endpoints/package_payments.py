@@ -36,6 +36,14 @@ def _resolve_student_id(current_user: User, requested_student_id: uuid.UUID | No
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only students or parents can purchase packages")
 
 
+def _can_access_payment(current_user: User, payment: Payment, db: Session) -> bool:
+    if payment.payer_id == current_user.id:
+        return True
+    if current_user.role == UserRole.parent and payment.student_id is not None:
+        return db.get(ParentStudentLink, (current_user.id, payment.student_id)) is not None
+    return False
+
+
 def _response_for_payment(payment: Payment, plan, *, razorpay_order_id=None, stripe_client_secret=None, razorpay_amount=None, stripe_amount=None):
     return PackageCheckoutResponse(
         payment_id=payment.id,
@@ -63,7 +71,8 @@ def package_checkout(
 
     payment = get_or_create_payment(
         db,
-        payer_id=student_id,
+        payer_id=current_user.id,
+        student_id=student_id,
         package_plan=plan,
         provider=payload.provider,
         idempotency_key=payload.idempotency_key,
@@ -136,15 +145,13 @@ def verify_package_razorpay(
     db: Session = Depends(get_db),
 ):
     payment = db.get(Payment, payload.payment_id)
-    if payment is None or payment.payer_id != current_user.id or payment.provider.value != "razorpay":
+    if payment is None or payment.provider.value != "razorpay" or not _can_access_payment(current_user, payment, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
     if payment.status == PaymentStatus.paid:
         return {"status": "already_confirmed"}
     if payment.provider_order_id != payload.razorpay_order_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order does not match payment")
     if not razorpay_service.verify_signature(payload.razorpay_order_id, payload.razorpay_payment_id, payload.razorpay_signature):
-        payment.status = PaymentStatus.failed
-        db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment verification failed")
 
     order = razorpay_service.fetch_order(payload.razorpay_order_id)
@@ -161,6 +168,8 @@ def verify_package_razorpay(
 async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     signature = request.headers.get("stripe-signature")
+    if not signature or not settings.STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stripe webhook is not configured")
     try:
         event = stripe_service.construct_webhook_event(payload, signature)
     except Exception:
