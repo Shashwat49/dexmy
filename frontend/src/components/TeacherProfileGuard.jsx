@@ -8,8 +8,15 @@ function isComplete(profile) {
 
 export default function TeacherProfileGuard({ children }) {
   const [state, setState] = useState("checking");
-  useEffect(() => { let cancelled = false; getMyTeacherProfile().then(profile => { if (!cancelled) setState(isComplete(profile) ? "complete" : "incomplete"); }).catch(() => { if (!cancelled) setState("incomplete"); }); return () => { cancelled = true; }; }, []);
-  if (state === "checking") return <div className="min-h-screen bg-void text-chalk flex items-center justify-center"><div className="text-sm text-chalk-muted">Preparing your teacher dashboard…</div></div>;
+  useEffect(() => {
+    let cancelled = false;
+    getMyTeacherProfile()
+      .then((profile) => { if (!cancelled) setState(isComplete(profile) ? "complete" : "incomplete"); })
+      .catch(() => { if (!cancelled) setState("error"); });
+    return () => { cancelled = true; };
+  }, []);
+  if (state === "checking") return <div className="min-h-screen bg-void text-chalk flex items-center justify-center"><div className="text-sm text-chalk-muted">Checking teacher profile…</div></div>;
   if (state === "incomplete") return <Navigate to="/dashboard/teacher/profile" replace />;
+  if (state === "error") return <div className="min-h-screen bg-void text-chalk flex items-center justify-center px-6"><div className="max-w-md text-center"><h1 className="text-lg font-semibold">Unable to load your profile</h1><p className="mt-2 text-sm text-chalk-muted">Please refresh and try again. Your account has not been changed.</p><button onClick={() => window.location.reload()} className="mt-5 rounded-lg bg-brand-red px-4 py-2 text-sm font-semibold">Retry</button></div></div>;
   return children;
 }
