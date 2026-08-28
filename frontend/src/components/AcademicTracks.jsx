@@ -3,9 +3,7 @@ const boards = [
   "ICSE",
   "IGCSE",
   "IB MYP",
-  "GCSE",
-  "MPPSC",
-  "DEMA"
+  "GCSE"
 ];
 
 const tests = [
@@ -13,9 +11,7 @@ const tests = [
   "PSAT",
   "AP",
   "TMUA",
-  "USCC",
-  "JEE",
-  "NEET"
+  "USCC"
 ];
 
 function TrackCard({ label, index }) {
