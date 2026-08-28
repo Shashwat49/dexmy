@@ -1,20 +1,8 @@
+import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+import { getMyTeacherProfile } from "../../api/teachers";
 
-const DASHBOARD_BY_ROLE = {
-  teacher: "/dashboard/teacher",
-  student: "/dashboard/student",
-  parent: "/dashboard/parent",
-  admin: "/dashboard/admin",
-  super_admin: "/dashboard/admin",
-  academic_manager: "/dashboard/admin",
-  teacher_manager: "/dashboard/admin",
-  finance_manager: "/dashboard/admin",
-  support_agent: "/dashboard/admin",
-};
+const DASHBOARD_BY_ROLE = { teacher:"/dashboard/teacher", student:"/dashboard/student", parent:"/dashboard/parent", admin:"/dashboard/admin", super_admin:"/dashboard/admin", academic_manager:"/dashboard/admin", teacher_manager:"/dashboard/admin", finance_manager:"/dashboard/admin", support_agent:"/dashboard/admin" };
 
-export default function DashboardRedirect() {
-  const { user } = useAuth();
-  if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={DASHBOARD_BY_ROLE[user.role] || "/login"} replace />;
-}
+export default function DashboardRedirect(){const{user}=useAuth();const[loading,setLoading]=useState(true);const[destination,setDestination]=useState(null);useEffect(()=>{let cancelled=false;async function resolve(){if(!user){if(!cancelled){setDestination("/login");setLoading(false)}return}if(user.role!=="teacher"){if(!cancelled){setDestination(DASHBOARD_BY_ROLE[user.role]||"/login");setLoading(false)}return}try{const profile=await getMyTeacherProfile();const complete=Boolean(profile?.bio?.trim()&&profile?.qualifications?.trim()&&profile?.years_experience!==null&&profile?.years_experience!==undefined&&profile?.hourly_rate!==null&&profile?.hourly_rate!==undefined&&Array.isArray(profile?.subject_ids)&&profile.subject_ids.length>0);if(!cancelled){setDestination(complete?"/dashboard/teacher":"/dashboard/teacher/profile");setLoading(false)}}catch{if(!cancelled){setDestination("/dashboard/teacher/profile");setLoading(false)}}}resolve();return()=>{cancelled=true}},[user]);if(loading)return <div className="min-h-screen bg-void text-chalk flex items-center justify-center"><div className="text-sm text-chalk-muted">Preparing your dashboard…</div></div>;return <Navigate to={destination||"/login"} replace/>}
