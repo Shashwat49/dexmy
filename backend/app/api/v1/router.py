@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     admin_students,
     admin_teachers,
     admin_bookings,
+    admin_teacher_candidates,
     admin_packages,
     admin_student_packages,
     admin_payouts,
@@ -42,6 +43,7 @@ api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
 api_router.include_router(admin_dashboard.router, prefix="/admin/dashboard", tags=["admin-dashboard"])
 api_router.include_router(admin_teachers.router, prefix="/admin/teachers", tags=["admin-teachers"])
 api_router.include_router(admin_students.router, prefix="/admin/students", tags=["admin-students"])
+api_router.include_router(admin_teacher_candidates.router, prefix="/admin/bookings", tags=["admin-booking-candidates"])
 api_router.include_router(admin_bookings.router, prefix="/admin/bookings", tags=["admin-bookings"])
 api_router.include_router(admin_packages.router, prefix="/admin/packages", tags=["admin-packages"])
 api_router.include_router(admin_student_packages.router, prefix="/admin/students", tags=["admin-student-packages"])
