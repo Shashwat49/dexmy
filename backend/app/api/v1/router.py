@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    admin, admin_dashboard, admin_students, admin_teachers, admin_bookings, admin_teacher_candidates, admin_teacher_profile_requests, admin_packages, admin_student_packages, admin_payouts, admin_finance, package_payments, package_payment_webhooks, auth, bookings, package_bookings, classroom, marketing, parents, students, teachers, users, payments, system, profiles, subjects, whatsapp,
+    admin, admin_dashboard, admin_students, admin_teachers, admin_bookings, admin_teacher_candidates, admin_teacher_profile_requests, admin_packages, admin_student_packages, admin_payouts, admin_finance, package_payments, package_payment_webhooks, auth, bookings, package_bookings, classroom, marketing, parents, students, teachers, users, payments, system, profiles, subjects, whatsapp, packages,
 )
 api_router=APIRouter()
 api_router.include_router(auth.router,prefix="/auth",tags=["auth"])
@@ -12,6 +12,7 @@ api_router.include_router(parents.router,prefix="/parents",tags=["parents"])
 api_router.include_router(bookings.router,prefix="/bookings",tags=["bookings"])
 api_router.include_router(package_bookings.router,prefix="/bookings/package",tags=["package-bookings"])
 api_router.include_router(marketing.router,tags=["marketing"])
+api_router.include_router(packages.router,prefix="/packages",tags=["packages"])
 api_router.include_router(admin.router,prefix="/admin",tags=["admin"])
 api_router.include_router(admin_dashboard.router,prefix="/admin/dashboard",tags=["admin-dashboard"])
 api_router.include_router(admin_teachers.router,prefix="/admin/teachers",tags=["admin-teachers"])
