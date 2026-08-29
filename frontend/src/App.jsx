@@ -49,6 +49,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
+      <Route path="/classroom/:sessionId" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
       <Route path="/classroom" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
       <Route path="/dashboard/teacher" element={<ProtectedRoute roles={["teacher"]}><TeacherProfileGuard><TeacherDashboard /></TeacherProfileGuard></ProtectedRoute>} />
       <Route path="/dashboard/student" element={<ProtectedRoute roles={["student"]}><StudentDashboard /></ProtectedRoute>} />
