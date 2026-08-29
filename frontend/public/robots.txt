@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /login
+Disallow: /signup
+Disallow: /dashboard
+Disallow: /api
+
+Sitemap: https://dexmyedu.com/sitemap.xml
