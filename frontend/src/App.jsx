@@ -30,6 +30,8 @@ import TeacherCalendar from "./pages/dashboard/teacher/TeacherCalendar";
 import CourseDetails from "./pages/dashboard/CourseDetails";
 import TeacherDashboardLayout from "./components/TeacherDashboardLayout";
 import Classroom from "./pages/Classroom";
+import Packages from "./pages/Packages";
+import PackageCheckout from "./pages/dashboard/PackageCheckout";
 
 const ADMIN_ROLES = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"];
 
@@ -37,6 +39,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/packages" element={<Packages />} />
+      <Route path="/checkout/package" element={<PackageCheckout />} />
       <Route path="/sat-tutoring" element={<ProgramPage slug="sat" />} />
       <Route path="/psat-tutoring" element={<ProgramPage slug="psat" />} />
       <Route path="/ap-tutoring" element={<ProgramPage slug="ap" />} />
