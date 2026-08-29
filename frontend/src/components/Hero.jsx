@@ -4,7 +4,6 @@ import { Link } from "react-router-dom";
 export default function Hero() {
   return (
     <section className="relative min-h-[78vh] sm:min-h-[82vh] md:min-h-[88vh] flex flex-col items-center justify-center text-center px-4 sm:px-6 pt-16 sm:pt-20 pb-12 sm:pb-16 overflow-hidden">
-      {/* soft red vignette behind everything */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -16,11 +15,11 @@ export default function Hero() {
       <HeroScene />
 
       <p className="relative z-[3] text-sm font-semibold tracking-[2px] uppercase text-brand-gold mb-5">
-        1-on-1 live classes, any subject
+        1-on-1 live online tutoring
       </p>
 
-      <h1 className="relative z-[3] font-display leading-[1.02] tracking-tight max-w-3xl text-[clamp(38px,10vw,84px)]">
-        Learn faster with a teacher who's{" "}
+      <h1 className="relative z-[3] font-display leading-[1.02] tracking-tight max-w-4xl text-[clamp(38px,10vw,84px)]">
+        Personalized tutoring with a teacher who's{" "}
         <span className="relative inline-block">
           actually watching
           <svg
@@ -34,9 +33,10 @@ export default function Hero() {
         you learn
       </h1>
 
-      <p className="relative z-[3] text-base sm:text-lg text-chalk-muted max-w-xl mx-auto mt-6 sm:mt-7 mb-8 sm:mb-10 leading-relaxed">
-        Dexmy pairs every student with a dedicated tutor for real one-on-one classes — live
-        whiteboard, live doubts, zero crowd.
+      <p className="relative z-[3] text-base sm:text-lg text-chalk-muted max-w-2xl mx-auto mt-6 sm:mt-7 mb-8 sm:mb-10 leading-relaxed">
+        Dexmy connects students with dedicated tutors for live 1-on-1 classes in SAT, PSAT, AP,
+        TMUA, CBSE, ICSE, IGCSE, IB MYP, GCSE and more — with personalized lessons, live doubts,
+        and zero crowded classrooms.
       </p>
 
       <div className="relative z-[3] flex gap-4 flex-wrap justify-center">
