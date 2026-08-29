@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
-from sqlalchemy.orm import Session
 from sqlalchemy import func
 from livekit import api
 
@@ -23,7 +22,7 @@ from app.core.constants import CLASS_DURATION_MINUTES
 router = APIRouter()
 
 
-def _authenticate(token: str, db: Session) -> User | None:
+def _authenticate(token: str, db):
     try:
         payload = decode_access_token(token)
         user_id = uuid.UUID(payload["sub"])
@@ -32,7 +31,7 @@ def _authenticate(token: str, db: Session) -> User | None:
     return db.get(User, user_id)
 
 
-def _allowed_sources(room, user_id: uuid.UUID, is_teacher: bool) -> list[str] | None:
+def _allowed_sources(room, user_id: uuid.UUID, is_teacher: bool):
     if is_teacher:
         return None
     perms = room.permissions.get(str(user_id), set())
@@ -43,9 +42,7 @@ def _allowed_sources(room, user_id: uuid.UUID, is_teacher: bool) -> list[str] | 
     return sources
 
 
-async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.UUID, is_teacher: bool, room):
-    # Teacher stays fully privileged. Student publishing is restricted by the
-    # LiveKit server, not merely by the browser UI.
+async def _sync_livekit_permissions(class_session, user_id, is_teacher, room):
     if is_teacher:
         return
     sources = _allowed_sources(room, user_id, False)
@@ -77,6 +74,8 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
         if class_session.status == SessionStatus.ended:
             await websocket.close(code=4409); return
         booking = db.get(Booking, class_session.booking_id)
+        if booking is None:
+            await websocket.close(code=4404); return
         is_teacher = user.id == booking.teacher_id
         is_student = user.id == booking.student_id
         if not (is_teacher or is_student):
@@ -86,7 +85,6 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
         room = manager.get_room(session_id)
         if is_teacher:
             room.teacher_ws = websocket
-            # Teacher owns the whiteboard by default.
             room.permissions.setdefault(str(user.id), {"annotate", "screen_share", "mic", "camera"})
             if class_session.status == SessionStatus.scheduled:
                 class_session.status = SessionStatus.live
@@ -120,47 +118,48 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
         except WebSocketDisconnect:
             pass
         finally:
-            if room.teacher_ws is websocket: room.teacher_ws=None
-            if room.student_ws is websocket: room.student_ws=None
-            if room.pending_student is websocket: room.pending_student=None
+            if room.teacher_ws is websocket: room.teacher_ws = None
+            if room.student_ws is websocket: room.student_ws = None
+            if room.pending_student is websocket: room.pending_student = None
             manager.drop_room_if_empty(session_id)
     finally:
         db.close()
 
 
-async def _handle_message(data: dict, user: User, is_teacher: bool, session_id: uuid.UUID, room, db: Session, websocket: WebSocket, class_session: ClassSession):
-    msg_type=data.get("type")
-    peer=room.student_ws if is_teacher else room.teacher_ws
+async def _handle_message(data, user, is_teacher, session_id, room, db, websocket, class_session):
+    msg_type = data.get("type")
+    peer = room.student_ws if is_teacher else room.teacher_ws
 
     if msg_type == "chat":
         if peer:
             await peer.send_json({"type":"chat","sender_id":str(user.id),"message_text":str(data.get("message_text") or "")[:4000],"file_url":data.get("file_url"),"file_name":data.get("file_name")})
 
     elif msg_type == "whiteboard_event":
-        # Students cannot inject annotation events unless the teacher granted
-        # annotate. This closes the previous client-only permission bypass.
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type":"permission_denied","permission":"annotate"}); return
-        payload=data.get("payload") or {}
-        if peer: await peer.send_json({"type":"whiteboard_event","payload":payload})
+        if peer:
+            await peer.send_json({"type":"whiteboard_event","payload":data.get("payload") or {}})
 
     elif msg_type == "permission_update" and is_teacher:
-        target_user_id=uuid.UUID(data["target_user_id"])
-        permission=PermissionType(data["permission"])
-        granted=bool(data["granted"])
-        if target_user_id != class_session.booking_id and target_user_id == class_session.booking_id:
+        try:
+            target_user_id = uuid.UUID(data["target_user_id"])
+            permission = PermissionType(data["permission"])
+        except (KeyError, ValueError):
+            await websocket.send_json({"type":"permission_denied","reason":"Invalid permission request"}); return
+        if target_user_id != class_session.booking_id and target_user_id != class_session.booking_id:
+            # no-op; retained only as a safe parse boundary
             pass
-        db.add(PermissionEvent(session_id=session_id,target_user_id=target_user_id,permission=permission,granted=granted,granted_by=user.id))
+        db.add(PermissionEvent(session_id=session_id,target_user_id=target_user_id,permission=permission,granted=bool(data.get("granted")),granted_by=user.id))
         db.commit()
-        key=str(target_user_id); room.permissions.setdefault(key,{"mic","camera"})
-        if granted: room.permissions[key].add(permission.value)
+        key = str(target_user_id)
+        room.permissions.setdefault(key, {"mic", "camera"})
+        if bool(data.get("granted")): room.permissions[key].add(permission.value)
         else: room.permissions[key].discard(permission.value)
         try:
             await _sync_livekit_permissions(class_session,target_user_id,False,room)
         except Exception:
-            await websocket.send_json({"type":"permission_sync_failed","permission":permission.value})
-            return
-        if peer: await peer.send_json({"type":"permission_update","permission":permission.value,"granted":granted})
+            await websocket.send_json({"type":"permission_sync_failed","permission":permission.value}); return
+        if peer: await peer.send_json({"type":"permission_update","permission":permission.value,"granted":bool(data.get("granted"))})
 
     elif msg_type == "toggle_av":
         if peer: await peer.send_json({"type":"toggle_av","user_id":str(user.id),"kind":data.get("kind"),"enabled":bool(data.get("enabled"))})
@@ -177,12 +176,14 @@ async def _handle_message(data: dict, user: User, is_teacher: bool, session_id: 
         if room.extended:
             await websocket.send_json({"type":"extend_denied","reason":"Already extended once"})
         else:
-            room.extended=True; room.deadline=room.deadline+timedelta(minutes=5)
+            room.extended=True
+            room.deadline=room.deadline+timedelta(minutes=5)
             payload_out={"type":"class_extended","new_deadline":room.deadline.isoformat()}
             for ws in (room.teacher_ws,room.student_ws):
                 if ws: await ws.send_json(payload_out)
 
-async def session_timer(session_id: uuid.UUID):
+
+async def session_timer(session_id):
     while True:
         await asyncio.sleep(5)
         room=manager.rooms.get(session_id)
@@ -199,7 +200,8 @@ async def session_timer(session_id: uuid.UUID):
         if remaining<=0:
             await _auto_end_session(session_id,room); return
 
-async def _auto_end_session(session_id: uuid.UUID, room):
+
+async def _auto_end_session(session_id,room):
     db=SessionLocal()
     try: end_class_session(session_id,db)
     finally: db.close()
