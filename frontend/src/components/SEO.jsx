@@ -2,8 +2,7 @@ import { useEffect } from "react";
 
 const SITE_URL = "https://dexmyedu.com";
 const DEFAULT_TITLE = "Dexmy | 1-on-1 Live Online Tutoring for SAT, AP, IB, IGCSE & More";
-const DEFAULT_DESCRIPTION =
-  "Dexmy provides 1-on-1 live online tutoring for SAT, PSAT, AP, TMUA, CBSE, ICSE, IGCSE, IB MYP and GCSE students with dedicated teachers and personalized learning.";
+const DEFAULT_DESCRIPTION = "Dexmy provides 1-on-1 live online tutoring for SAT, PSAT, AP, TMUA, CBSE, ICSE, IGCSE, IB MYP and GCSE students with dedicated teachers and personalized learning.";
 
 function upsertMeta(attribute, key, content) {
   let tag = document.head.querySelector(`meta[${attribute}="${key}"]`);
@@ -25,11 +24,18 @@ function upsertLink(rel, href) {
   tag.setAttribute("href", href);
 }
 
-export default function SEO({
-  title = DEFAULT_TITLE,
-  description = DEFAULT_DESCRIPTION,
-  path = "/",
-}) {
+function upsertJsonLd(id, data) {
+  let script = document.getElementById(id);
+  if (!script) {
+    script = document.createElement("script");
+    script.id = id;
+    script.type = "application/ld+json";
+    document.head.appendChild(script);
+  }
+  script.textContent = JSON.stringify(data);
+}
+
+export default function SEO({ title = DEFAULT_TITLE, description = DEFAULT_DESCRIPTION, path = "/" }) {
   useEffect(() => {
     const canonicalUrl = `${SITE_URL}${path === "/" ? "/" : path}`;
 
@@ -52,24 +58,25 @@ export default function SEO({
 
     upsertLink("canonical", canonicalUrl);
 
-    const existingSchema = document.getElementById("dexmy-organization-schema");
-    if (!existingSchema) {
-      const script = document.createElement("script");
-      script.id = "dexmy-organization-schema";
-      script.type = "application/ld+json";
-      script.textContent = JSON.stringify({
-        "@context": "https://schema.org",
-        "@type": "EducationalOrganization",
-        name: "Dexmy",
-        url: SITE_URL,
-        logo: `${SITE_URL}/dexmy-logo-bg-removed.png`,
-        description: DEFAULT_DESCRIPTION,
-        sameAs: [
-          "https://www.linkedin.com/company/dexmyedu/",
-        ],
-      });
-      document.head.appendChild(script);
-    }
+    upsertJsonLd("dexmy-organization-schema", {
+      "@context": "https://schema.org",
+      "@type": "EducationalOrganization",
+      name: "Dexmy",
+      url: SITE_URL,
+      logo: `${SITE_URL}/dexmy-logo-bg-removed.png`,
+      description: DEFAULT_DESCRIPTION,
+      sameAs: ["https://www.linkedin.com/company/dexmyedu/"],
+    });
+
+    upsertJsonLd("dexmy-page-schema", {
+      "@context": "https://schema.org",
+      "@type": "WebPage",
+      name: title,
+      description,
+      url: canonicalUrl,
+      isPartOf: { "@type": "WebSite", name: "Dexmy", url: SITE_URL },
+      publisher: { "@type": "EducationalOrganization", name: "Dexmy", url: SITE_URL },
+    });
   }, [title, description, path]);
 
   return null;
