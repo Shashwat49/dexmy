@@ -1,0 +1,27 @@
+import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import SEO from "../components/SEO";
+import { getPackages } from "../api/packages";
+
+const DEFAULTS = [
+  { class_count: 25, name: "25 Classes Package", inr: 500, usd: 6 },
+  { class_count: 50, name: "50 Classes Package", inr: 475, usd: 5.75 },
+  { class_count: 75, name: "75 Classes Package", inr: 450, usd: 5.5 },
+  { class_count: 100, name: "100 Classes Package", inr: 425, usd: 5.25 },
+  { class_count: 0, name: "Customize Your Package", inr: 550, usd: 6.5, is_custom: true },
+];
+
+export default function Packages() {
+  const [packages, setPackages] = useState([]);
+  const [currency, setCurrency] = useState("INR");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => { getPackages().then(setPackages).catch(() => setError("Unable to load packages right now.")).finally(() => setLoading(false)); }, []);
+  const visible = useMemo(() => {
+    const active = packages.filter((p) => p.is_active && p.currency === currency);
+    if (active.length) return active;
+    return DEFAULTS.map((p) => ({ ...p, currency, price: currency === "INR" ? p.inr : p.usd }));
+  }, [packages, currency]);
+  return <div className="min-h-screen bg-void text-chalk"><SEO title="Packages | Dexmy" description="Explore Dexmy tutoring class packages and per-class pricing." path="/packages" /><header className="border-b border-chalk-faint px-6 py-5"><div className="mx-auto max-w-6xl flex items-center justify-between gap-4"><Link to="/" className="font-display text-2xl text-brand-red -skew-x-6">Dexmy</Link><Link to="/login" className="text-sm text-chalk-muted hover:text-chalk">Login</Link></div></header><main className="mx-auto max-w-6xl px-6 py-14"><div className="text-center max-w-2xl mx-auto"><p className="text-sm font-semibold uppercase tracking-widest text-brand-red">Explore Packages</p><h1 className="mt-3 text-4xl md:text-5xl font-semibold">Choose your learning package</h1><p className="mt-4 text-chalk-muted">Simple per-class pricing. Pick the package that fits your learning goals.</p><div className="mt-7 inline-flex rounded-xl border border-chalk-faint bg-panel p-1"><button onClick={() => setCurrency("INR")} className={`px-5 py-2 rounded-lg text-sm font-semibold ${currency === "INR" ? "bg-brand-red text-white" : "text-chalk-muted"}`}>INR ₹</button><button onClick={() => setCurrency("USD")} className={`px-5 py-2 rounded-lg text-sm font-semibold ${currency === "USD" ? "bg-brand-red text-white" : "text-chalk-muted"}`}>USD $</button></div></div>{error && <p className="mt-8 text-center text-sm text-chalk-muted">{error}</p>}{loading ? <div className="py-20 text-center text-chalk-muted">Loading packages…</div> : <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{visible.map((p) => <PackageCard key={`${p.name}-${p.currency}`} pkg={p} currency={currency} />)}</div>}<p className="mt-10 text-center text-xs text-chalk-muted">The price shown is per class. Your selected package total is calculated at checkout.</p></main></div>;
+}
+function PackageCard({ pkg, currency }) { const price = Number(pkg.price); const custom = pkg.is_custom || !pkg.class_count; return <article className="rounded-2xl border border-chalk-faint bg-panel p-6 flex flex-col"><div className="text-sm text-chalk-muted">{custom ? "Flexible" : `${pkg.class_count} live classes`}</div><h2 className="mt-2 text-xl font-semibold">{pkg.name}</h2><div className="mt-7"><span className="text-4xl font-semibold">{currency === "INR" ? "₹" : "$"}{price.toFixed(2).replace(/\.00$/, "")}</span><span className="ml-2 text-sm text-chalk-muted">/ class</span></div><p className="mt-3 text-sm text-chalk-muted">{custom ? "Build a package around your required number of classes." : `${pkg.class_count} classes at ${currency === "INR" ? "₹" : "$"}${(price * pkg.class_count).toFixed(2).replace(/\.00$/, "")} total.`}</p><Link to={`/dashboard/student/packages?package=${pkg.id || "custom"}&currency=${currency}`} className="mt-7 inline-flex justify-center rounded-xl bg-brand-red px-4 py-3 text-sm font-semibold">Choose package</Link></article>; }
