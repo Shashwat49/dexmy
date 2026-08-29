@@ -5,9 +5,18 @@ from app.core.config import settings
 
 app = FastAPI(title=settings.APP_NAME)
 
+# Keep the production domain explicitly allowed so a stale FRONTEND_ORIGIN
+# environment variable cannot take the production site offline. The env value
+# is still supported for additional environments such as Vercel previews.
+allowed_origins = list(dict.fromkeys([
+    settings.FRONTEND_ORIGIN,
+    "https://dexmyedu.com",
+    "https://www.dexmyedu.com",
+]))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_ORIGIN],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
