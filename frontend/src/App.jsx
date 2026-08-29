@@ -29,6 +29,7 @@ import TeacherProfileView from "./pages/dashboard/teacher/TeacherProfileView";
 import TeacherCalendar from "./pages/dashboard/teacher/TeacherCalendar";
 import CourseDetails from "./pages/dashboard/CourseDetails";
 import TeacherDashboardLayout from "./components/TeacherDashboardLayout";
+import Classroom from "./pages/Classroom";
 
 const ADMIN_ROLES = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"];
 
@@ -48,6 +49,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
+      <Route path="/classroom" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
       <Route path="/dashboard/teacher" element={<ProtectedRoute roles={["teacher"]}><TeacherProfileGuard><TeacherDashboard /></TeacherProfileGuard></ProtectedRoute>} />
       <Route path="/dashboard/student" element={<ProtectedRoute roles={["student"]}><StudentDashboard /></ProtectedRoute>} />
       <Route path="/dashboard/student/book" element={<ProtectedRoute roles={["student"]}><BookClass /></ProtectedRoute>} />
