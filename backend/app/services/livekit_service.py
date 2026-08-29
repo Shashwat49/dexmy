@@ -5,10 +5,19 @@ from livekit import api
 from app.core.config import settings
 
 
-def create_join_token(room_name: str, identity: str, name: str, can_publish: bool) -> str:
-    """can_publish controls camera/mic. Screen-share and annotate are handled
-    separately at the app layer (see permission_events) since LiveKit grants
-    are coarse — we gate those finer actions in our own WebSocket handler."""
+def create_join_token(
+    room_name: str,
+    identity: str,
+    name: str,
+    can_publish: bool,
+    publish_sources: list[str] | None = None,
+) -> str:
+    """Create a short-lived, least-privilege classroom token.
+
+    ``can_publish_sources`` is enforced by LiveKit itself. This is important for
+    classroom moderation: a student can initially publish camera/microphone but
+    cannot publish screen-share unless the teacher explicitly grants it.
+    """
     token = (
         api.AccessToken(settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
         .with_identity(identity)
@@ -20,6 +29,7 @@ def create_join_token(room_name: str, identity: str, name: str, can_publish: boo
                 can_publish=can_publish,
                 can_subscribe=True,
                 can_publish_data=True,
+                can_publish_sources=publish_sources,
             )
         )
         .with_ttl(timedelta(hours=3))
