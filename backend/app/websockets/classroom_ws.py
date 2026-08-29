@@ -26,7 +26,7 @@ def _authenticate(token,db):
 
 def _allowed_sources(room,user_id,is_teacher):
     if is_teacher:return None
-    perms=room.permissions.get(str(user_id),set()); sources=[]
+    perms=room.permissions.get(str(user_id),set());sources=[]
     if "camera" in perms:sources.append("camera")
     if "mic" in perms:sources.append("microphone")
     if "screen_share" in perms:sources.append("screen_share")
@@ -57,11 +57,9 @@ async def classroom_socket(websocket:WebSocket,session_id:uuid.UUID,token:str=Qu
         if is_teacher:
             room.teacher_ws=websocket;room.permissions.setdefault(str(user.id),{"annotate","screen_share","mic","camera"})
             if class_session.status==SessionStatus.scheduled:
-                class_session.status=SessionStatus.live;class_session.started_at=func.now();db.commit()
-                room.deadline=datetime.now(timezone.utc)+timedelta(minutes=CLASS_DURATION_MINUTES);room.timer_task=asyncio.create_task(session_timer(session_id))
+                class_session.status=SessionStatus.live;class_session.started_at=func.now();db.commit();room.deadline=datetime.now(timezone.utc)+timedelta(minutes=CLASS_DURATION_MINUTES);room.timer_task=asyncio.create_task(session_timer(session_id))
             if room.pending_student:
-                room.student_ws=room.pending_student;room.pending_student=None;sid=booking.student_id;room.permissions.setdefault(str(sid),{"mic","camera"})
-                await room.student_ws.send_json({"type":"admitted"})
+                room.student_ws=room.pending_student;room.pending_student=None;sid=booking.student_id;room.permissions.setdefault(str(sid),{"mic","camera"});await room.student_ws.send_json({"type":"admitted"})
                 try:await _sync_livekit_permissions(class_session,sid,False,room)
                 except Exception:pass
         else:
@@ -73,7 +71,7 @@ async def classroom_socket(websocket:WebSocket,session_id:uuid.UUID,token:str=Qu
                 except Exception:pass
         try:
             while True:
-                data=await websocket.receive_json();await _handle_message(data,user,is_teacher,session_id,room,db,websocket,class_session)
+                data=await websocket.receive_json();await _handle_message(data,user,is_teacher,session_id,room,db,websocket,class_session,booking)
         except WebSocketDisconnect:pass
         finally:
             if room.teacher_ws is websocket:room.teacher_ws=None
@@ -82,7 +80,7 @@ async def classroom_socket(websocket:WebSocket,session_id:uuid.UUID,token:str=Qu
             manager.drop_room_if_empty(session_id)
     finally:db.close()
 
-async def _handle_message(data,user,is_teacher,session_id,room,db,websocket,class_session):
+async def _handle_message(data,user,is_teacher,session_id,room,db,websocket,class_session,booking):
     msg_type=data.get("type");peer=room.student_ws if is_teacher else room.teacher_ws
     if msg_type=="chat":
         if peer:await peer.send_json({"type":"chat","sender_id":str(user.id),"message_text":str(data.get("message_text") or "")[:4000],"file_url":data.get("file_url"),"file_name":data.get("file_name")})
@@ -92,11 +90,8 @@ async def _handle_message(data,user,is_teacher,session_id,room,db,websocket,clas
     elif msg_type=="permission_update" and is_teacher:
         try:target_user_id=uuid.UUID(data["target_user_id"]);permission=PermissionType(data["permission"]);granted=bool(data["granted"])
         except(KeyError,ValueError):await websocket.send_json({"type":"permission_denied","reason":"Invalid permission request"});return
-        if target_user_id!=class_session.booking_id:
-            student_id=db.get(Booking,class_session.booking_id).student_id
-            if target_user_id!=student_id:await websocket.send_json({"type":"permission_denied","reason":"Invalid classroom participant"});return
-        db.add(PermissionEvent(session_id=session_id,target_user_id=target_user_id,permission=permission,granted=granted,granted_by=user.id));db.commit()
-        key=str(target_user_id);room.permissions.setdefault(key,{"mic","camera"})
+        if target_user_id!=booking.student_id:await websocket.send_json({"type":"permission_denied","reason":"Invalid classroom participant"});return
+        db.add(PermissionEvent(session_id=session_id,target_user_id=target_user_id,permission=permission,granted=granted,granted_by=user.id));db.commit();key=str(target_user_id);room.permissions.setdefault(key,{"mic","camera"})
         if granted:room.permissions[key].add(permission.value)
         else:room.permissions[key].discard(permission.value)
         try:await _sync_livekit_permissions(class_session,target_user_id,False,room)
