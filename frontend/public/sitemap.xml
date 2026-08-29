@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://dexmyedu.com/</loc>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
-  </url>
+  <url><loc>https://dexmyedu.com/</loc></url>
+  <url><loc>https://dexmyedu.com/sat-tutoring</loc></url>
+  <url><loc>https://dexmyedu.com/psat-tutoring</loc></url>
+  <url><loc>https://dexmyedu.com/ap-tutoring</loc></url>
+  <url><loc>https://dexmyedu.com/tmua-tutoring</loc></url>
+  <url><loc>https://dexmyedu.com/igcse-tutoring</loc></url>
+  <url><loc>https://dexmyedu.com/ib-myp-tutoring</loc></url>
+  <url><loc>https://dexmyedu.com/gcse-tutoring</loc></url>
+  <url><loc>https://dexmyedu.com/cbse-tutoring</loc></url>
+  <url><loc>https://dexmyedu.com/icse-tutoring</loc></url>
 </urlset>
