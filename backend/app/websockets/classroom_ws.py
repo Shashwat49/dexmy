@@ -58,36 +58,20 @@ def _permission_payload(room, user_id: uuid.UUID) -> dict[str, bool]:
 
 
 async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.UUID, room) -> None:
-    """Synchronize only media permissions with the already-connected LiveKit participant.
-
-    Annotation is an application-level classroom permission and must never call
-    LiveKit. The participant is explicitly checked before UpdateParticipant so
-    a WebSocket-presence race cannot make the teacher's permission control fail.
-    """
+    """Synchronize only media permissions with the already-connected LiveKit participant."""
     sources = _allowed_sources(room, user_id)
     last_error = None
-
     for attempt in range(10):
-        lkapi = api.LiveKitAPI(
-            settings.LIVEKIT_URL,
-            settings.LIVEKIT_API_KEY,
-            settings.LIVEKIT_API_SECRET,
-        )
+        lkapi = api.LiveKitAPI(settings.LIVEKIT_URL, settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
         try:
             try:
-                await lkapi.room.get_participant(
-                    api.RoomParticipantIdentity(
-                        room=class_session.livekit_room_name,
-                        identity=str(user_id),
-                    )
-                )
+                await lkapi.room.get_participant(api.RoomParticipantIdentity(room=class_session.livekit_room_name, identity=str(user_id)))
             except Exception as exc:
                 last_error = exc
                 if attempt < 9:
                     await asyncio.sleep(0.35)
                     continue
                 raise
-
             await lkapi.room.update_participant(
                 api.UpdateParticipantRequest(
                     room=class_session.livekit_room_name,
@@ -107,18 +91,12 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
                 await asyncio.sleep(0.35)
         finally:
             await lkapi.aclose()
-
     raise last_error or RuntimeError("LiveKit permission synchronization failed")
 
 
 def _restore_student_permissions(session_id: uuid.UUID, student_id: uuid.UUID, db) -> set[str]:
     permissions = _default_student_permissions()
-    events = (
-        db.query(PermissionEvent)
-        .filter(PermissionEvent.session_id == session_id, PermissionEvent.target_user_id == student_id)
-        .order_by(desc(PermissionEvent.created_at))
-        .all()
-    )
+    events = db.query(PermissionEvent).filter(PermissionEvent.session_id == session_id, PermissionEvent.target_user_id == student_id).order_by(desc(PermissionEvent.created_at)).all()
     latest = {}
     for event in events:
         if event.permission not in latest:
@@ -132,12 +110,7 @@ def _restore_student_permissions(session_id: uuid.UUID, student_id: uuid.UUID, d
 
 
 async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, db) -> None:
-    snapshots = (
-        db.query(WhiteboardSnapshot)
-        .filter(WhiteboardSnapshot.session_id == session_id)
-        .order_by(WhiteboardSnapshot.page_number.asc(), WhiteboardSnapshot.created_at.desc())
-        .all()
-    )
+    snapshots = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id).order_by(WhiteboardSnapshot.page_number.asc(), WhiteboardSnapshot.created_at.desc()).all()
     latest_by_page = {}
     for snapshot in snapshots:
         latest_by_page.setdefault(snapshot.page_number, snapshot)
@@ -145,8 +118,7 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
         return
     pages = [
         {"page_number": n, "image_url": get_presigned_url(s.image_url, expires_in=3600)}
-        for n, s in sorted(latest_by_page.items())
-        if s.image_url
+        for n, s in sorted(latest_by_page.items()) if s.image_url
     ]
     current_page = max(latest_by_page)
     snapshot = latest_by_page[current_page]
@@ -183,10 +155,8 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
         if not (is_teacher or is_student):
             await websocket.close(code=4403)
             return
-
         await websocket.accept()
         room = manager.get_room(session_id)
-
         if is_teacher:
             room.teacher_ws = websocket
             room.permissions[str(user.id)] = {"annotate", "screen_share", "mic", "camera"}
@@ -204,22 +174,14 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                     room.deadline = datetime.now(timezone.utc) + timedelta(minutes=CLASS_DURATION_MINUTES)
             if room.timer_task is None or room.timer_task.done():
                 room.timer_task = asyncio.create_task(session_timer(session_id))
-
             student_waiting = room.student_ws is not None or room.pending_student is not None
-            await websocket.send_json({
-                "type": "class_started",
-                "deadline": room.deadline.isoformat(),
-                "student_present": student_waiting,
-                "student_id": str(booking.student_id) if student_waiting else None,
-            })
-
+            await websocket.send_json({"type": "class_started", "deadline": room.deadline.isoformat(), "student_present": student_waiting, "student_id": str(booking.student_id) if student_waiting else None})
             if room.student_ws:
                 student = db.get(User, booking.student_id)
                 if student:
                     room.permissions[str(booking.student_id)] = _restore_student_permissions(session_id, booking.student_id, db)
                     await websocket.send_json({"type": "participant_info", "role": "student", "name": student.full_name})
                     await websocket.send_json({"type": "permissions_state", "permissions": _permission_payload(room, booking.student_id)})
-
             if room.pending_student:
                 room.student_ws = room.pending_student
                 room.pending_student = None
@@ -229,7 +191,8 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 await room.student_ws.send_json({"type": "admitted", "deadline": room.deadline.isoformat()})
                 await room.student_ws.send_json({"type": "participant_info", "role": "teacher", "name": user.full_name})
                 await room.student_ws.send_json({"type": "permissions_state", "permissions": permissions_state})
-                await websocket.send_json({"type": "student_joined", "user_id": str(student_id), "name": db.get(User, student_id).full_name if db.get(User, student_id) else "Student"})
+                student = db.get(User, student_id)
+                await websocket.send_json({"type": "student_joined", "user_id": str(student_id), "name": student.full_name if student else "Student"})
                 await websocket.send_json({"type": "permissions_state", "permissions": permissions_state})
         else:
             room.permissions[str(user.id)] = _restore_student_permissions(session_id, user.id, db)
@@ -246,7 +209,6 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 await websocket.send_json({"type": "permissions_state", "permissions": permissions_state})
                 await room.teacher_ws.send_json({"type": "student_joined", "user_id": str(user.id), "name": user.full_name})
                 await room.teacher_ws.send_json({"type": "permissions_state", "permissions": permissions_state})
-
         await _send_latest_whiteboard(session_id, websocket, db)
         while True:
             data = await websocket.receive_json()
@@ -311,38 +273,24 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         if target_user_id != booking.student_id:
             await websocket.send_json({"type": "permission_denied", "reason": "Invalid classroom participant"})
             return
-
         db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=granted, granted_by=user.id))
         db.commit()
-
         key = str(target_user_id)
         room.permissions.setdefault(key, _default_student_permissions())
         if granted:
             room.permissions[key].add(permission.value)
         else:
             room.permissions[key].discard(permission.value)
-
-        # The classroom permission state is authoritative independently of LiveKit.
-        # Send it immediately so the UI never appears frozen while LiveKit catches up.
         event = {"type": "permission_update", "permission": permission.value, "granted": granted}
         if peer:
             await peer.send_json(event)
         await websocket.send_json(event)
-
-        # Annotation is enforced by our classroom WebSocket, not LiveKit.
-        # Calling UpdateParticipant for it was causing the misleading
-        # "could not update annotate permission" error.
         if permission == PermissionType.annotate:
             return
-
         try:
             await _sync_livekit_permissions(class_session, target_user_id, room)
         except Exception as exc:
-            await websocket.send_json({
-                "type": "permission_sync_failed",
-                "permission": permission.value,
-                "reason": str(exc)[:300],
-            })
+            await websocket.send_json({"type": "permission_sync_failed", "permission": permission.value, "reason": str(exc)[:300]})
     elif msg_type == "toggle_av":
         if peer:
             await peer.send_json({"type": "toggle_av", "user_id": str(user.id), "kind": data.get("kind"), "enabled": bool(data.get("enabled"))})
@@ -358,6 +306,17 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data=data.get("canvas_json") or {}, image_url=image_url, page_number=page_number))
         db.commit()
         await websocket.send_json({"type": "snapshot_saved", "page_number": page_number})
+    elif msg_type == "remove_pdf" and is_teacher:
+        snapshots = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id).all()
+        for snapshot in snapshots:
+            snapshot.image_url = None
+        db.commit()
+        for ws in (room.teacher_ws, room.student_ws):
+            if ws:
+                try:
+                    await ws.send_json({"type": "pdf_removed"})
+                except Exception:
+                    pass
     elif msg_type == "extend_class" and is_teacher:
         if room.extended:
             await websocket.send_json({"type": "extend_denied", "reason": "Already extended once"})
