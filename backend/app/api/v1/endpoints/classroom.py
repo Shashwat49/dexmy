@@ -4,7 +4,7 @@ from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.booking import Booking
-from app.models.classroom import ClassSession
+from app.models.classroom import ClassSession, PermissionEvent, PermissionType
 from app.models.user import User
 from app.schemas.classroom import JoinTokenRequest, JoinTokenResponse, ClassSessionRead, ClassNotesRead
 from app.services.livekit_service import create_join_token
@@ -15,12 +15,45 @@ from app.services.session_lifecycle import end_class_session
 from app.services.pdf_render_service import render_pdf_to_images
 from app.websockets.connection_manager import manager
 from pydantic import BaseModel
+from sqlalchemy import desc
 
 router = APIRouter()
 
 class FileUploadResponse(BaseModel):
     file_url: str
     file_name: str
+
+def _student_publish_sources(session_id: uuid.UUID, student_id: uuid.UUID, db: Session) -> list[str]:
+    """Return the student's currently granted LiveKit publish sources.
+
+    Camera and microphone are the classroom baseline. Any persisted teacher
+    permission decisions override those defaults; this keeps a newly issued
+    LiveKit token aligned with the classroom WebSocket permission state.
+    """
+    sources = {"camera", "microphone"}
+    events = (
+        db.query(PermissionEvent)
+        .filter(PermissionEvent.session_id == session_id, PermissionEvent.target_user_id == student_id)
+        .order_by(desc(PermissionEvent.created_at))
+        .all()
+    )
+    latest = {}
+    for event in events:
+        if event.permission not in latest:
+            latest[event.permission] = event.granted
+    mapping = {
+        PermissionType.camera: "camera",
+        PermissionType.mic: "microphone",
+        PermissionType.screen_share: "screen_share",
+    }
+    for permission, granted in latest.items():
+        source = mapping.get(permission)
+        if source:
+            if granted:
+                sources.add(source)
+            else:
+                sources.discard(source)
+    return sorted(sources)
 
 @router.post("/join-token", response_model=JoinTokenResponse)
 def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -34,8 +67,8 @@ def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_c
     is_student = current_user.id == booking.student_id
     if not (is_teacher or is_student):
         raise HTTPException(status_code=403, detail="You are not part of this classroom")
-    sources = None if is_teacher else []
-    token = create_join_token(room_name=session.livekit_room_name, identity=str(current_user.id), name=current_user.full_name, can_publish=is_teacher, publish_sources=sources)
+    sources = None if is_teacher else _student_publish_sources(payload.session_id, current_user.id, db)
+    token = create_join_token(room_name=session.livekit_room_name, identity=str(current_user.id), name=current_user.full_name, can_publish=is_teacher or bool(sources), publish_sources=sources)
     return JoinTokenResponse(livekit_token=token, livekit_url=settings.LIVEKIT_URL, room_name=session.livekit_room_name)
 
 @router.post("/sessions/{session_id}/end", response_model=ClassNotesRead)
@@ -106,23 +139,15 @@ async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(.
         raise HTTPException(status_code=400, detail="Could not read PDF")
     if len(pages_raw) > 50:
         raise HTTPException(status_code=400, detail="PDF too long (50 pages max)")
-
     pages = []
     stored_pages = []
     for i, img in enumerate(pages_raw, 1):
         key = save_bytes_file(img, f"annotate_{session_id}_p{i}", "png")
         stored_pages.append((i, key))
         pages.append(FileUploadResponse(file_url=get_presigned_url(key, expires_in=86400), file_name=f"page_{i}.png"))
-
     for i, key in stored_pages:
-        db.add(WhiteboardSnapshot(
-            session_id=session_id,
-            snapshot_data={"strokes": []},
-            image_url=key,
-            page_number=i,
-        ))
+        db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data={"strokes": []}, image_url=key, page_number=i))
     db.commit()
-
     payload = {"type": "pdf_pages_ready", "pages": [{"page_number": i, "image_url": get_presigned_url(key, expires_in=86400)} for i, key in stored_pages]}
     room = manager.get_room(session_id)
     for ws in (room.teacher_ws, room.student_ws):
