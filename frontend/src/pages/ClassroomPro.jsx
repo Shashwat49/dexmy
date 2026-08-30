@@ -334,8 +334,8 @@ export default function ClassroomPro() {
           if (msg.type === "permission_update") {
             setPermissions((p) => ({ ...p, [msg.permission]: msg.granted }));
             if (!msg.granted && msg.permission === "screen_share") setScreen(false);
-            if (!msg.granted && msg.permission === "camera") { setCamera(false); room.localParticipant.setCameraEnabled(false).catch(() => {}); }
-            if (!msg.granted && msg.permission === "mic") { setMic(false); room.localParticipant.setMicrophoneEnabled(false).catch(() => {}); }
+            if (!msg.granted && msg.permission === "camera") { setCamera(false); room.localParticipant.setCameraEnabled(false).catch(() => { }); }
+            if (!msg.granted && msg.permission === "mic") { setMic(false); room.localParticipant.setMicrophoneEnabled(false).catch(() => { }); }
           }
           if (msg.type === "pdf_pages_ready") {
             setPages(msg.pages || []);
@@ -350,18 +350,18 @@ export default function ClassroomPro() {
               ? msg.pages
               : (msg.image_url
                 ? [{
-                    page_number: msg.page_number || 1,
-                    image_url: msg.image_url
-                  }]
+                  page_number: msg.page_number || 1,
+                  image_url: msg.image_url
+                }]
                 : []);
 
             // Never blindly replace local history. The server snapshot may
             // have been produced before a local stroke reached the backend.
             const serverStrokes = Array.isArray(msg.canvas_json?.strokes)
               ? msg.canvas_json.strokes.map((stroke) => ({
-                  ...stroke,
-                  id: stroke.id || crypto.randomUUID()
-                }))
+                ...stroke,
+                id: stroke.id || crypto.randomUUID()
+              }))
               : [];
 
             const serverIds = new Set(serverStrokes.map((stroke) => stroke.id));
@@ -444,9 +444,43 @@ export default function ClassroomPro() {
           if (msg.type === "permission_sync_failed") setNotice(`Could not update ${msg.permission || "student"} permission. Please retry.`);
           if (msg.type === "extend_prompt") setNotice(`Class ends in about ${Math.ceil(msg.seconds_remaining / 60)} minutes.`);
           if (msg.type === "class_extended") { setDeadline(msg.new_deadline); setNotice("Class extended by 5 minutes."); }
-          if (msg.type === "session_ended") { setStatus("Class ended"); setTimeout(() => navigate("/dashboard"), 1600); }
+          if (msg.type === "session_ended") {
+            clearTimeout(reconnectTimer);
+            ws.close(1000, "Class ended");
+            setStatus("Class ended");
+            setTimeout(() => navigate("/dashboard"), 1600);
+          }
         };
-        ws.onclose = () => { if (!disposedRef.current) { setStatus("Classroom connection closed — retrying…"); reconnectTimer = setTimeout(connect, 2500); } };
+        ws.onclose = (event) => {
+          if (disposedRef.current) return;
+
+          if (event.code === 4409) {
+            setStatus("This class has already ended.");
+            setNotice("This classroom session has ended. Please join an active class.");
+            return;
+          }
+
+          if (event.code === 4404) {
+            setStatus("Classroom not found.");
+            setNotice("This classroom session no longer exists.");
+            return;
+          }
+
+          if (event.code === 4403) {
+            setStatus("Access denied.");
+            setNotice("You are not authorized to join this classroom.");
+            return;
+          }
+
+          if (event.code === 4401) {
+            setStatus("Authentication failed.");
+            setNotice("Your session has expired. Please log in again.");
+            return;
+          }
+
+          setStatus("Classroom connection closed — retrying…");
+          reconnectTimer = setTimeout(connect, 2500);
+        };
       } catch (error) {
         if (!disposedRef.current) { setStatus(error.response?.data?.detail || error.message || "Unable to join classroom"); reconnectTimer = setTimeout(connect, 3500); }
       }
@@ -534,7 +568,7 @@ export default function ClassroomPro() {
               <div id="remote-stage" className="relative h-full rounded-lg overflow-hidden bg-black"><span className="absolute z-10 top-2 left-2 px-2 py-1 rounded bg-black/60 text-[10px]">{peerLabel}</span><div id="remote-audio" className="hidden" /><div className="absolute inset-0 grid place-items-center text-xs text-slate-600">Camera off</div></div>
               <div id="local-stage" className="absolute right-4 bottom-4 w-24 aspect-video rounded-lg overflow-hidden border border-white/20 bg-slate-800 shadow-lg"><span className="absolute z-10 top-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-[8px]">{localLabel}</span></div>
             </div>
-            {isTeacher && <div className="px-3 pb-2"><div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Student permissions</div><div className="grid grid-cols-2 gap-1.5">{[["mic","Mic"],["camera","Camera"],["annotate","Annotate"],["screen_share","Screen share"]].map(([key,label]) => <button key={key} onClick={() => setPermission(key, !permissions[key])} className={`px-2 py-2 rounded-md text-[10px] ${permissions[key] ? "bg-emerald-600/80" : "bg-white/5 text-slate-400"}`}>{permissions[key] ? "✓ " : ""}{label}</button>)}</div></div>}
+            {isTeacher && <div className="px-3 pb-2"><div className="text-[10px] uppercase tracking-wider text-slate-500 mb-1.5">Student permissions</div><div className="grid grid-cols-2 gap-1.5">{[["mic", "Mic"], ["camera", "Camera"], ["annotate", "Annotate"], ["screen_share", "Screen share"]].map(([key, label]) => <button key={key} onClick={() => setPermission(key, !permissions[key])} className={`px-2 py-2 rounded-md text-[10px] ${permissions[key] ? "bg-emerald-600/80" : "bg-white/5 text-slate-400"}`}>{permissions[key] ? "✓ " : ""}{label}</button>)}</div></div>}
             <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2">{chat.length === 0 && <div className="h-full grid place-items-center text-xs text-slate-600">No messages yet</div>}{chat.map((item, i) => <div key={i} className={`flex ${item.mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs ${item.mine ? "bg-red-600" : "bg-white/10"}`}>{item.file_url ? <a href={item.file_url} target="_blank" rel="noreferrer" className="underline">{item.file_name || "Open file"}</a> : item.text}</div></div>)}</div>
             <form onSubmit={sendMessage} className="shrink-0 p-2 border-t border-white/10 flex gap-2"><label className="shrink-0 h-9 w-9 grid place-items-center rounded-lg bg-white/5 cursor-pointer">＋<input hidden type="file" onChange={(e) => uploadChatFile(e.target.files?.[0])} /></label><input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Message…" className="min-w-0 flex-1 h-9 rounded-lg bg-white/5 px-3 text-xs outline-none" /><button className="h-9 px-3 rounded-lg bg-red-600 text-xs">Send</button></form>
           </div>
