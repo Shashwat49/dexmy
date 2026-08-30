@@ -54,6 +54,7 @@ export default function ClassroomLiveAnnotation() {
   const wrapperRef = useRef(null);
   const overlayRef = useRef(null);
   const currentRef = useRef(null);
+  const liveStrokesRef = useRef(new Map());
   const lastSentRef = useRef(0);
   const canvasRef = useRef(null);
 
@@ -64,41 +65,32 @@ export default function ClassroomLiveAnnotation() {
     let liveSocket = null;
 
     const positionOverlay = () => {
-      const canvas = canvasRef.current;
-      const overlay = overlayRef.current;
-      const wrapper = wrapperRef.current;
+      const canvas = canvasRef.current; const overlay = overlayRef.current; const wrapper = wrapperRef.current;
       if (!canvas || !overlay || !wrapper) return;
       const cr = canvas.getBoundingClientRect(); const wr = wrapper.getBoundingClientRect();
-      overlay.style.left = `${cr.left - wr.left}px`;
-      overlay.style.top = `${cr.top - wr.top}px`;
-      overlay.style.width = `${cr.width}px`;
-      overlay.style.height = `${cr.height}px`;
+      overlay.style.left = `${cr.left - wr.left}px`; overlay.style.top = `${cr.top - wr.top}px`;
+      overlay.style.width = `${cr.width}px`; overlay.style.height = `${cr.height}px`;
     };
-
     const findCanvas = () => {
       const canvas = document.querySelector('canvas.absolute.inset-0');
       if (canvas) { canvasRef.current = canvas; positionOverlay(); }
       return canvas;
     };
-
     const getPage = () => {
       const pageText = [...document.querySelectorAll("span")].find((el) => /^Page \d+\/\d+$/.test(el.textContent?.trim() || ""));
       return Number(pageText?.textContent?.match(/Page (\d+)/)?.[1] || 1);
     };
-
     const point = (event, canvas) => {
       const r = canvas.getBoundingClientRect();
       return { x: Math.max(0, Math.min(W, (event.clientX - r.left) * W / r.width)), y: Math.max(0, Math.min(H, (event.clientY - r.top) * H / r.height)) };
     };
-
-    const sendLive = (stroke, final = false) => {
+    const sendLive = (stroke, final = false, append = false) => {
       if (!liveSocket || liveSocket.readyState !== NativeWebSocket.OPEN) return;
       const now = performance.now();
       if (!final && now - lastSentRef.current < INTERVAL) return;
       lastSentRef.current = now;
-      liveSocket.send(JSON.stringify({ type: "whiteboard_live", payload: { stroke, page_number: getPage(), final } }));
+      liveSocket.send(JSON.stringify({ type: "whiteboard_live", payload: { stroke, page_number: getPage(), final, append } }));
     };
-
     const getTool = () => {
       const selected = [...document.querySelectorAll("button")].find((b) => b.className.includes("bg-red-600"));
       const label = selected?.textContent?.trim().toLowerCase() || "pen";
@@ -106,44 +98,36 @@ export default function ClassroomLiveAnnotation() {
       if (label.includes("rectangle")) return "rect";
       return label;
     };
-
     const onDown = (event) => {
       if (user.role !== "teacher") return;
       const canvas = findCanvas(); if (!canvas) return;
-      const tool = getTool();
-      if (["select", "text", "sticky"].some((x) => tool.includes(x))) return;
+      const tool = getTool(); if (["select", "text", "sticky"].some((x) => tool.includes(x))) return;
       const color = document.querySelector('input[aria-label="Pen color"]')?.value || "#111827";
       const width = Number(document.querySelector('input[aria-label="Pen size"]')?.value || 3);
       currentRef.current = { id: crypto.randomUUID(), tool, color, width, points: [point(event, canvas)] };
-      const ctx = overlayRef.current?.getContext("2d"); if (ctx) drawPreview(ctx, currentRef.current);
-      sendLive(currentRef.current);
+      drawPreview(overlayRef.current.getContext("2d"), currentRef.current);
+      sendLive({ ...currentRef.current }, false, false);
     };
     const onMove = (event) => {
       const stroke = currentRef.current; const canvas = canvasRef.current || findCanvas();
       if (!stroke || !canvas) return;
-      stroke.points.push(point(event, canvas));
-      const ctx = overlayRef.current?.getContext("2d"); if (ctx) drawPreview(ctx, stroke);
-      sendLive({ ...stroke, points: stroke.points.slice(-64) });
+      const nextPoint = point(event, canvas); stroke.points.push(nextPoint);
+      drawPreview(overlayRef.current.getContext("2d"), stroke);
+      sendLive({ ...stroke, points: [nextPoint] }, false, true);
     };
     const onUp = () => {
       const stroke = currentRef.current; if (!stroke) return;
-      sendLive(stroke, true); currentRef.current = null;
+      sendLive(stroke, true, false); currentRef.current = null;
       overlayRef.current?.getContext("2d")?.clearRect(0, 0, W, H);
     };
-
     const bind = () => {
-      const canvas = findCanvas();
-      if (!canvas || canvas.dataset.liveAnnotationBound === "1") return null;
+      const canvas = findCanvas(); if (!canvas || canvas.dataset.liveAnnotationBound === "1") return null;
       canvas.dataset.liveAnnotationBound = "1";
-      canvas.addEventListener("pointerdown", onDown, true);
-      canvas.addEventListener("pointermove", onMove, true);
-      canvas.addEventListener("pointerup", onUp, true);
-      canvas.addEventListener("pointercancel", onUp, true);
+      canvas.addEventListener("pointerdown", onDown, true); canvas.addEventListener("pointermove", onMove, true);
+      canvas.addEventListener("pointerup", onUp, true); canvas.addEventListener("pointercancel", onUp, true);
       return () => {
-        canvas.removeEventListener("pointerdown", onDown, true);
-        canvas.removeEventListener("pointermove", onMove, true);
-        canvas.removeEventListener("pointerup", onUp, true);
-        canvas.removeEventListener("pointercancel", onUp, true);
+        canvas.removeEventListener("pointerdown", onDown, true); canvas.removeEventListener("pointermove", onMove, true);
+        canvas.removeEventListener("pointerup", onUp, true); canvas.removeEventListener("pointercancel", onUp, true);
         delete canvas.dataset.liveAnnotationBound;
       };
     };
@@ -158,12 +142,21 @@ export default function ClassroomLiveAnnotation() {
         liveSocket.addEventListener("message", (event) => {
           if (user.role === "teacher") return;
           try {
-            const msg = JSON.parse(event.data);
-            if (msg.type !== "whiteboard_live") return;
-            const p = msg.payload || {};
-            if (p.page_number !== getPage()) return;
-            const ctx = overlayRef.current?.getContext("2d"); if (!ctx) return;
-            if (p.final) ctx.clearRect(0, 0, W, H); else drawPreview(ctx, p.stroke);
+            const msg = JSON.parse(event.data); if (msg.type !== "whiteboard_live") return;
+            const p = msg.payload || {}; if (p.page_number !== getPage()) return;
+            const ctx = overlayRef.current?.getContext("2d"); if (!ctx || !p.stroke?.id) return;
+            if (p.final) {
+              liveStrokesRef.current.delete(p.stroke.id);
+              ctx.clearRect(0, 0, W, H);
+              return;
+            }
+            const prior = liveStrokesRef.current.get(p.stroke.id);
+            const stroke = prior
+              ? { ...prior, points: [...prior.points, ...(p.stroke.points || [])] }
+              : { ...p.stroke, points: p.stroke.points || [] };
+            liveStrokesRef.current.set(p.stroke.id, stroke);
+            ctx.clearRect(0, 0, W, H);
+            liveStrokesRef.current.forEach((item) => drawPreview(ctx, item));
           } catch { /* malformed live packets are ignored */ }
         });
       }
@@ -174,12 +167,10 @@ export default function ClassroomLiveAnnotation() {
     const observer = new MutationObserver(() => { if (!cleanupCanvas) cleanupCanvas = bind(); positionOverlay(); });
     observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("resize", positionOverlay);
-
     return () => {
-      cancelled = true; clearInterval(interval); observer.disconnect(); cleanupCanvas?.();
-      window.removeEventListener("resize", positionOverlay);
+      cancelled = true; clearInterval(interval); observer.disconnect(); cleanupCanvas?.(); window.removeEventListener("resize", positionOverlay);
       if (liveSocket) liveSocket.__dexmyLiveListener = false;
-      overlayRef.current?.getContext("2d")?.clearRect(0, 0, W, H);
+      liveStrokesRef.current.clear(); overlayRef.current?.getContext("2d")?.clearRect(0, 0, W, H);
     };
   }, [sessionId, user]);
 
