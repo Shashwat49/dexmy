@@ -18,8 +18,7 @@ api_router.include_router(admin_dashboard.router,prefix="/admin/dashboard",tags=
 api_router.include_router(admin_teachers.router,prefix="/admin/teachers",tags=["admin-teachers"])
 api_router.include_router(admin_teacher_profile_requests.router,prefix="/admin/teacher-profile-requests",tags=["admin-teacher-profile-requests"])
 api_router.include_router(admin_students.router,prefix="/admin/students",tags=["admin-students"])
-# Register the dedicated candidate endpoint before admin_bookings because
-# admin.py historically contained a duplicate route with the same path.
+# Register the dedicated candidate endpoint before the legacy duplicate in admin.py.
 api_router.include_router(admin_teacher_candidates.router,prefix="/admin/bookings",tags=["admin-booking-candidates"])
 api_router.include_router(admin_bookings.router,prefix="/admin/bookings",tags=["admin-bookings"])
 api_router.include_router(admin_packages.router,prefix="/admin/packages",tags=["admin-packages"])
@@ -33,4 +32,3 @@ api_router.include_router(system.router,prefix="/system",tags=["system"])
 api_router.include_router(profiles.router,prefix="/profiles",tags=["profiles"])
 api_router.include_router(subjects.router,prefix="/subjects",tags=["subjects"])
 api_router.include_router(whatsapp.router,prefix="/whatsapp",tags=["whatsapp"])
-api_router.include_router(packages.router,prefix="/packages",tags=["packages"])
