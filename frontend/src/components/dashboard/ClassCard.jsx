@@ -15,18 +15,13 @@ const formatDateTime = (iso) => {
 const initials = (name) =>
   name ? name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase() : "?";
 
-// A booking is "joinable" from 10 minutes before its scheduled time until
-// its slot ends — outside that window the join button stays disabled.
+// TESTING MODE: confirmed bookings are joinable immediately, regardless of
+// their scheduled start/end time. Restore production scheduling restrictions later.
 function getJoinState(booking) {
-  const now = new Date();
-  const start = new Date(booking.scheduled_at);
-  const end = new Date(start.getTime() + booking.duration_minutes * 60000);
-  const joinOpensAt = new Date(start.getTime() - 10 * 60000);
-
+  if (booking.status === "completed") return { canJoin: false, label: "Class completed" };
+  if (booking.status === "cancelled") return { canJoin: false, label: "Class cancelled" };
   if (booking.status !== "confirmed") return { canJoin: false, label: "Awaiting payment" };
-  if (now < joinOpensAt) return { canJoin: false, label: `Starts ${formatDateTime(booking.scheduled_at)}` };
-  if (now >= joinOpensAt && now <= end) return { canJoin: true, label: "Join class" };
-  return { canJoin: false, label: "Class ended" };
+  return { canJoin: true, label: "Join class" };
 }
 
 export default function ClassCard({ booking, otherPartyName, onJoin, onDownloadNotes, isPast }) {
