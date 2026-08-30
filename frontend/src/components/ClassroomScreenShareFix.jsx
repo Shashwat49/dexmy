@@ -1,71 +1,58 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
-/**
- * Keeps LiveKit screen-share video in the classroom's main stage.
- * It observes the existing LiveKit media containers so this is independent
- * of the media SDK's internal DOM implementation.
- */
 export default function ClassroomScreenShareFix() {
-  const previousMainVideos = useRef([]);
-
   useEffect(() => {
-    const main = document.getElementById("main-classroom-stage");
-    const local = document.getElementById("local-stage");
-    const remote = document.getElementById("remote-stage");
-    if (!main || !local || !remote) return undefined;
+    const find = () => ({ canvas: document.querySelector("canvas"), local: document.getElementById("local-stage"), remote: document.getElementById("remote-stage") });
+    let refs = find();
+    if (!refs.canvas || !refs.local || !refs.remote) return undefined;
+    const board = refs.canvas.parentElement;
+    if (!board) return undefined;
 
-    const isLikelyScreenShare = (video) => {
+    const stage = document.createElement("div");
+    Object.assign(stage.style, { position: "absolute", inset: "0", zIndex: "40", display: "none", overflow: "hidden", background: "#000", borderRadius: "inherit" });
+    board.appendChild(stage);
+    const label = document.createElement("div");
+    Object.assign(label.style, { position: "absolute", top: "12px", left: "12px", zIndex: "3", padding: "6px 9px", borderRadius: "8px", background: "rgba(0,0,0,.68)", color: "white", font: "500 11px system-ui,sans-serif", pointerEvents: "none" });
+    stage.appendChild(label);
+
+    const isScreen = (video) => {
       const track = video?.srcObject?.getVideoTracks?.()[0];
       if (!track) return false;
-      const settings = track.getSettings?.() || {};
-      const ratio = settings.width && settings.height ? settings.width / settings.height : 0;
-      const label = String(track.label || "").toLowerCase();
-      return ratio > 1.45 || /screen|display|window|tab/.test(label);
+      const s = track.getSettings?.() || {};
+      if (s.displaySurface) return true;
+      const n = String(track.label || "").toLowerCase();
+      return /screen|display|window|tab|monitor/.test(n);
     };
 
     const sync = () => {
-      const candidates = [
-        ...local.querySelectorAll("video"),
-        ...remote.querySelectorAll("video"),
-      ];
-      const screenVideo = candidates.find(isLikelyScreenShare);
-      const old = main.querySelector("video");
-
-      if (screenVideo) {
-        if (old !== screenVideo) {
-          if (old) old.remove();
-          previousMainVideos.current = [screenVideo];
-          screenVideo.classList.remove("object-cover");
-          screenVideo.classList.add("object-contain");
-          screenVideo.style.position = "absolute";
-          screenVideo.style.inset = "0";
-          screenVideo.style.width = "100%";
-          screenVideo.style.height = "100%";
-          screenVideo.style.objectFit = "contain";
-          screenVideo.style.background = "#000";
-          main.appendChild(screenVideo);
+      refs = find();
+      if (!refs.canvas || !refs.local || !refs.remote) return;
+      const videos = [...refs.local.querySelectorAll("video"), ...refs.remote.querySelectorAll("video")];
+      const share = videos.find(isScreen);
+      const current = stage.querySelector("video");
+      if (share) {
+        if (current !== share) {
+          current?.remove();
+          share.remove();
+          Object.assign(share.style, { position: "absolute", inset: "0", width: "100%", height: "100%", objectFit: "contain", background: "#000" });
+          stage.appendChild(share);
         }
-        main.dataset.screenSharing = "true";
+        label.textContent = (share.closest("#local-stage") ? "Your screen" : "Participant screen") + " · Screen sharing";
+        stage.style.display = "block";
+        refs.canvas.style.visibility = "hidden";
       } else {
-        if (old) old.remove();
-        main.dataset.screenSharing = "false";
-        window.dispatchEvent(new CustomEvent("dexmy:screen-share-stopped"));
+        current?.remove();
+        stage.style.display = "none";
+        refs.canvas.style.visibility = "visible";
       }
     };
 
     const observer = new MutationObserver(sync);
-    observer.observe(local, { childList: true, subtree: true });
-    observer.observe(remote, { childList: true, subtree: true });
-    const timer = window.setInterval(sync, 500);
+    observer.observe(refs.local, { childList: true, subtree: true });
+    observer.observe(refs.remote, { childList: true, subtree: true });
+    const interval = window.setInterval(sync, 400);
     sync();
-
-    return () => {
-      observer.disconnect();
-      window.clearInterval(timer);
-      const video = main.querySelector("video");
-      if (video) video.remove();
-    };
+    return () => { observer.disconnect(); window.clearInterval(interval); stage.remove(); if (refs.canvas) refs.canvas.style.visibility = "visible"; };
   }, []);
-
   return null;
 }
