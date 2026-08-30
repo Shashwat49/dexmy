@@ -30,10 +30,12 @@ import TeacherCalendar from "./pages/dashboard/teacher/TeacherCalendar";
 import CourseDetails from "./pages/dashboard/CourseDetails";
 import TeacherDashboardLayout from "./components/TeacherDashboardLayout";
 import ClassroomPro from "./pages/ClassroomPro";
+import ClassroomScreenShareFix from "./components/ClassroomScreenShareFix";
 import Packages from "./pages/Packages";
 import PackageCheckout from "./pages/dashboard/PackageCheckout";
 
 const ADMIN_ROLES = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"];
+const Classroom = () => <><ClassroomPro /><ClassroomScreenShareFix /></>;
 
 export default function App() {
   return (
@@ -53,8 +55,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
-      <Route path="/classroom/:sessionId" element={<ProtectedRoute roles={["teacher", "student"]}><ClassroomPro /></ProtectedRoute>} />
-      <Route path="/classroom" element={<ProtectedRoute roles={["teacher", "student"]}><ClassroomPro /></ProtectedRoute>} />
+      <Route path="/classroom/:sessionId" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
+      <Route path="/classroom" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
       <Route path="/dashboard/teacher" element={<ProtectedRoute roles={["teacher"]}><TeacherProfileGuard><TeacherDashboard /></TeacherProfileGuard></ProtectedRoute>} />
       <Route path="/dashboard/student" element={<ProtectedRoute roles={["student"]}><StudentDashboard /></ProtectedRoute>} />
       <Route path="/dashboard/student/book" element={<ProtectedRoute roles={["student"]}><BookClass /></ProtectedRoute>} />
@@ -73,6 +75,7 @@ export default function App() {
       <Route path="/dashboard/admin/audit-logs" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminAuditLogs /></ProtectedRoute>} />
       <Route path="/dashboard/admin/users" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminUsers /></ProtectedRoute>} />
       <Route path="/dashboard/admin/student-packages" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminStudentPackages /></ProtectedRoute>} />
+      <Route path="/dashboard/admin/support" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminSupport /></ProtectedRoute>} />
       <Route path="/dashboard/admin/support" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminSupport /></ProtectedRoute>} />
       <Route path="/dashboard/teacher/profile" element={<ProtectedRoute roles={["teacher"]}><TeacherProfileView /></ProtectedRoute>} />
       <Route path="/dashboard/teacher/profile/edit" element={<ProtectedRoute roles={["teacher"]}><TeacherDashboardLayout><TeacherProfile /></TeacherDashboardLayout></ProtectedRoute>} />
