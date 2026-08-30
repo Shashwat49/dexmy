@@ -9,8 +9,8 @@ export default function ClassroomLiveAnnotation() {
       <style>{`
         [data-classroom-role] aside { width: 380px !important; flex: 0 0 380px !important; overflow: hidden !important; }
         [data-classroom-role] aside > div { width: 100% !important; }
-        [data-classroom-role] aside > div > div:nth-child(2) { height: 560px !important; min-height: 560px !important; flex: 0 0 560px !important; }
-        [data-classroom-role] #remote-stage, [data-classroom-role] #local-stage { aspect-ratio: 4 / 3 !important; min-height: 0 !important; height: auto !important; }
+        [data-classroom-role] aside > div > div:nth-child(2) { height: 560px !important; min-height: 560px !important; flex: 0 0 560px !important; display:flex !important; flex-direction:column !important; gap:8px !important; }
+        [data-classroom-role] #remote-stage, [data-classroom-role] #local-stage { flex: 0 0 auto !important; width: 100% !important; height: auto !important; aspect-ratio: 4 / 3 !important; min-height: 0 !important; }
         [data-classroom-role="teacher"] #local-stage { order: 1 !important; }
         [data-classroom-role="teacher"] #remote-stage { order: 2 !important; }
         [data-classroom-role="student"] #remote-stage { order: 1 !important; }
