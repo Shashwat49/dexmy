@@ -58,11 +58,36 @@ def _permission_payload(room, user_id: uuid.UUID) -> dict[str, bool]:
 
 
 async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.UUID, room) -> None:
+    """Synchronize only media permissions with the already-connected LiveKit participant.
+
+    Annotation is an application-level classroom permission and must never call
+    LiveKit. The participant is explicitly checked before UpdateParticipant so
+    a WebSocket-presence race cannot make the teacher's permission control fail.
+    """
     sources = _allowed_sources(room, user_id)
     last_error = None
-    for attempt in range(6):
-        lkapi = api.LiveKitAPI(settings.LIVEKIT_URL, settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
+
+    for attempt in range(10):
+        lkapi = api.LiveKitAPI(
+            settings.LIVEKIT_URL,
+            settings.LIVEKIT_API_KEY,
+            settings.LIVEKIT_API_SECRET,
+        )
         try:
+            try:
+                await lkapi.room.get_participant(
+                    api.RoomParticipantIdentity(
+                        room=class_session.livekit_room_name,
+                        identity=str(user_id),
+                    )
+                )
+            except Exception as exc:
+                last_error = exc
+                if attempt < 9:
+                    await asyncio.sleep(0.35)
+                    continue
+                raise
+
             await lkapi.room.update_participant(
                 api.UpdateParticipantRequest(
                     room=class_session.livekit_room_name,
@@ -78,10 +103,11 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
             return
         except Exception as exc:
             last_error = exc
-            if attempt < 5:
-                await asyncio.sleep(0.5)
+            if attempt < 9:
+                await asyncio.sleep(0.35)
         finally:
             await lkapi.aclose()
+
     raise last_error or RuntimeError("LiveKit permission synchronization failed")
 
 
@@ -205,10 +231,6 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 await room.student_ws.send_json({"type": "permissions_state", "permissions": permissions_state})
                 await websocket.send_json({"type": "student_joined", "user_id": str(student_id), "name": db.get(User, student_id).full_name if db.get(User, student_id) else "Student"})
                 await websocket.send_json({"type": "permissions_state", "permissions": permissions_state})
-                try:
-                    await _sync_livekit_permissions(class_session, student_id, room)
-                except Exception as exc:
-                    await websocket.send_json({"type": "permission_sync_failed", "reason": f"Initial student permission sync failed: {str(exc)[:250]}"})
         else:
             room.permissions[str(user.id)] = _restore_student_permissions(session_id, user.id, db)
             if room.teacher_ws is None:
@@ -224,10 +246,6 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 await websocket.send_json({"type": "permissions_state", "permissions": permissions_state})
                 await room.teacher_ws.send_json({"type": "student_joined", "user_id": str(user.id), "name": user.full_name})
                 await room.teacher_ws.send_json({"type": "permissions_state", "permissions": permissions_state})
-                try:
-                    await _sync_livekit_permissions(class_session, user.id, room)
-                except Exception as exc:
-                    await websocket.send_json({"type": "permission_sync_failed", "reason": f"Initial student permission sync failed: {str(exc)[:250]}"})
 
         await _send_latest_whiteboard(session_id, websocket, db)
         while True:
@@ -293,8 +311,10 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         if target_user_id != booking.student_id:
             await websocket.send_json({"type": "permission_denied", "reason": "Invalid classroom participant"})
             return
+
         db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=granted, granted_by=user.id))
         db.commit()
+
         key = str(target_user_id)
         room.permissions.setdefault(key, _default_student_permissions())
         if granted:
@@ -302,15 +322,27 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         else:
             room.permissions[key].discard(permission.value)
 
+        # The classroom permission state is authoritative independently of LiveKit.
+        # Send it immediately so the UI never appears frozen while LiveKit catches up.
         event = {"type": "permission_update", "permission": permission.value, "granted": granted}
         if peer:
             await peer.send_json(event)
         await websocket.send_json(event)
 
+        # Annotation is enforced by our classroom WebSocket, not LiveKit.
+        # Calling UpdateParticipant for it was causing the misleading
+        # "could not update annotate permission" error.
+        if permission == PermissionType.annotate:
+            return
+
         try:
             await _sync_livekit_permissions(class_session, target_user_id, room)
         except Exception as exc:
-            await websocket.send_json({"type": "permission_sync_failed", "permission": permission.value, "reason": str(exc)[:300]})
+            await websocket.send_json({
+                "type": "permission_sync_failed",
+                "permission": permission.value,
+                "reason": str(exc)[:300],
+            })
     elif msg_type == "toggle_av":
         if peer:
             await peer.send_json({"type": "toggle_av", "user_id": str(user.id), "kind": data.get("kind"), "enabled": bool(data.get("enabled"))})
