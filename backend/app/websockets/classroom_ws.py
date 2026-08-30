@@ -185,7 +185,6 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 room.permissions[str(student_id)] = _restore_student_permissions(session_id, student_id, db)
                 await room.student_ws.send_json({"type": "admitted", "deadline": room.deadline.isoformat()})
                 await room.student_ws.send_json({"type": "participant_info", "role": "teacher", "name": user.full_name})
-                # Critical: notify the teacher too, so permission controls immediately know the student identity.
                 await websocket.send_json({"type": "student_joined", "user_id": str(student_id), "name": db.get(User, student_id).full_name if db.get(User, student_id) else "Student"})
                 try:
                     await _sync_livekit_permissions(class_session, student_id, room)
@@ -243,6 +242,23 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
     if msg_type == "chat":
         if peer:
             await peer.send_json({"type": "chat", "sender_id": str(user.id), "message_text": str(data.get("message_text") or "")[:4000], "file_url": data.get("file_url"), "file_name": data.get("file_name")})
+    elif msg_type == "whiteboard_live":
+        # Ephemeral, low-latency annotation packets are deliberately not persisted.
+        # The authoritative whiteboard_event that follows pointer-up remains the
+        # durable representation used for snapshots, reloads, undo and notes.
+        if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
+            await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
+            return
+        if peer:
+            payload = data.get("payload") or {}
+            stroke = payload.get("stroke") or {}
+            # Bound packet size and point count so rapid pointer events cannot
+            # become an accidental memory/bandwidth amplification vector.
+            points = stroke.get("points") or []
+            if len(points) > 64:
+                stroke = {**stroke, "points": points[-64:]}
+            payload = {"stroke": stroke, "page_number": max(1, int(payload.get("page_number", 1))), "final": bool(payload.get("final"))}
+            await peer.send_json({"type": "whiteboard_live", "payload": payload})
     elif msg_type == "whiteboard_event":
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
