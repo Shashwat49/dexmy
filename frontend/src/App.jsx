@@ -29,7 +29,7 @@ import TeacherProfileView from "./pages/dashboard/teacher/TeacherProfileView";
 import TeacherCalendar from "./pages/dashboard/teacher/TeacherCalendar";
 import CourseDetails from "./pages/dashboard/CourseDetails";
 import TeacherDashboardLayout from "./components/TeacherDashboardLayout";
-import ClassroomLiveAnnotation from "./components/ClassroomLiveAnnotation";
+import ClassroomLiveAnnotation from "./components/ClassroomLiveAnnotation.jsx";
 import ClassroomScreenShareFix from "./components/ClassroomScreenShareFix";
 import Packages from "./pages/Packages";
 import PackageCheckout from "./pages/dashboard/PackageCheckout";
