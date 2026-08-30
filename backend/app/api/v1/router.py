@@ -13,13 +13,14 @@ api_router.include_router(bookings.router,prefix="/bookings",tags=["bookings"])
 api_router.include_router(package_bookings.router,prefix="/bookings/package",tags=["package-bookings"])
 api_router.include_router(marketing.router,tags=["marketing"])
 api_router.include_router(packages.router,prefix="/packages",tags=["packages"])
+# Register the dedicated candidate endpoint BEFORE the legacy /admin router.
+# The candidate endpoint returns availability metadata required by the admin UI.
+api_router.include_router(admin_teacher_candidates.router,prefix="/admin/bookings",tags=["admin-booking-candidates"])
 api_router.include_router(admin.router,prefix="/admin",tags=["admin"])
 api_router.include_router(admin_dashboard.router,prefix="/admin/dashboard",tags=["admin-dashboard"])
 api_router.include_router(admin_teachers.router,prefix="/admin/teachers",tags=["admin-teachers"])
 api_router.include_router(admin_teacher_profile_requests.router,prefix="/admin/teacher-profile-requests",tags=["admin-teacher-profile-requests"])
 api_router.include_router(admin_students.router,prefix="/admin/students",tags=["admin-students"])
-# Register the dedicated candidate endpoint before the legacy duplicate in admin.py.
-api_router.include_router(admin_teacher_candidates.router,prefix="/admin/bookings",tags=["admin-booking-candidates"])
 api_router.include_router(admin_bookings.router,prefix="/admin/bookings",tags=["admin-bookings"])
 api_router.include_router(admin_packages.router,prefix="/admin/packages",tags=["admin-packages"])
 api_router.include_router(admin_student_packages.router,prefix="/admin/students",tags=["admin-student-packages"])
