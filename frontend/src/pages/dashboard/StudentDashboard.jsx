@@ -28,8 +28,11 @@ export default function StudentDashboard() {
   useEffect(() => { load(); }, []);
 
   const now = new Date();
-  const upcoming = bookings.filter((b) => new Date(b.scheduled_at) >= now && b.status !== "cancelled").sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
-  const past = bookings.filter((b) => new Date(b.scheduled_at) < now || b.status === "completed").sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
+  // TESTING MODE: completed bookings are never considered upcoming, even if
+  // their scheduled time is still in the future. This lets the dashboard
+  // immediately promote the next scheduled confirmed class after the teacher ends one.
+  const upcoming = bookings.filter((b) => new Date(b.scheduled_at) >= now && b.status === "confirmed").sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+  const past = bookings.filter((b) => b.status === "completed" || b.status === "cancelled" || new Date(b.scheduled_at) < now).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
 
   async function handleJoin(booking) {
     try {
