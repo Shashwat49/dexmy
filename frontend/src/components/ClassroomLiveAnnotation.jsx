@@ -46,6 +46,7 @@ function drawPreview(ctx, stroke) {
 export default function ClassroomLiveAnnotation() {
   const { user } = useAuth();
   const { sessionId } = useParams();
+  const wrapperRef = useRef(null);
   const overlayRef = useRef(null);
   const liveWsRef = useRef(null);
   const currentRef = useRef(null);
@@ -62,16 +63,31 @@ export default function ClassroomLiveAnnotation() {
     const ws = new WebSocket(`${u.origin}/ws/classroom/${sessionId}?token=${encodeURIComponent(token)}`);
     liveWsRef.current = ws;
 
+    const positionOverlay = () => {
+      const canvas = canvasRef.current;
+      const overlay = overlayRef.current;
+      const wrapper = wrapperRef.current;
+      if (!canvas || !overlay || !wrapper) return;
+      const cr = canvas.getBoundingClientRect();
+      const wr = wrapper.getBoundingClientRect();
+      overlay.style.left = `${cr.left - wr.left}px`;
+      overlay.style.top = `${cr.top - wr.top}px`;
+      overlay.style.width = `${cr.width}px`;
+      overlay.style.height = `${cr.height}px`;
+    };
+
     const findCanvas = () => {
       const canvas = document.querySelector('canvas.absolute.inset-0');
-      if (!canvas || canvasRef.current === canvas) return canvasRef.current;
-      canvasRef.current = canvas;
-      const overlay = overlayRef.current;
-      if (overlay) {
-        overlay.width = W;
-        overlay.height = H;
+      if (canvas) {
+        canvasRef.current = canvas;
+        positionOverlay();
       }
       return canvas;
+    };
+
+    const getPage = () => {
+      const pageText = [...document.querySelectorAll("span")].find((el) => /^Page \d+\/\d+$/.test(el.textContent?.trim() || ""));
+      return Number(pageText?.textContent?.match(/Page (\d+)/)?.[1] || 1);
     };
 
     const point = (event, canvas) => {
@@ -87,18 +103,26 @@ export default function ClassroomLiveAnnotation() {
       const now = performance.now();
       if (!final && now - lastSentRef.current < INTERVAL) return;
       lastSentRef.current = now;
-      ws.send(JSON.stringify({ type: "whiteboard_live", payload: { stroke, page_number: 1, final } }));
+      ws.send(JSON.stringify({ type: "whiteboard_live", payload: { stroke, page_number: getPage(), final } }));
+    };
+
+    const getTool = () => {
+      const selected = [...document.querySelectorAll("button")].find((b) => b.className.includes("bg-red-600"));
+      const label = selected?.textContent?.trim().toLowerCase() || "pen";
+      if (label.includes("highlight")) return "highlighter";
+      if (label.includes("rectangle")) return "rect";
+      return label;
     };
 
     const onDown = (event) => {
       if (user.role !== "teacher") return;
       const canvas = findCanvas();
       if (!canvas) return;
-      const tool = document.querySelector('button.bg-red-600')?.textContent?.toLowerCase() || "pen";
+      const tool = getTool();
       const color = document.querySelector('input[aria-label="Pen color"]')?.value || "#111827";
       const width = Number(document.querySelector('input[aria-label="Pen size"]')?.value || 3);
       if (["select", "text", "sticky"].some((x) => tool.includes(x))) return;
-      currentRef.current = { id: crypto.randomUUID(), tool: tool.includes("highlight") ? "highlighter" : tool.includes("rectangle") ? "rect" : tool, color, width, points: [point(event, canvas)] };
+      currentRef.current = { id: crypto.randomUUID(), tool, color, width, points: [point(event, canvas)] };
       const ctx = overlayRef.current?.getContext("2d");
       if (ctx) drawPreview(ctx, currentRef.current);
       sendLive(currentRef.current);
@@ -111,7 +135,7 @@ export default function ClassroomLiveAnnotation() {
       stroke.points.push(point(event, canvas));
       const ctx = overlayRef.current?.getContext("2d");
       if (ctx) drawPreview(ctx, stroke);
-      sendLive({ ...stroke, points: stroke.points.slice(-48) });
+      sendLive({ ...stroke, points: stroke.points.slice(-64) });
     };
 
     const onUp = () => {
@@ -119,13 +143,12 @@ export default function ClassroomLiveAnnotation() {
       if (!stroke) return;
       sendLive(stroke, true);
       currentRef.current = null;
-      const ctx = overlayRef.current?.getContext("2d");
-      ctx?.clearRect(0, 0, W, H);
+      overlayRef.current?.getContext("2d")?.clearRect(0, 0, W, H);
     };
 
     const bind = () => {
       const canvas = findCanvas();
-      if (!canvas || canvas.dataset.liveAnnotationBound === "1") return;
+      if (!canvas || canvas.dataset.liveAnnotationBound === "1") return null;
       canvas.dataset.liveAnnotationBound = "1";
       canvas.addEventListener("pointerdown", onDown, true);
       canvas.addEventListener("pointermove", onMove, true);
@@ -141,8 +164,9 @@ export default function ClassroomLiveAnnotation() {
     };
 
     let cleanup = bind();
-    const observer = new MutationObserver(() => { if (!cleanup) cleanup = bind(); });
+    const observer = new MutationObserver(() => { if (!cleanup) cleanup = bind(); positionOverlay(); });
     observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("resize", positionOverlay);
 
     ws.onmessage = (event) => {
       try {
@@ -150,19 +174,20 @@ export default function ClassroomLiveAnnotation() {
         if (msg.type !== "whiteboard_live" || user.role === "teacher") return;
         const p = msg.payload || {};
         const overlay = overlayRef.current;
-        if (!overlay || p.page_number !== 1) return;
+        if (!overlay || p.page_number !== getPage()) return;
         const ctx = overlay.getContext("2d");
         if (p.final) {
           ctx.clearRect(0, 0, W, H);
           return;
         }
         drawPreview(ctx, p.stroke);
-      } catch { /* Ignore malformed live packets; authoritative events remain intact. */ }
+      } catch { /* Ignore malformed live packets. */ }
     };
 
     return () => {
       observer.disconnect();
       cleanup?.();
+      window.removeEventListener("resize", positionOverlay);
       ws.close();
       liveWsRef.current = null;
       overlayRef.current?.getContext("2d")?.clearRect(0, 0, W, H);
@@ -170,15 +195,9 @@ export default function ClassroomLiveAnnotation() {
   }, [sessionId, user]);
 
   return (
-    <div className="relative h-full w-full">
+    <div ref={wrapperRef} className="relative h-full w-full">
       <ClassroomPro />
-      <canvas
-        ref={overlayRef}
-        width={W}
-        height={H}
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 w-full h-full z-30"
-      />
+      <canvas ref={overlayRef} width={W} height={H} aria-hidden="true" className="pointer-events-none absolute z-30" />
     </div>
   );
 }
