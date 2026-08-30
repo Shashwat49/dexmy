@@ -5,6 +5,11 @@ from datetime import datetime
 
 from fastapi import WebSocket
 
+# Import the LiveKit permission reliability shim before classroom_ws uses the
+# room service. This handles the small race between WebSocket presence and
+# LiveKit participant registration.
+from app.services import livekit_permission_sync  # noqa: F401
+
 
 @dataclass
 class RoomState:
