@@ -88,3 +88,98 @@ table {
     repeating-linear-gradient(90deg, #F2ECDD 0px, transparent 1px, transparent 40px);
   opacity: 0.035;
 }
+
+/* ---- Dexmy Classroom theme ----
+   ClassroomPro uses a few hard-coded dark utility classes. Keep the
+   classroom visually consistent with Dexmy's existing palette:
+   void #0F1D17, panels #152922/#1B3229/#223B31,
+   chalk #F2ECDD, muted chalk #9BAFA0, and brand red #E4271C.
+*/
+
+/* Main classroom surfaces */
+[class~="bg-[#0b1020]"] {
+  background-color: #0F1D17 !important;
+}
+
+[class~="bg-[#111827]"] {
+  background-color: #152922 !important;
+}
+
+[class~="bg-[#0f172a]"] {
+  background-color: #1B3229 !important;
+}
+
+[class~="bg-[#070b16]"] {
+  background-color: #0F1D17 !important;
+}
+
+/* Classroom secondary controls */
+[class~="bg-white/5"] {
+  background-color: rgba(242, 236, 221, 0.08) !important;
+}
+
+[class~="bg-white/10"] {
+  background-color: #223B31 !important;
+}
+
+[class~="bg-white/15"] {
+  background-color: rgba(242, 236, 221, 0.14) !important;
+}
+
+/* Dexmy brand accent for active classroom actions */
+[class~="bg-indigo-600"] {
+  background-color: #E4271C !important;
+}
+
+[class~="bg-emerald-600"] {
+  background-color: #E4271C !important;
+}
+
+[class~="bg-emerald-600/80"] {
+  background-color: rgba(228, 39, 28, 0.88) !important;
+}
+
+/* Keep the classroom's red states consistent */
+[class~="bg-red-600"] {
+  background-color: #E4271C !important;
+}
+
+/* Classroom text */
+[class~="text-slate-300"] {
+  color: #F2ECDD !important;
+}
+
+[class~="text-slate-400"] {
+  color: #9BAFA0 !important;
+}
+
+[class~="text-slate-500"] {
+  color: #9BAFA0 !important;
+}
+
+[class~="text-slate-600"] {
+  color: rgba(155, 175, 160, 0.72) !important;
+}
+
+/* Classroom borders */
+[class~="border-white/10"] {
+  border-color: rgba(242, 236, 221, 0.10) !important;
+}
+
+[class~="border-white/20"] {
+  border-color: rgba(242, 236, 221, 0.20) !important;
+}
+
+/* Active/hovered classroom controls */
+[class~="hover:bg-white/10"]:hover {
+  background-color: rgba(242, 236, 221, 0.10) !important;
+}
+
+[class~="hover:bg-white/15"]:hover {
+  background-color: rgba(242, 236, 221, 0.15) !important;
+}
+
+/* Keep the whiteboard itself clean and chalk-white. */
+.bg-white {
+  background-color: #F2ECDD !important;
+}
