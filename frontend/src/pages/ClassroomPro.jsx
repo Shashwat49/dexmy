@@ -28,6 +28,10 @@ export default function ClassroomPro() {
   const pageRef = useRef(1);
   const disposedRef = useRef(false);
   const snapshotTimer = useRef(null);
+  // Stable whiteboard identity/synchronization state. These refs prevent
+  // remote snapshots and redraws from replacing newer local annotations.
+  const strokeIdsRef = useRef(new Set());
+  const redrawVersionRef = useRef(0);
   const [status, setStatus] = useState("Connecting…");
   const [notice, setNotice] = useState("");
   const [tool, setTool] = useState("pen");
@@ -113,31 +117,72 @@ export default function ClassroomPro() {
       String(s.text || "Note").split("\n").forEach((line, i) => ctx.fillText(line.slice(0, 45), a.x + 12, a.y + 28 + i * 24));
     }
     ctx.restore();
-    if (record) { historyRef.current.push(s); redoRef.current = []; }
+    if (record) {
+      // A stroke is a logical whiteboard object. Give it a stable ID and
+      // record it only once, even if the server echoes the same event back.
+      if (!s.id) s.id = crypto.randomUUID();
+      if (!strokeIdsRef.current.has(s.id)) {
+        historyRef.current.push(s);
+        strokeIdsRef.current.add(s.id);
+      }
+      redoRef.current = [];
+    }
   }, []);
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
+
+    // Invalidate older asynchronous image loads. A PDF background can finish
+    // loading after the user has already drawn more annotations.
+    const version = ++redrawVersionRef.current;
+    const renderPage = pageRef.current;
+
+    // Snapshot the logical annotation state for this redraw. Rendering must
+    // never mutate historyRef.current.
+    const strokes = [...historyRef.current];
+
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, W, H);
     drawGrid(ctx);
-    const current = pagesRef.current[pageRef.current - 1];
+
+    const current = pagesRef.current[renderPage - 1];
+
+    const renderStrokes = () => {
+      if (
+        version !== redrawVersionRef.current ||
+        renderPage !== pageRef.current
+      ) return;
+
+      strokes.forEach((s) => renderStroke(s, false));
+    };
+
     if (current?.image_url) {
       const img = new Image();
       img.crossOrigin = "anonymous";
+
       img.onload = () => {
+        if (
+          version !== redrawVersionRef.current ||
+          renderPage !== pageRef.current
+        ) return;
+
         const scale = Math.min(W / img.width, H / img.height);
-        const w = img.width * scale; const h = img.height * scale;
+        const w = img.width * scale;
+        const h = img.height * scale;
+
         ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
         drawGrid(ctx);
-        historyRef.current.forEach((s) => renderStroke(s, false));
+        renderStrokes();
       };
+
+      // If a background fails, the annotations must still remain visible.
+      img.onerror = renderStrokes;
       img.src = current.image_url;
     } else {
-      historyRef.current.forEach((s) => renderStroke(s, false));
+      renderStrokes();
     }
   }, [drawGrid, renderStroke]);
 
@@ -153,14 +198,14 @@ export default function ClassroomPro() {
     snapshotTimer.current = setTimeout(() => sendWS({
       type: "save_snapshot",
       page_number: pageRef.current,
-      canvas_json: { strokes: historyRef.current },
+      canvas_json: { strokes: historyRef.current.map((stroke) => ({ ...stroke })) },
     }), 700);
   }, [sendWS]);
 
   const onPointerDown = (event) => {
     if (tool === "select") return;
     if (!isTeacher && !permissions.annotate) return setNotice("The teacher has not enabled annotation for you.");
-    drawingRef.current = { tool, color, width, points: [point(event)] };
+    drawingRef.current = { id: crypto.randomUUID(), tool, color, width, points: [point(event)] };
     canvasRef.current.setPointerCapture(event.pointerId);
   };
   const onPointerMove = (event) => {
@@ -186,6 +231,7 @@ export default function ClassroomPro() {
 
   const undo = () => {
     const s = historyRef.current.pop(); if (!s) return;
+    if (s.id) strokeIdsRef.current.delete(s.id);
     redoRef.current.push(s); redraw();
     sendWS({ type: "whiteboard_event", payload: { kind: "undo", page_number: pageRef.current } }); queueSnapshot();
   };
@@ -194,13 +240,14 @@ export default function ClassroomPro() {
     renderStroke(s, true); sendWS({ type: "whiteboard_event", payload: { kind: "stroke", stroke: s, page_number: pageRef.current } }); queueSnapshot();
   };
   const clearBoard = () => {
-    historyRef.current = []; redoRef.current = []; redraw();
+    historyRef.current = []; strokeIdsRef.current.clear(); redoRef.current = []; redraw();
     sendWS({ type: "whiteboard_event", payload: { kind: "clear", page_number: pageRef.current } }); queueSnapshot();
   };
   const changePage = (next) => {
     const target = clamp(next, 1, Math.max(1, pages.length));
     if (target === page) return;
     historyRef.current = [];
+    strokeIdsRef.current.clear();
     redoRef.current = [];
     setPage(target);
     sendWS({ type: "whiteboard_event", payload: { kind: "page", page_number: target } });
@@ -290,18 +337,108 @@ export default function ClassroomPro() {
             if (!msg.granted && msg.permission === "camera") { setCamera(false); room.localParticipant.setCameraEnabled(false).catch(() => {}); }
             if (!msg.granted && msg.permission === "mic") { setMic(false); room.localParticipant.setMicrophoneEnabled(false).catch(() => {}); }
           }
-          if (msg.type === "pdf_pages_ready") { setPages(msg.pages || []); setPage(1); historyRef.current = []; redoRef.current = []; }
-          if (msg.type === "whiteboard_state") {
-            const nextPages = msg.pages?.length ? msg.pages : (msg.image_url ? [{ page_number: msg.page_number || 1, image_url: msg.image_url }] : []);
-            setPages(nextPages); setPage(msg.page_number || 1); historyRef.current = msg.canvas_json?.strokes || []; redoRef.current = []; setTimeout(redraw, 0);
+          if (msg.type === "pdf_pages_ready") {
+            setPages(msg.pages || []);
+            setPage(1);
+            historyRef.current = [];
+            strokeIdsRef.current.clear();
+            redoRef.current = [];
           }
+
+          if (msg.type === "whiteboard_state") {
+            const nextPages = msg.pages?.length
+              ? msg.pages
+              : (msg.image_url
+                ? [{
+                    page_number: msg.page_number || 1,
+                    image_url: msg.image_url
+                  }]
+                : []);
+
+            // Never blindly replace local history. The server snapshot may
+            // have been produced before a local stroke reached the backend.
+            const serverStrokes = Array.isArray(msg.canvas_json?.strokes)
+              ? msg.canvas_json.strokes.map((stroke) => ({
+                  ...stroke,
+                  id: stroke.id || crypto.randomUUID()
+                }))
+              : [];
+
+            const serverIds = new Set(serverStrokes.map((stroke) => stroke.id));
+
+            const localOnly = historyRef.current.filter(
+              (stroke) => stroke?.id && !serverIds.has(stroke.id)
+            );
+
+            const merged = [...serverStrokes, ...localOnly];
+            const seen = new Set();
+
+            historyRef.current = merged.filter((stroke) => {
+              if (!stroke?.id || seen.has(stroke.id)) return false;
+              seen.add(stroke.id);
+              return true;
+            });
+
+            strokeIdsRef.current = new Set(
+              historyRef.current.map((stroke) => stroke.id)
+            );
+
+            redoRef.current = [];
+            setPages(nextPages);
+            setPage(msg.page_number || 1);
+            setTimeout(redraw, 0);
+          }
+
           if (msg.type === "whiteboard_event") {
             const p = msg.payload || {};
-            if (p.kind === "stroke" && p.page_number === pageRef.current) renderStroke(p.stroke, true);
-            if (p.kind === "undo" && p.page_number === pageRef.current) { historyRef.current.pop(); redraw(); }
-            if (p.kind === "clear" && p.page_number === pageRef.current) { historyRef.current = []; redoRef.current = []; redraw(); }
-            if (p.kind === "pdf") { setPages(p.pages || []); setPage(1); historyRef.current = []; redoRef.current = []; }
-            if (p.kind === "page") { historyRef.current = []; redoRef.current = []; setPage(p.page_number || 1); }
+
+            if (
+              p.kind === "stroke" &&
+              p.page_number === pageRef.current &&
+              p.stroke
+            ) {
+              const stroke = {
+                ...p.stroke,
+                id: p.stroke.id || crypto.randomUUID()
+              };
+
+              // The sender can receive its own event back from the server.
+              // Do not add an already-known stroke a second time.
+              if (!strokeIdsRef.current.has(stroke.id)) {
+                strokeIdsRef.current.add(stroke.id);
+                historyRef.current.push(stroke);
+                renderStroke(stroke, false);
+              }
+            }
+
+            if (p.kind === "undo" && p.page_number === pageRef.current) {
+              const removed = historyRef.current.pop();
+              if (removed?.id) strokeIdsRef.current.delete(removed.id);
+              redoRef.current = [];
+              redraw();
+            }
+
+            if (p.kind === "clear" && p.page_number === pageRef.current) {
+              historyRef.current = [];
+              strokeIdsRef.current.clear();
+              redoRef.current = [];
+              redraw();
+            }
+
+            if (p.kind === "pdf") {
+              setPages(p.pages || []);
+              setPage(1);
+              historyRef.current = [];
+              strokeIdsRef.current.clear();
+              redoRef.current = [];
+            }
+
+            if (p.kind === "page") {
+              historyRef.current = [];
+              strokeIdsRef.current.clear();
+              redoRef.current = [];
+              setPage(p.page_number || 1);
+            }
           }
           if (msg.type === "permission_denied") setNotice(`Permission denied: ${msg.permission || "action"}.`);
           if (msg.type === "permission_sync_failed") setNotice(`Could not update ${msg.permission || "student"} permission. Please retry.`);
@@ -337,7 +474,7 @@ export default function ClassroomPro() {
     if (!isTeacher || !file) return;
     if (file.size > 30 * 1024 * 1024) return setNotice("PDFs are limited to 30 MB.");
     const form = new FormData(); form.append("file", file);
-    try { const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`, form); const loaded = data.map((item, i) => ({ page_number: i + 1, image_url: item.file_url })); setPages(loaded); setPage(1); historyRef.current = []; redoRef.current = []; setNotice(`${loaded.length} PDF page${loaded.length === 1 ? "" : "s"} loaded onto the whiteboard.`); }
+    try { const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`, form); const loaded = data.map((item, i) => ({ page_number: i + 1, image_url: item.file_url })); setPages(loaded); setPage(1); historyRef.current = []; strokeIdsRef.current.clear(); redoRef.current = []; setNotice(`${loaded.length} PDF page${loaded.length === 1 ? "" : "s"} loaded onto the whiteboard.`); }
     catch (error) { setNotice(error.response?.data?.detail || "PDF upload failed."); }
   };
   const setPermission = (permission, granted) => {
