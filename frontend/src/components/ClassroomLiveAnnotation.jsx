@@ -12,6 +12,8 @@ if (!window.__dexmyClassroomWebSocketPatched) {
   };
   ClassroomWebSocket.prototype = NativeWebSocket.prototype;
   window.WebSocket = ClassroomWebSocket;
+  window.__dexmyClassroomWS = window.__dexmyClassroomWS || null;
+  window.WebSocket = ClassroomWebSocket;
   window.__dexmyClassroomWebSocketPatched = true;
 }
 
@@ -22,7 +24,6 @@ const INTERVAL = 16;
 function drawPreview(ctx, stroke) {
   if (!stroke?.points?.length) return;
   const a = stroke.points[0]; const b = stroke.points[stroke.points.length - 1];
-  if (!ctx.__dexmyLivePreserve) ctx.clearRect(0, 0, W, H);
   ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
   ctx.strokeStyle = stroke.tool === "eraser" ? "#ffffff" : stroke.color; ctx.fillStyle = stroke.color;
   ctx.lineWidth = stroke.tool === "highlighter" ? stroke.width * 5 : stroke.width;
@@ -82,16 +83,20 @@ export default function ClassroomLiveAnnotation() {
       const color = document.querySelector('input[aria-label="Pen color"]')?.value || "#111827";
       const width = Number(document.querySelector('input[aria-label="Pen size"]')?.value || 3);
       currentRef.current = { id: crypto.randomUUID(), tool, color, width, points: [point(event, canvas)] };
-      drawPreview(overlayRef.current.getContext("2d"), currentRef.current); sendLive(currentRef.current);
+      sendLive(currentRef.current);
     };
     const onMove = (event) => {
       const stroke = currentRef.current; const canvas = canvasRef.current || findCanvas(); if (!stroke || !canvas) return;
       const nextPoint = point(event, canvas); stroke.points.push(nextPoint);
-      drawPreview(overlayRef.current.getContext("2d"), stroke); sendLive({ ...stroke, points: [nextPoint] }, false, true);
+      const ctx = overlayRef.current?.getContext("2d"); if (ctx) { ctx.clearRect(0, 0, W, H); liveStrokesRef.current.forEach((item) => drawPreview(ctx, item)); drawPreview(ctx, stroke); }
+      sendLive({ ...stroke, points: [nextPoint] }, false, true);
     };
     const onUp = () => {
-      const stroke = currentRef.current; if (!stroke) return; sendLive(stroke, true, false); currentRef.current = null;
-      overlayRef.current?.getContext("2d")?.clearRect(0, 0, W, H);
+      const stroke = currentRef.current; if (!stroke) return;
+      sendLive(stroke, true, false);
+      liveStrokesRef.current.set(stroke.id, { ...stroke, points: [...stroke.points] });
+      currentRef.current = null;
+      const ctx = overlayRef.current?.getContext("2d"); if (ctx) { ctx.clearRect(0, 0, W, H); liveStrokesRef.current.forEach((item) => drawPreview(ctx, item)); }
     };
     const bind = () => {
       const canvas = findCanvas(); if (!canvas || canvas.dataset.liveAnnotationBound === "1") return null;
@@ -109,21 +114,27 @@ export default function ClassroomLiveAnnotation() {
         liveSocket.addEventListener("message", (event) => {
           if (user.role === "teacher") return;
           try {
-            const msg = JSON.parse(event.data); if (msg.type !== "whiteboard_live") return;
-            const p = msg.payload || {}; if (p.page_number !== getPage()) return;
-            const ctx = overlayRef.current?.getContext("2d"); if (!ctx || !p.stroke?.id) return;
-            ctx.__dexmyLivePreserve = true;
-            if (p.final) {
-              liveStrokesRef.current.delete(p.stroke.id); ctx.clearRect(0, 0, W, H);
-              liveStrokesRef.current.forEach((item) => drawPreview(ctx, item));
-            } else {
+            const msg = JSON.parse(event.data);
+            const ctx = overlayRef.current?.getContext("2d"); if (!ctx) return;
+            if (msg.type === "whiteboard_live") {
+              const p = msg.payload || {}; if (p.page_number !== getPage() || !p.stroke?.id) return;
               const prior = liveStrokesRef.current.get(p.stroke.id);
-              const stroke = prior ? { ...prior, points: [...prior.points, ...(p.stroke.points || [])] } : { ...p.stroke, points: p.stroke.points || [] };
-              liveStrokesRef.current.set(p.stroke.id, stroke);
+              const incomingPoints = p.stroke.points || [];
+              if (p.final) {
+                const finalStroke = prior ? { ...prior, points: [...prior.points, ...incomingPoints.filter((_, i) => i > 0)] } : p.stroke;
+                liveStrokesRef.current.set(p.stroke.id, finalStroke);
+              } else {
+                const stroke = prior ? { ...prior, points: [...prior.points, ...incomingPoints] } : { ...p.stroke, points: incomingPoints };
+                liveStrokesRef.current.set(p.stroke.id, stroke);
+              }
+              ctx.clearRect(0, 0, W, H); liveStrokesRef.current.forEach((item) => drawPreview(ctx, item));
+              return;
+            }
+            if (msg.type === "whiteboard_event" && msg.payload?.kind === "stroke" && msg.payload.stroke?.id) {
+              liveStrokesRef.current.delete(msg.payload.stroke.id);
               ctx.clearRect(0, 0, W, H); liveStrokesRef.current.forEach((item) => drawPreview(ctx, item));
             }
-            ctx.__dexmyLivePreserve = false;
-          } catch { /* malformed live packets are ignored */ }
+          } catch { /* ignore malformed live packets */ }
         });
       }
     };
