@@ -24,13 +24,16 @@ class FileUploadResponse(BaseModel):
     file_name: str
 
 def _student_publish_sources(session_id: uuid.UUID, student_id: uuid.UUID, db: Session) -> list[str]:
-    """Return the student's currently granted LiveKit publish sources.
+    """Return the student's LiveKit media publish sources.
 
-    Camera and microphone are the classroom baseline. Any persisted teacher
-    permission decisions override those defaults; this keeps a newly issued
-    LiveKit token aligned with the classroom WebSocket permission state.
+    Screen sharing is included in the join grant so a student who is granted
+    screen sharing by the classroom controls can publish immediately without
+    depending on a race between the browser and a mid-session LiveKit token
+    permission update. The classroom WebSocket still remains authoritative for
+    whether the student is allowed to use the feature from the application UI.
+    Persisted explicit revocations are still honored for reconnects.
     """
-    sources = {"camera", "microphone"}
+    sources = {"camera", "microphone", "screen_share"}
     events = (
         db.query(PermissionEvent)
         .filter(PermissionEvent.session_id == session_id, PermissionEvent.target_user_id == student_id)
