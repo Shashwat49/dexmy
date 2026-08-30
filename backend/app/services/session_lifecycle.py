@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.models.booking import Booking, BookingStatus
 from app.models.classroom import ClassSession, SessionStatus
 from app.models.classroom_content import ClassNotes, WhiteboardSnapshot
 from app.services.notes_service import compile_notes_pdf
@@ -11,16 +12,21 @@ from app.services.storage_service import download_bytes, save_bytes_file
 
 
 def end_class_session(session_id: uuid.UUID, db: Session) -> ClassNotes | None:
-    """Marks the session ended and best-effort compiles whatever whiteboard
-    content exists into a notes PDF. The session always ends regardless of
-    whether there's anything to compile — returns None (not an error) when
-    there's no whiteboard content yet."""
+    """End a classroom session and, for testing, immediately mark its
+    associated booking completed regardless of the scheduled time."""
     class_session = db.get(ClassSession, session_id)
     if class_session is None or class_session.status == SessionStatus.ended:
         return None
 
     class_session.status = SessionStatus.ended
     class_session.ended_at = datetime.now(timezone.utc)
+
+    # TESTING MODE: completing the actual classroom immediately completes
+    # the associated booking, regardless of its scheduled end time.
+    booking = db.get(Booking, class_session.booking_id)
+    if booking is not None and booking.status != BookingStatus.cancelled:
+        booking.status = BookingStatus.completed
+
     db.commit()
 
     snapshots = (
