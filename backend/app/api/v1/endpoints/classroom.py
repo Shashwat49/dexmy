@@ -35,13 +35,7 @@ def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_c
     if not (is_teacher or is_student):
         raise HTTPException(status_code=403, detail="You are not part of this classroom")
     sources = None if is_teacher else []
-    token = create_join_token(
-        room_name=session.livekit_room_name,
-        identity=str(current_user.id),
-        name=current_user.full_name,
-        can_publish=is_teacher,
-        publish_sources=sources,
-    )
+    token = create_join_token(room_name=session.livekit_room_name, identity=str(current_user.id), name=current_user.full_name, can_publish=is_teacher, publish_sources=sources)
     return JoinTokenResponse(livekit_token=token, livekit_url=settings.LIVEKIT_URL, room_name=session.livekit_room_name)
 
 @router.post("/sessions/{session_id}/end", response_model=ClassNotesRead)
@@ -114,22 +108,22 @@ async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(.
         raise HTTPException(status_code=400, detail="PDF too long (50 pages max)")
 
     pages = []
+    stored_pages = []
     for i, img in enumerate(pages_raw, 1):
         key = save_bytes_file(img, f"annotate_{session_id}_p{i}", "png")
+        stored_pages.append((i, key))
         pages.append(FileUploadResponse(file_url=get_presigned_url(key, expires_in=86400), file_name=f"page_{i}.png"))
 
-    # Persist PDF pages as whiteboard backgrounds. This makes them available
-    # to reconnecting/late-joining participants and to post-class notes.
-    for i, page in enumerate(pages, 1):
+    for i, key in stored_pages:
         db.add(WhiteboardSnapshot(
             session_id=session_id,
             snapshot_data={"strokes": []},
-            image_url=page.file_url,
+            image_url=key,
             page_number=i,
         ))
     db.commit()
 
-    payload = {"type": "pdf_pages_ready", "pages": [{"page_number": i, "image_url": p.file_url} for i, p in enumerate(pages, 1)]}
+    payload = {"type": "pdf_pages_ready", "pages": [{"page_number": i, "image_url": get_presigned_url(key, expires_in=86400)} for i, key in stored_pages]}
     room = manager.get_room(session_id)
     for ws in (room.teacher_ws, room.student_ws):
         if ws:
