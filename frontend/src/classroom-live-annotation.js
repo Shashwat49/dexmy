@@ -3,7 +3,7 @@ import { Room, RoomEvent } from "livekit-client";
 const TOPIC = "dexmy-whiteboard-live-v1";
 const W = 1600;
 const H = 900;
-const LIVE_TOOLS = new Set(["pen", "highlighter", "eraser"]);
+const LIVE_TOOLS = new Set(["pen", "highlighter", "line", "arrow", "rect", "circle", "eraser"]);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -77,16 +77,8 @@ function flushOutgoing() {
   if (!outgoing || !outgoing.points.length) return;
   const points = outgoing.points.splice(0, 10);
   publish({
-    v: 1,
-    type: "stroke",
-    id: outgoing.id,
-    page: outgoing.page,
-    tool: outgoing.tool,
-    color: outgoing.color,
-    width: outgoing.width,
-    seq: outgoing.seq++,
-    points,
-    final: false,
+    v: 1, type: "stroke", id: outgoing.id, page: outgoing.page, tool: outgoing.tool,
+    color: outgoing.color, width: outgoing.width, seq: outgoing.seq++, points, final: false,
   });
   if (outgoing.points.length) scheduleOutgoing();
 }
@@ -122,7 +114,7 @@ function drawLiveStroke(ctx, stroke) {
     ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6));
     ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6));
     ctx.stroke();
-  } else if (LIVE_TOOLS.has(stroke.tool)) {
+  } else if (["pen", "highlighter", "eraser"].includes(stroke.tool)) {
     ctx.beginPath();
     points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
     if (points.length === 1) ctx.lineTo(points[0].x + 0.01, points[0].y + 0.01);
@@ -160,18 +152,11 @@ function handleData(payload, topic) {
   let stroke = incoming.get(message.id);
   if (!stroke) {
     stroke = {
-      id: message.id,
-      page: message.page,
-      tool: message.tool,
-      color: message.color,
-      width: message.width,
-      points: [],
-      lastSeq: -1,
-      done: false,
+      id: message.id, page: message.page, tool: message.tool, color: message.color,
+      width: message.width, points: [], lastSeq: -1, done: false,
     };
     incoming.set(message.id, stroke);
   }
-
   if (typeof message.seq === "number" && message.seq <= stroke.lastSeq) return;
   if (typeof message.seq === "number") stroke.lastSeq = message.seq;
   if (Array.isArray(message.points)) stroke.points.push(...message.points);
@@ -231,7 +216,6 @@ function installWebSocketFilter() {
       });
     }
   }
-
   for (const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
     Object.defineProperty(ClassroomWebSocket, key, { value: NativeWebSocket[key] });
   }
@@ -248,12 +232,7 @@ function installPointerCapture() {
     const point = pointFromEvent(event, target);
     outgoing = {
       id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
-      page: currentPage(),
-      tool,
-      color: currentColor(),
-      width: currentWidth(),
-      seq: 0,
-      points: [point],
+      page: currentPage(), tool, color: currentColor(), width: currentWidth(), seq: 0, points: [point],
     };
     publish({
       v: 1, type: "stroke", id: outgoing.id, page: outgoing.page, tool: outgoing.tool,
@@ -272,11 +251,17 @@ function installPointerCapture() {
     if (!outgoing) return;
     const target = event.target instanceof HTMLCanvasElement ? event.target : canvas();
     if (target?.width === W && target.height === H) outgoing.points.push(pointFromEvent(event, target));
-    flushOutgoing();
+    if (outgoingRaf) { cancelAnimationFrame(outgoingRaf); outgoingRaf = 0; }
+    while (outgoing.points.length > 10) {
+      const points = outgoing.points.splice(0, 10);
+      publish({
+        v: 1, type: "stroke", id: outgoing.id, page: outgoing.page, tool: outgoing.tool,
+        color: outgoing.color, width: outgoing.width, seq: outgoing.seq++, points, final: false,
+      });
+    }
     publish({
       v: 1, type: "stroke", id: outgoing.id, page: outgoing.page, tool: outgoing.tool,
-      color: outgoing.color, width: outgoing.width, seq: outgoing.seq++,
-      points: outgoing.points.splice(0, 10), final: true,
+      color: outgoing.color, width: outgoing.width, seq: outgoing.seq++, points: outgoing.points.splice(0, 10), final: true,
     });
     outgoing = null;
   };
