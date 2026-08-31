@@ -12,8 +12,27 @@ let outgoing = null;
 let outgoingRaf = 0;
 const incoming = new Map();
 let incomingRaf = 0;
+let overlay = null;
 
 const canvas = () => document.querySelector('canvas[width="1600"][height="900"]');
+
+function ensureOverlay() {
+  const source = canvas();
+  if (!source?.parentElement) return null;
+  if (overlay?.isConnected) return overlay;
+  overlay = document.createElement("canvas");
+  overlay.width = W;
+  overlay.height = H;
+  overlay.setAttribute("aria-hidden", "true");
+  overlay.style.position = "absolute";
+  overlay.style.inset = "0";
+  overlay.style.width = "100%";
+  overlay.style.height = "100%";
+  overlay.style.pointerEvents = "none";
+  overlay.style.zIndex = "6";
+  source.parentElement.appendChild(overlay);
+  return overlay;
+}
 
 function currentTool() {
   const buttons = [...document.querySelectorAll("button")];
@@ -24,9 +43,17 @@ function currentTool() {
   return selected?.textContent?.trim().toLowerCase() || null;
 }
 
+function currentColor() {
+  return document.querySelector('input[type="color"]')?.value || "#111827";
+}
+
+function currentWidth() {
+  return Number(document.querySelector('input[type="range"][min="1"][max="18"]')?.value || 3);
+}
+
 function currentPage() {
-  const node = [...document.querySelectorAll("span")].find((el) => /^Slide\\s+\\d+\\/\\d+$/i.test(el.textContent?.trim() || ""));
-  const match = node?.textContent?.trim().match(/^Slide\\s+(\\d+)\\//i);
+  const node = [...document.querySelectorAll("span")].find((el) => /^Slide\s+\d+\/\d+$/i.test(el.textContent?.trim() || ""));
+  const match = node?.textContent?.trim().match(/^Slide\s+(\d+)\//i);
   return match ? Number(match[1]) : 1;
 }
 
@@ -42,16 +69,13 @@ function publish(message) {
   if (!activeRoom?.localParticipant || activeRoom.state !== "connected") return;
   const payload = encoder.encode(JSON.stringify(message));
   if (payload.byteLength > 1200) return;
-  activeRoom.localParticipant.publishData(payload, {
-    reliable: false,
-    topic: TOPIC,
-  }).catch(() => {});
+  activeRoom.localParticipant.publishData(payload, { reliable: false, topic: TOPIC }).catch(() => {});
 }
 
 function flushOutgoing() {
   outgoingRaf = 0;
   if (!outgoing || !outgoing.points.length) return;
-  const points = outgoing.points.splice(0, 12);
+  const points = outgoing.points.splice(0, 10);
   publish({
     v: 1,
     type: "stroke",
@@ -71,35 +95,53 @@ function scheduleOutgoing() {
   if (!outgoingRaf) outgoingRaf = requestAnimationFrame(flushOutgoing);
 }
 
-function drawSegment(stroke, points) {
-  const ctx = canvas()?.getContext("2d");
-  if (!ctx || !points?.length || !LIVE_TOOLS.has(stroke.tool)) return;
+function drawLiveStroke(ctx, stroke) {
+  const points = stroke.points;
+  if (!points?.length) return;
+  const a = points[0];
+  const b = points[points.length - 1];
   ctx.save();
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.strokeStyle = stroke.tool === "eraser" ? "#fff" : stroke.color;
+  ctx.fillStyle = stroke.color;
   ctx.lineWidth = stroke.tool === "highlighter" ? stroke.width * 5 : stroke.width;
   ctx.globalAlpha = stroke.tool === "highlighter" ? 0.24 : 1;
-  ctx.beginPath();
-  if (stroke.last) ctx.moveTo(stroke.last.x, stroke.last.y);
-  points.forEach((p, i) => {
-    if (i === 0 && !stroke.last) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  });
-  if (points.length === 1) ctx.lineTo(points[0].x + 0.01, points[0].y + 0.01);
-  ctx.stroke();
+
+  if (stroke.tool === "line") {
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  } else if (stroke.tool === "rect") {
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+  } else if (stroke.tool === "circle") {
+    ctx.beginPath(); ctx.arc(a.x, a.y, Math.hypot(b.x - a.x, b.y - a.y), 0, Math.PI * 2); ctx.stroke();
+  } else if (stroke.tool === "arrow") {
+    const angle = Math.atan2(b.y - a.y, b.x - a.x);
+    const head = 16 + stroke.width * 2;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6));
+    ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6));
+    ctx.stroke();
+  } else if (LIVE_TOOLS.has(stroke.tool)) {
+    ctx.beginPath();
+    points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    if (points.length === 1) ctx.lineTo(points[0].x + 0.01, points[0].y + 0.01);
+    ctx.stroke();
+  }
   ctx.restore();
-  stroke.last = points[points.length - 1];
 }
 
 function renderIncoming() {
   incomingRaf = 0;
+  const target = ensureOverlay();
+  const ctx = target?.getContext("2d");
+  if (!ctx) return;
+  ctx.clearRect(0, 0, W, H);
   const page = currentPage();
   for (const [id, stroke] of incoming) {
     if (stroke.page !== page) continue;
-    const points = stroke.queue.splice(0, 24);
-    if (points.length) drawSegment(stroke, points);
-    if (stroke.done && !stroke.queue.length) incoming.delete(id);
+    drawLiveStroke(ctx, stroke);
+    if (stroke.done) incoming.delete(id);
   }
   if (incoming.size) incomingRaf = requestAnimationFrame(renderIncoming);
 }
@@ -111,11 +153,7 @@ function scheduleIncoming() {
 function handleData(payload, topic) {
   if (topic !== TOPIC) return;
   let message;
-  try {
-    message = JSON.parse(decoder.decode(payload));
-  } catch {
-    return;
-  }
+  try { message = JSON.parse(decoder.decode(payload)); } catch { return; }
   if (message?.v !== 1 || message.type !== "stroke" || !message.id) return;
   if (message.page !== currentPage()) return;
 
@@ -127,8 +165,7 @@ function handleData(payload, topic) {
       tool: message.tool,
       color: message.color,
       width: message.width,
-      last: null,
-      queue: [],
+      points: [],
       lastSeq: -1,
       done: false,
     };
@@ -137,7 +174,7 @@ function handleData(payload, topic) {
 
   if (typeof message.seq === "number" && message.seq <= stroke.lastSeq) return;
   if (typeof message.seq === "number") stroke.lastSeq = message.seq;
-  if (Array.isArray(message.points)) stroke.queue.push(...message.points);
+  if (Array.isArray(message.points)) stroke.points.push(...message.points);
   if (message.final) stroke.done = true;
   scheduleIncoming();
 }
@@ -157,6 +194,7 @@ function installRoomHook() {
       if (activeRoom === this) activeRoom = null;
       incoming.clear();
       outgoing = null;
+      if (overlay?.isConnected) overlay.getContext("2d")?.clearRect(0, 0, W, H);
     });
     return result;
   };
@@ -165,14 +203,14 @@ function installRoomHook() {
 function installWebSocketFilter() {
   const NativeWebSocket = window.WebSocket;
   if (!NativeWebSocket || NativeWebSocket.__dexmyWhiteboardFilter) return;
+  const descriptor = Object.getOwnPropertyDescriptor(NativeWebSocket.prototype, "onmessage");
+  if (!descriptor?.get || !descriptor?.set) return;
 
   class ClassroomWebSocket extends NativeWebSocket {
     constructor(...args) {
       super(...args);
       const url = String(args[0] || "");
       if (!url.includes("/ws/classroom/")) return;
-      const descriptor = Object.getOwnPropertyDescriptor(NativeWebSocket.prototype, "onmessage");
-      if (!descriptor?.get || !descriptor?.set) return;
       let handler = null;
       Object.defineProperty(this, "onmessage", {
         configurable: true,
@@ -184,7 +222,7 @@ function installWebSocketFilter() {
               const message = JSON.parse(event.data);
               if (message?.type === "whiteboard_live") return;
             } catch {
-              // Preserve normal WebSocket behavior for non-JSON messages.
+              // Keep normal WebSocket behavior for non-JSON payloads.
             }
             next(event);
           } : next;
@@ -194,10 +232,9 @@ function installWebSocketFilter() {
     }
   }
 
-  Object.defineProperty(ClassroomWebSocket, "CONNECTING", { value: NativeWebSocket.CONNECTING });
-  Object.defineProperty(ClassroomWebSocket, "OPEN", { value: NativeWebSocket.OPEN });
-  Object.defineProperty(ClassroomWebSocket, "CLOSING", { value: NativeWebSocket.CLOSING });
-  Object.defineProperty(ClassroomWebSocket, "CLOSED", { value: NativeWebSocket.CLOSED });
+  for (const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
+    Object.defineProperty(ClassroomWebSocket, key, { value: NativeWebSocket[key] });
+  }
   ClassroomWebSocket.__dexmyWhiteboardFilter = true;
   window.WebSocket = ClassroomWebSocket;
 }
@@ -207,28 +244,20 @@ function installPointerCapture() {
     const target = event.target;
     if (!(target instanceof HTMLCanvasElement) || target.width !== W || target.height !== H) return;
     const tool = currentTool();
-    if (!LIVE_TOOLS.has(tool) || !activeRoom) return;
+    if (!tool || !activeRoom) return;
     const point = pointFromEvent(event, target);
     outgoing = {
       id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
       page: currentPage(),
       tool,
-      color: "#111827",
-      width: 3,
+      color: currentColor(),
+      width: currentWidth(),
       seq: 0,
       points: [point],
     };
     publish({
-      v: 1,
-      type: "stroke",
-      id: outgoing.id,
-      page: outgoing.page,
-      tool: outgoing.tool,
-      color: outgoing.color,
-      width: outgoing.width,
-      seq: outgoing.seq++,
-      points: [point],
-      final: false,
+      v: 1, type: "stroke", id: outgoing.id, page: outgoing.page, tool: outgoing.tool,
+      color: outgoing.color, width: outgoing.width, seq: outgoing.seq++, points: [point], final: false,
     });
   }, true);
 
@@ -242,19 +271,12 @@ function installPointerCapture() {
   const finish = (event) => {
     if (!outgoing) return;
     const target = event.target instanceof HTMLCanvasElement ? event.target : canvas();
-    if (target?.width === W && target?.height === H) outgoing.points.push(pointFromEvent(event, target));
+    if (target?.width === W && target.height === H) outgoing.points.push(pointFromEvent(event, target));
     flushOutgoing();
     publish({
-      v: 1,
-      type: "stroke",
-      id: outgoing.id,
-      page: outgoing.page,
-      tool: outgoing.tool,
-      color: outgoing.color,
-      width: outgoing.width,
-      seq: outgoing.seq++,
-      points: outgoing.points.splice(0, 12),
-      final: true,
+      v: 1, type: "stroke", id: outgoing.id, page: outgoing.page, tool: outgoing.tool,
+      color: outgoing.color, width: outgoing.width, seq: outgoing.seq++,
+      points: outgoing.points.splice(0, 10), final: true,
     });
     outgoing = null;
   };
