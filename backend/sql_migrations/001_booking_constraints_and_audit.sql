@@ -2,15 +2,20 @@
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 -- 2. Add idempotency_key to bookings
-ALTER TABLE bookings ADD COLUMN IF NOT EXISTS idempotency_key UUID UNIQUE;
+ALTER TABLE bookings
+ADD COLUMN IF NOT EXISTS idempotency_key UUID;
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_bookings_idempotency_key
+ON bookings (idempotency_key)
+WHERE idempotency_key IS NOT NULL;
 
 -- 3. Create booking_assignment_audits table
 CREATE TABLE IF NOT EXISTS booking_assignment_audits (
     id UUID PRIMARY KEY,
     booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-    admin_id UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+    admin_id UUID REFERENCES users(id) ON DELETE SET NULL,
     prev_teacher UUID REFERENCES teacher_profiles(user_id) ON DELETE SET NULL,
-    new_teacher UUID NOT NULL REFERENCES teacher_profiles(user_id) ON DELETE CASCADE,
+    new_teacher UUID NOT NULL REFERENCES teacher_profiles(user_id) ON DELETE RESTRICT,
     action VARCHAR(20) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
