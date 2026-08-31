@@ -1,200 +1,34 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import { Room, RoomEvent, Track } from "livekit-client";
+import {useCallback,useEffect,useMemo,useRef,useState} from "react";
+import {useNavigate,useParams} from "react-router-dom";
+import {Room,RoomEvent,Track} from "livekit-client";
 import api from "../api/client";
-import { useAuth } from "../context/AuthContext";
-
-const TOOLS = ["select", "pen", "highlighter", "line", "arrow", "rect", "circle", "text", "sticky", "eraser"];
-const MAX_CHAT_FILE = 20 * 1024 * 1024;
-const MAX_PDF = 30 * 1024 * 1024;
-const CANVAS_W = 1600;
-const CANVAS_H = 900;
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-
-export default function Classroom() {
-  const { user } = useAuth();
-  const { sessionId } = useParams();
-  const navigate = useNavigate();
-  const isTeacher = user?.role === "teacher";
-  const canvasRef = useRef(null);
-  const wsRef = useRef(null);
-  const roomRef = useRef(null);
-  const drawingRef = useRef(null);
-  const historyRef = useRef([]);
-  const redoRef = useRef([]);
-  const pageRef = useRef(1);
-  const pagesRef = useRef([]);
-  const snapshotTimerRef = useRef(null);
-  const disposedRef = useRef(false);
-  const [status, setStatus] = useState("Connecting…");
-  const [notice, setNotice] = useState("");
-  const [chat, setChat] = useState([]);
-  const [message, setMessage] = useState("");
-  const [tool, setTool] = useState("pen");
-  const [color, setColor] = useState("#111827");
-  const [width, setWidth] = useState(3);
-  const [zoom, setZoom] = useState(1);
-  const [grid, setGrid] = useState(false);
-  const [pages, setPages] = useState([]);
-  const [page, setPage] = useState(1);
-  const [mic, setMic] = useState(false);
-  const [camera, setCamera] = useState(false);
-  const [screen, setScreen] = useState(false);
-  const [studentId, setStudentId] = useState(null);
-  const [timer, setTimer] = useState(null);
-  const [deadline, setDeadline] = useState(null);
-  const [permissions, setPermissions] = useState({ screen_share: false, annotate: false, mic: true, camera: true });
-  const [chatOpen, setChatOpen] = useState(true);
-
-  useEffect(() => { pageRef.current = page; }, [page]);
-  useEffect(() => { pagesRef.current = pages; }, [pages]);
-
-  const wsUrl = useMemo(() => {
-    const base = import.meta.env.VITE_API_BASE_URL;
-    if (!base || !sessionId) return null;
-    const u = new URL(base);
-    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-    return `${u.origin}/ws/classroom/${sessionId}`;
-  }, [sessionId]);
-
-  const sendWS = useCallback((payload) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(payload));
-  }, []);
-
-  const renderStroke = useCallback((s, record = true) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!canvas || !ctx || !s?.points?.length) return;
-    ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.strokeStyle = s.tool === "eraser" ? "#fff" : s.color; ctx.fillStyle = s.color;
-    ctx.lineWidth = s.tool === "highlighter" ? s.width * 5 : s.width;
-    ctx.globalAlpha = s.tool === "highlighter" ? 0.25 : 1;
-    const a = s.points[0]; const b = s.points[s.points.length - 1];
-    if (["pen", "highlighter", "eraser"].includes(s.tool)) {
-      ctx.beginPath(); s.points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
-    } else if (s.tool === "line") {
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    } else if (s.tool === "arrow") {
-      const angle = Math.atan2(b.y - a.y, b.x - a.x); const head = 16 + s.width * 2;
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6)); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6)); ctx.stroke();
-    } else if (s.tool === "rect") {
-      ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
-    } else if (s.tool === "circle") {
-      const radius = Math.hypot(b.x - a.x, b.y - a.y); ctx.beginPath(); ctx.arc(a.x, a.y, radius, 0, Math.PI * 2); ctx.stroke();
-    } else if (s.tool === "text") {
-      ctx.globalAlpha = 1; ctx.font = `${Math.max(16, s.width * 6)}px sans-serif`; ctx.fillText(s.text || "Text", a.x, a.y);
-    } else if (s.tool === "sticky") {
-      ctx.globalAlpha = 0.92; ctx.fillStyle = "#fff7a8"; ctx.fillRect(a.x, a.y, Math.max(160, b.x - a.x), Math.max(100, b.y - a.y));
-      ctx.globalAlpha = 1; ctx.fillStyle = "#111827"; ctx.font = "20px sans-serif";
-      String(s.text || "Note").split("\n").forEach((line, i) => ctx.fillText(line.slice(0, 45), a.x + 12, a.y + 28 + i * 24));
-    }
-    ctx.restore();
-    if (record) { historyRef.current.push(s); redoRef.current = []; }
-  }, []);
-
-  const drawBackground = useCallback(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); ctx.clearRect(0, 0, CANVAS_W, CANVAS_H); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-    const current = pagesRef.current[pageRef.current - 1];
-    if (current?.image_url) {
-      const img = new Image(); img.crossOrigin = "anonymous";
-      img.onload = () => { const scale = Math.min(CANVAS_W / img.width, CANVAS_H / img.height); const w = img.width * scale, h = img.height * scale; ctx.drawImage(img, (CANVAS_W - w) / 2, (CANVAS_H - h) / 2, w, h); historyRef.current.forEach((s) => renderStroke(s, false)); };
-      img.src = current.image_url;
-    } else historyRef.current.forEach((s) => renderStroke(s, false));
-  }, [renderStroke]);
-
-  useEffect(() => { drawBackground(); }, [page, pages, drawBackground]);
-
-  const redraw = useCallback(() => drawBackground(), [drawBackground]);
-  const point = (event) => { const r = canvasRef.current.getBoundingClientRect(); return { x: clamp((event.clientX - r.left) * CANVAS_W / r.width, 0, CANVAS_W), y: clamp((event.clientY - r.top) * CANVAS_H / r.height, 0, CANVAS_H) }; };
-  const queueSnapshot = useCallback(() => { clearTimeout(snapshotTimerRef.current); snapshotTimerRef.current = setTimeout(() => sendWS({ type: "save_snapshot", page_number: pageRef.current, canvas_json: { strokes: historyRef.current } }), 900); }, [sendWS]);
-
-  const onPointerDown = (event) => {
-    if (tool === "select") return;
-    if (!isTeacher && !permissions.annotate) return setNotice("The teacher has not enabled annotation for you.");
-    drawingRef.current = { tool, color, width, points: [point(event)] }; canvasRef.current.setPointerCapture(event.pointerId);
-  };
-  const onPointerMove = (event) => { if (!drawingRef.current) return; drawingRef.current.points.push(point(event)); redraw(); renderStroke(drawingRef.current, false); };
-  const onPointerUp = (event) => {
-    const stroke = drawingRef.current; drawingRef.current = null; if (!stroke) return;
-    if (["text", "sticky"].includes(stroke.tool)) { const text = window.prompt(stroke.tool === "sticky" ? "Sticky note text" : "Text"); if (!text) return; stroke.text = text; if (stroke.tool === "text") stroke.points = [stroke.points[0]]; }
-    renderStroke(stroke, true); sendWS({ type: "whiteboard_event", payload: { kind: "stroke", stroke, page_number: pageRef.current } }); queueSnapshot(); canvasRef.current?.releasePointerCapture?.(event.pointerId);
-  };
-  const undo = () => { const s = historyRef.current.pop(); if (!s) return; redoRef.current.push(s); redraw(); sendWS({ type: "whiteboard_event", payload: { kind: "undo", page_number: pageRef.current } }); queueSnapshot(); };
-  const redo = () => { const s = redoRef.current.pop(); if (!s) return; renderStroke(s, true); sendWS({ type: "whiteboard_event", payload: { kind: "stroke", stroke: s, page_number: pageRef.current } }); queueSnapshot(); };
-  const clearBoard = () => { historyRef.current = []; redoRef.current = []; redraw(); sendWS({ type: "whiteboard_event", payload: { kind: "clear", page_number: pageRef.current } }); queueSnapshot(); };
-  const changePage = (next) => { const target = clamp(next, 1, Math.max(1, pages.length)); setPage(target); sendWS({ type: "whiteboard_event", payload: { kind: "page", page_number: target } }); };
-
-  const toggleMedia = async (kind) => {
-    const participant = roomRef.current?.localParticipant; if (!participant) return;
-    try {
-      if (kind === "mic") { if (!isTeacher && !permissions.mic) return setNotice("Microphone access is disabled by the teacher."); const next = !mic; await participant.setMicrophoneEnabled(next); setMic(next); sendWS({ type: "toggle_av", kind: "mic", enabled: next }); }
-      if (kind === "camera") { if (!isTeacher && !permissions.camera) return setNotice("Camera access is disabled by the teacher."); const next = !camera; await participant.setCameraEnabled(next); setCamera(next); sendWS({ type: "toggle_av", kind: "camera", enabled: next }); }
-      if (kind === "screen") { if (!isTeacher && !permissions.screen_share) return setNotice("The teacher has not enabled screen sharing for you."); const next = !screen; await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" }); setScreen(next); sendWS({ type: "toggle_av", kind: "screen", enabled: next }); }
-    } catch (error) { setNotice(error?.message || "Media permission failed."); }
-  };
-
-  const attachTrack = useCallback((track, containerId, identity) => { const container = document.getElementById(containerId); if (!container) return; const el = track.attach(); el.autoplay = true; el.playsInline = true; el.dataset.participant = identity; el.className = "w-full h-full object-contain"; container.appendChild(el); }, []);
-
-  useEffect(() => {
-    if (!sessionId || !user || !wsUrl) return undefined;
-    disposedRef.current = false; let reconnectTimer;
-    const connect = async () => {
-      try {
-        setStatus("Authorizing…");
-        const { data } = await api.post("/classroom/join-token", { session_id: sessionId });
-        if (disposedRef.current) return;
-        const room = new Room({ adaptiveStream: true, dynacast: true }); roomRef.current = room;
-        room.on(RoomEvent.TrackSubscribed, (track, _publication, participant) => { if (track.kind === Track.Kind.Video) attachTrack(track, "dexmy-remote-video", participant.identity); if (track.kind === Track.Kind.Audio) attachTrack(track, "dexmy-remote-audio", participant.identity); });
-        room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
-        room.on(RoomEvent.LocalTrackPublished, (publication) => { if (publication.track?.kind === Track.Kind.Video) attachTrack(publication.track, "dexmy-local-video", user.id); });
-        room.on(RoomEvent.ParticipantConnected, () => setNotice("Participant connected.")); room.on(RoomEvent.ParticipantDisconnected, () => setNotice("Participant disconnected.")); room.on(RoomEvent.Disconnected, () => setStatus("Media disconnected — reconnecting…"));
-        await room.connect(data.livekit_url, data.livekit_token); setStatus("Live");
-        const token = localStorage.getItem("dexmy_token"); const ws = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token || "")}`); wsRef.current = ws;
-        ws.onmessage = (event) => {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "waiting_for_teacher") setStatus("Waiting for teacher…");
-          if (msg.type === "admitted" || msg.type === "class_started") { setStatus("Live"); if (msg.deadline) setDeadline(msg.deadline); if (msg.student_id) setStudentId(msg.student_id); }
-          if (msg.type === "student_joined") setStudentId(msg.user_id);
-          if (msg.type === "teacher_disconnected") setNotice("Teacher connection lost. Please wait for reconnection.");
-          if (msg.type === "student_disconnected") setNotice("Student disconnected.");
-          if (msg.type === "chat") setChat((items) => [...items, { mine: msg.sender_id === String(user.id), text: msg.message_text || "", file_url: msg.file_url, file_name: msg.file_name, at: new Date().toISOString() }]);
-          if (msg.type === "permission_update") { setPermissions((p) => ({ ...p, [msg.permission]: msg.granted })); if (!msg.granted && msg.permission === "screen_share") setScreen(false); if (!msg.granted && msg.permission === "camera") setCamera(false); if (!msg.granted && msg.permission === "mic") setMic(false); }
-          if (msg.type === "whiteboard_event") { const p = msg.payload || {}; if (p.kind === "stroke" && p.page_number === pageRef.current) renderStroke(p.stroke, true); if (p.kind === "undo" && p.page_number === pageRef.current) { historyRef.current.pop(); redraw(); } if (p.kind === "clear" && p.page_number === pageRef.current) { historyRef.current = []; redoRef.current = []; redraw(); } if (p.kind === "pdf") { setPages(p.pages || []); setPage(1); } if (p.kind === "page") setPage(p.page_number || 1); }
-          if (msg.type === "pdf_pages_ready") { setPages(msg.pages || []); setPage(1); }
-          if (msg.type === "whiteboard_state") { historyRef.current = msg.canvas_json?.strokes || []; redoRef.current = []; if (msg.image_url && pagesRef.current.length === 0) setPages([{ page_number: msg.page_number || 1, image_url: msg.image_url }]); setPage(msg.page_number || 1); setTimeout(redraw, 0); }
-          if (msg.type === "extend_prompt") setNotice(`Class ends in about ${Math.ceil(msg.seconds_remaining / 60)} minutes.`);
-          if (msg.type === "class_extended") { setDeadline(msg.new_deadline); setNotice("Class extended by 5 minutes."); }
-          if (msg.type === "permission_denied") setNotice(`Permission denied: ${msg.permission || "action"}.`);
-          if (msg.type === "session_ended") { setStatus("Class ended"); setTimeout(() => navigate("/dashboard"), 1800); }
-        };
-        ws.onclose = () => { if (!disposedRef.current) { setStatus("Classroom connection closed — retrying…"); reconnectTimer = setTimeout(connect, 2000); } };
-      } catch (error) { if (!disposedRef.current) { setStatus(error.response?.data?.detail || error.message || "Unable to join classroom"); reconnectTimer = setTimeout(connect, 3000); } }
-    };
-    connect();
-    return () => { disposedRef.current = true; clearTimeout(reconnectTimer); clearTimeout(snapshotTimerRef.current); wsRef.current?.close(); roomRef.current?.disconnect(); roomRef.current = null; };
-  }, [sessionId, user, wsUrl, attachTrack, navigate, redraw, renderStroke]);
-
-  useEffect(() => { if (!deadline) return undefined; const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))); tick(); const id = setInterval(tick, 1000); return () => clearInterval(id); }, [deadline]);
-
-  const sendMessage = (event) => { event.preventDefault(); const text = message.trim(); if (!text) return; sendWS({ type: "chat", message_text: text }); setChat((items) => [...items, { mine: true, text, at: new Date().toISOString() }]); setMessage(""); };
-  const uploadChatFile = async (file) => { if (!file) return; if (file.size > MAX_CHAT_FILE) return setNotice("Chat files are limited to 20 MB."); const form = new FormData(); form.append("file", file); try { const { data } = await api.post(`/classroom/sessions/${sessionId}/chat-file`, form); sendWS({ type: "chat", file_url: data.file_url, file_name: data.file_name, message_text: "" }); setChat((items) => [...items, { mine: true, text: "", file_url: data.file_url, file_name: data.file_name, at: new Date().toISOString() }]); } catch (error) { setNotice(error.response?.data?.detail || "Upload failed."); } };
-  const uploadPdf = async (file) => { if (!isTeacher || !file) return; if (file.size > MAX_PDF) return setNotice("PDFs are limited to 30 MB."); const form = new FormData(); form.append("file", file); try { const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`, form); const loaded = data.map((item, i) => ({ page_number: i + 1, image_url: item.file_url })); historyRef.current = []; redoRef.current = []; setPages(loaded); setPage(1); sendWS({ type: "whiteboard_event", payload: { kind: "pdf", pages: loaded } }); setNotice(`${loaded.length} PDF page${loaded.length === 1 ? "" : "s"} loaded.`); } catch (error) { setNotice(error.response?.data?.detail || "PDF upload failed."); } };
-  const setPermission = (permission, granted) => { if (!studentId) return setNotice("Waiting for the student to join."); setPermissions((p) => ({ ...p, [permission]: granted })); sendWS({ type: "permission_update", target_user_id: studentId, permission, granted }); };
-  const endClass = async () => { if (!isTeacher || !window.confirm("End this class for both participants?")) return; try { await api.post(`/classroom/sessions/${sessionId}/end`); } catch (error) { setNotice(error.response?.data?.detail || "Could not end class."); } };
-
-  if (!sessionId) return <div className="min-h-screen bg-slate-950 text-white grid place-items-center">Classroom link is incomplete.</div>;
-  return <div className="min-h-screen bg-slate-950 text-white flex flex-col">
-    <header className="h-14 shrink-0 border-b border-slate-800 bg-slate-900 px-3 md:px-5 flex items-center justify-between"><div><div className="font-bold">Dexmy Classroom</div><div className="text-xs text-slate-400">{status} · {isTeacher ? "Teacher" : "Student"}</div></div><div className="flex items-center gap-2 text-xs"><span className="rounded-full bg-emerald-500/10 text-emerald-400 px-2.5 py-1">● Secure</span>{timer !== null && <span className="font-mono">{Math.floor(timer / 60)}:{String(timer % 60).padStart(2, "0")}</span>}</div></header>
-    <div className="flex-1 min-h-0 grid lg:grid-cols-[minmax(0,1fr)_340px]">
-      <section className="min-w-0 min-h-0 flex flex-col">
-        <div className="grid md:grid-cols-[minmax(0,1fr)_250px] gap-2 p-2 bg-slate-950 h-[260px] shrink-0"><div id="dexmy-remote-video" className="relative rounded-xl bg-black overflow-hidden flex items-center justify-center"><span className="absolute top-2 left-2 z-20 rounded bg-black/60 px-2 py-1 text-xs">Participant</span></div><div id="dexmy-local-video" className="relative rounded-xl bg-slate-900 border border-slate-800 overflow-hidden flex items-center justify-center"><span className="absolute top-2 left-2 z-20 rounded bg-black/60 px-2 py-1 text-xs">You</span><span className="text-xs text-slate-500">Camera off</span></div><div id="dexmy-remote-audio" className="hidden" /></div>
-        <div className="px-2 flex flex-wrap items-center gap-1 border-y border-slate-800 bg-slate-900 py-2">{TOOLS.map((item) => <button key={item} onClick={() => setTool(item)} className={`px-2.5 py-1.5 rounded text-xs capitalize ${tool === item ? "bg-red-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}>{item}</button>)}<label className="ml-1 flex items-center gap-1 text-xs text-slate-400">Color <input type="color" value={color} onChange={(e) => setColor(e.target.value)} /></label><label className="flex items-center gap-1 text-xs text-slate-400">Size <input type="range" min="1" max="18" value={width} onChange={(e) => setWidth(Number(e.target.value))} /></label><button onClick={undo} className="px-2.5 py-1.5 bg-slate-800 rounded text-xs">Undo</button><button onClick={redo} className="px-2.5 py-1.5 bg-slate-800 rounded text-xs">Redo</button><button onClick={clearBoard} className="px-2.5 py-1.5 bg-slate-800 rounded text-xs">Clear</button><button onClick={() => setGrid((v) => !v)} className={`px-2.5 py-1.5 rounded text-xs ${grid ? "bg-slate-600" : "bg-slate-800"}`}>Grid</button><button onClick={() => setZoom((v) => clamp(v - 0.1, 0.5, 2))} className="px-2.5 py-1.5 bg-slate-800 rounded text-xs">−</button><span className="text-xs text-slate-400">{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((v) => clamp(v + 0.1, 0.5, 2))} className="px-2.5 py-1.5 bg-slate-800 rounded text-xs">+</button>{isTeacher && <label className="ml-auto px-2.5 py-1.5 bg-slate-800 rounded text-xs cursor-pointer">PDF<input hidden type="file" accept="application/pdf,.pdf" onChange={(e) => uploadPdf(e.target.files?.[0])} /></label>}</div>
-        <div className="flex-1 min-h-0 bg-slate-700 overflow-auto p-2"><div className="mx-auto relative" style={{ width: `${CANVAS_W * zoom}px`, height: `${CANVAS_H * zoom}px` }}><canvas ref={canvasRef} width={CANVAS_W} height={CANVAS_H} className="absolute inset-0 bg-white rounded shadow-xl touch-none" style={{ width: "100%", height: "100%", backgroundImage: grid ? "linear-gradient(#e5e7eb 1px, transparent 1px), linear-gradient(90deg, #e5e7eb 1px, transparent 1px)" : undefined, backgroundSize: "32px 32px" }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} /></div></div>
-        <div className="shrink-0 bg-slate-900 border-t border-slate-800 px-2 py-2 flex flex-wrap items-center gap-2"><button onClick={() => toggleMedia("mic")} className={`px-3 py-2 rounded-lg text-xs ${mic ? "bg-emerald-600" : "bg-slate-800"}`}>{mic ? "Mute" : "Mic"}</button><button onClick={() => toggleMedia("camera")} className={`px-3 py-2 rounded-lg text-xs ${camera ? "bg-emerald-600" : "bg-slate-800"}`}>{camera ? "Camera off" : "Camera"}</button><button onClick={() => toggleMedia("screen")} className={`px-3 py-2 rounded-lg text-xs ${screen ? "bg-emerald-600" : "bg-slate-800"}`}>{screen ? "Stop share" : "Share screen"}</button><div className="flex items-center gap-1 ml-1"><button onClick={() => changePage(page - 1)} className="px-2 py-2 bg-slate-800 rounded">‹</button><span className="text-xs text-slate-400 min-w-16 text-center">Page {page}{pages.length ? ` / ${pages.length}` : ""}</span><button onClick={() => changePage(page + 1)} disabled={!pages.length || page >= pages.length} className="px-2 py-2 bg-slate-800 rounded disabled:opacity-30">›</button></div>{isTeacher && <><button onClick={() => sendWS({ type: "extend_class" })} className="px-3 py-2 bg-amber-600 rounded-lg text-xs">+5 min</button><button onClick={endClass} className="px-3 py-2 bg-red-600 rounded-lg text-xs">End class</button></>}<button onClick={() => setChatOpen((v) => !v)} className="ml-auto px-3 py-2 bg-slate-800 rounded-lg text-xs">{chatOpen ? "Hide chat" : "Show chat"}</button></div>{notice && <div className="px-3 py-2 text-xs bg-slate-900 text-amber-300 border-t border-slate-800">{notice}</div>}
-      </section>
-      {chatOpen && <aside className="border-l border-slate-800 bg-slate-900 min-h-0 flex flex-col"><div className="p-4 border-b border-slate-800"><div className="font-semibold">Class chat</div><div className="text-xs text-slate-500 mt-1">Live classroom messages and attachments.</div></div><div className="flex-1 overflow-y-auto p-3 space-y-2">{chat.length === 0 && <div className="text-xs text-slate-500 text-center py-10">No messages yet.</div>}{chat.map((item, i) => <div key={`${item.at}-${i}`} className={`flex ${item.mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[85%] rounded-xl px-3 py-2 text-sm ${item.mine ? "bg-red-600" : "bg-slate-800"}`}>{item.text && <div>{item.text}</div>}{item.file_url && <a className="underline text-xs break-all" href={item.file_url} target="_blank" rel="noreferrer">{item.file_name || "Attachment"}</a>}</div></div>)}</div><form onSubmit={sendMessage} className="p-3 border-t border-slate-800 flex gap-2"><input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Type a message…" className="flex-1 min-w-0 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" /><label className="cursor-pointer px-3 py-2 bg-slate-800 rounded-lg text-xs">📎<input hidden type="file" onChange={(e) => { uploadChatFile(e.target.files?.[0]); e.target.value = ""; }} /></label><button className="px-3 py-2 bg-red-600 rounded-lg text-xs">Send</button></form>{isTeacher && <div className="p-3 border-t border-slate-800 space-y-2"><div className="text-xs font-semibold text-slate-400">Student controls</div><div className="grid grid-cols-2 gap-2">{[["annotate", "Whiteboard"], ["screen_share", "Screen share"], ["mic", "Mic"], ["camera", "Camera"]].map(([key, label]) => <button key={key} onClick={() => setPermission(key, !permissions[key])} className={`px-2 py-2 rounded text-xs ${permissions[key] ? "bg-emerald-600/80" : "bg-slate-800 text-slate-400"}`}>{permissions[key] ? "✓ " : "✕ "}{label}</button>)}</div></div>}</aside>}
-    </div>
-  </div>;
+import {useAuth} from "../context/AuthContext";
+const W=1600,H=900,TOOLS=[["select","Select"],["pen","Pen"],["highlighter","Highlight"],["line","Line"],["arrow","Arrow"],["rect","Rectangle"],["circle","Circle"],["text","Text"],["sticky","Sticky"],["eraser","Eraser"]],DRAW=new Set(TOOLS.map(x=>x[0]).filter(x=>x!=="select"));
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+export default function Classroom(){
+ const {user}=useAuth(),{sessionId}=useParams(),navigate=useNavigate(),teacher=user?.role==="teacher",email=user?.email||"";
+ const canvas=useRef(null),ws=useRef(null),room=useRef(null),draw=useRef(null),history=useRef([]),redo=useRef([]),pages=useRef([{page_number:1,image_url:null}]),page=useRef(1),live=useRef(new Map()),pending=useRef(null),liveTimer=useRef(null),snap=useRef(null),dead=useRef(false);
+ const [status,setStatus]=useState("Connecting…"),[notice,setNotice]=useState(""),[tool,setTool]=useState("pen"),[color,setColor]=useState("#111827"),[width,setWidth]=useState(3),[grid,setGrid]=useState(false),[slide,setSlide]=useState(1),[slideList,setSlideList]=useState([{page_number:1,image_url:null}]),[chat,setChat]=useState([]),[message,setMessage]=useState(""),[mic,setMic]=useState(false),[camera,setCamera]=useState(false),[screen,setScreen]=useState(false),[share,setShare]=useState(false),[studentId,setStudentId]=useState(null),[peer,setPeer]=useState(""),[permissions,setPermissions]=useState({mic:true,camera:true,annotate:false,screen_share:false}),[pdfLoading,setPdfLoading]=useState(false),[ending,setEnding]=useState(false),[notes,setNotes]=useState(null),[selected,setSelected]=useState(null);
+ const send=useCallback(x=>{if(ws.current?.readyState===WebSocket.OPEN)ws.current.send(JSON.stringify(x))},[]);
+ const drawStroke=useCallback((s,record=false)=>{const c=canvas.current,ctx=c?.getContext("2d");if(!ctx||!s?.points?.length)return;const a=s.points[0],b=s.points.at(-1);ctx.save();ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle=s.tool==="eraser"?"#fff":s.color;ctx.fillStyle=s.color;ctx.lineWidth=s.tool==="highlighter"?s.width*5:s.width;ctx.globalAlpha=s.tool==="highlighter"?.24:1;if(["pen","highlighter","eraser"].includes(s.tool)){ctx.beginPath();s.points.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.stroke()}else if(s.tool==="line"){ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}else if(s.tool==="arrow"){const q=Math.atan2(b.y-a.y,b.x-a.x),h=16+s.width*2;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-h*Math.cos(q-Math.PI/6),b.y-h*Math.sin(q-Math.PI/6));ctx.moveTo(b.x,b.y);ctx.lineTo(b.x-h*Math.cos(q+Math.PI/6),b.y-h*Math.sin(q+Math.PI/6));ctx.stroke()}else if(s.tool==="rect")ctx.strokeRect(a.x,a.y,b.x-a.x,b.y-a.y);else if(s.tool==="circle"){ctx.beginPath();ctx.arc(a.x,a.y,Math.hypot(b.x-a.x,b.y-a.y),0,Math.PI*2);ctx.stroke()}else if(s.tool==="text"){ctx.globalAlpha=1;ctx.font=`${Math.max(18,s.width*6)}px sans-serif`;ctx.fillText(s.text||"Text",a.x,a.y)}else if(s.tool==="sticky"){ctx.globalAlpha=.92;ctx.fillStyle="#fff7a8";ctx.fillRect(a.x,a.y,Math.max(160,b.x-a.x),Math.max(100,b.y-a.y));ctx.globalAlpha=1;ctx.fillStyle="#111827";ctx.font="20px sans-serif";String(s.text||"Note").split("\n").forEach((x,i)=>ctx.fillText(x.slice(0,45),a.x+12,a.y+28+i*24))}ctx.restore();if(record){if(!s.id)s.id=crypto.randomUUID();history.current=history.current.filter(x=>x.id!==s.id);history.current.push(s);redo.current=[]}},[]);
+ const redraw=useCallback(async()=>{const c=canvas.current;if(!c)return;const ctx=c.getContext("2d");ctx.clearRect(0,0,W,H);ctx.fillStyle="#fff";ctx.fillRect(0,0,W,H);const bg=pages.current[page.current-1]?.image_url;if(bg){await new Promise(r=>{const img=new Image();img.crossOrigin="anonymous";img.onload=()=>{const k=Math.min(W/img.width,H/img.height),w=img.width*k,h=img.height*k;ctx.drawImage(img,(W-w)/2,(H-h)/2,w,h);r()};img.onerror=r;img.src=bg})}if(grid){ctx.strokeStyle="#e5e7eb";ctx.lineWidth=1;for(let x=0;x<=W;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}for(let y=0;y<=H;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}}history.current.forEach(s=>drawStroke(s));ctx.save();ctx.globalAlpha=.55;ctx.fillStyle="#64748b";ctx.font="18px sans-serif";ctx.textAlign="right";ctx.fillText(email,W-30,H-25);ctx.globalAlpha=.9;ctx.textAlign="left";ctx.fillStyle="#111827";ctx.font="bold 24px sans-serif";ctx.fillText("DEXMY",30,40);ctx.restore()},[grid,email,drawStroke]);
+ useEffect(()=>{pages.current=slideList;page.current=slide;redraw()},[slide,slideList,grid,redraw]);
+ const save=useCallback(async()=>{clearTimeout(snap.current);snap.current=setTimeout(async()=>{await redraw();const image_base64=canvas.current?.toDataURL("image/png");send({type:"save_snapshot",page_number:page.current,canvas_json:{strokes:history.current.map(x=>({...x}))},image_base64})},600)},[redraw,send]);
+ const qLive=useCallback((s,pts,final=false)=>{const p=pending.current;if(p?.id===s.id){p.points.push(...pts);p.final=final}else pending.current={id:s.id,stroke:{id:s.id,tool:s.tool,color:s.color,width:s.width},points:[...pts],page_number:page.current,final}},[]);
+ const flush=useCallback((force=false)=>{const p=pending.current;if(!p||(!force&&!p.points.length))return;pending.current=null;send({type:"whiteboard_live",payload:{stroke:{...p.stroke,points:p.points.slice(0,64)},page_number:p.page_number,final:p.final}});if(p.points.length>64){p.points=p.points.slice(64);p.final=false;pending.current=p}},[send]);
+ useEffect(()=>{liveTimer.current=setInterval(()=>flush(false),20);return()=>{clearInterval(liveTimer.current);flush(true);clearTimeout(snap.current)}},[flush]);
+ const point=e=>{const r=canvas.current.getBoundingClientRect();return{x:clamp((e.clientX-r.left)*W/r.width,0,W),y:clamp((e.clientY-r.top)*H/r.height,0,H)}};
+ const down=e=>{const p=point(e);if(tool==="select"){let hit=null;for(let i=history.current.length-1;i>=0;i--){const s=history.current[i],xs=s.points.map(x=>x.x),ys=s.points.map(x=>x.y);if(p.x>=Math.min(...xs)-12&&p.x<=Math.max(...xs)+12&&p.y>=Math.min(...ys)-12&&p.y<=Math.max(...ys)+12){hit=s;break}}setSelected(hit?.id||null);if(hit&&(teacher||permissions.annotate))draw.current={move:true,id:hit.id,last:p};return}if(!DRAW.has(tool))return;if(!teacher&&!permissions.annotate)return setNotice("The teacher has not enabled annotation for you.");draw.current={id:crypto.randomUUID(),tool,color,width,points:[p]};canvas.current.setPointerCapture(e.pointerId);if(["pen","highlighter","eraser"].includes(tool))qLive(draw.current,[p])};
+ const move=e=>{const p=point(e),d=draw.current;if(!d)return;if(d.move){const s=history.current.find(x=>x.id===d.id);if(!s)return;const dx=p.x-d.last.x,dy=p.y-d.last.y;s.points=s.points.map(q=>({x:q.x+dx,y:q.y+dy}));d.last=p;redraw();return}d.points.push(p);if(["pen","highlighter","eraser"].includes(d.tool)){const n=d.points.length;drawStroke({...d,points:[d.points[n-2],d.points[n-1]]});qLive(d,[p])}else redraw()};
+ const up=async e=>{const d=draw.current;draw.current=null;canvas.current?.releasePointerCapture?.(e.pointerId);if(!d)return;if(d.move){const s=history.current.find(x=>x.id===d.id);if(s)send({type:"whiteboard_event",payload:{kind:"move",stroke:s,page_number:page.current}});return save()}if(["text","sticky"].includes(d.tool)){const t=window.prompt(d.tool==="sticky"?"Sticky note text":"Text");if(!t)return;d.text=t;if(d.tool==="text")d.points=[d.points[0]]}drawStroke(d,true);if(["pen","highlighter","eraser"].includes(d.tool)){qLive(d,[],true);flush(true)}else flush(true);send({type:"whiteboard_event",payload:{kind:"stroke",stroke:d,page_number:page.current}});save()};
+ const undo=()=>{const s=history.current.pop();if(!s)return;redo.current.push(s);redraw();send({type:"whiteboard_event",payload:{kind:"undo",page_number:page.current}});save()};
+ const redoDo=()=>{const s=redo.current.pop();if(!s)return;drawStroke(s,true);send({type:"whiteboard_event",payload:{kind:"stroke",stroke:s,page_number:page.current}});save()};
+ const clearBoard=()=>{history.current=[];redo.current=[];redraw();send({type:"whiteboard_event",payload:{kind:"clear",page_number:page.current}});save()};
+ const addSlide=async()=>{await save();const n=slideList.length+1;history.current=[];redo.current=[];setSlideList(x=>[...x,{page_number:n,image_url:null}]);setSlide(n);send({type:"whiteboard_event",payload:{kind:"page",page_number:n}})};
+ const goSlide=async n=>{const t=clamp(n,1,slideList.length);if(t===slide)return;await save();history.current=[];redo.current=[];setSlide(t);send({type:"whiteboard_event",payload:{kind:"page",page_number:t}})};
+ const uploadPdf=async file=>{if(!teacher||!file)return;if(!file.name.toLowerCase().endsWith(".pdf"))return setNotice("Please select a PDF file.");setPdfLoading(true);try{const f=new FormData();f.append("file",file);const{data}=await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`,f);const p=data.map((x,i)=>({page_number:i+1,image_url:x.file_url}));history.current=[];redo.current=[];setSlideList(p.length?p:[{page_number:1,image_url:null}]);setSlide(1);send({type:"whiteboard_event",payload:{kind:"pdf",pages:p}});setNotice(`${p.length} PDF slides imported.`)}catch(e){setNotice(e.response?.data?.detail||"PDF upload failed. Check that the PDF is readable and under 30MB.")}finally{setPdfLoading(false)}};
+ const media=async k=>{const p=room.current?.localParticipant;if(!p)return;try{if(k==="mic"){if(!teacher&&!permissions.mic)return setNotice("Microphone permission is disabled.");const n=!mic;await p.setMicrophoneEnabled(n);setMic(n)}if(k==="camera"){if(!teacher&&!permissions.camera)return setNotice("Camera permission is disabled.");const n=!camera;await p.setCameraEnabled(n);setCamera(n)}if(k==="screen"){if(!teacher&&!permissions.screen_share)return setNotice("Screen sharing is disabled.");const n=!screen;await p.setScreenShareEnabled(n,{contentHint:"detail",selfBrowserSurface:"exclude"});setScreen(n);setShare(n)}}catch(e){setNotice(e?.message||"Could not change media.")}};
+ useEffect(()=>{if(!sessionId||!user||!wsUrl)return;dead.current=false;let reconnect;const connect=async()=>{try{const{data}=await api.post("/classroom/join-token",{session_id:sessionId});if(dead.current)return;const r=new Room({adaptiveStream:true,dynacast:true});room.current=r;r.on(RoomEvent.TrackSubscribed,(t,p,who)=>{const id=p.source===Track.Source.ScreenShare?"remote-screen":t.kind===Track.Kind.Video?"remote-video":"remote-audio",box=document.getElementById(id);if(box){box.innerHTML="";const el=t.attach();el.autoplay=true;el.playsInline=true;el.className="absolute inset-0 w-full h-full object-contain bg-black";box.appendChild(el)}if(p.source===Track.Source.ScreenShare)setShare(true);setPeer(who.name||"Participant")});r.on(RoomEvent.LocalTrackPublished,p=>{const id=p.source===Track.Source.ScreenShare?"local-screen":"local-video",box=document.getElementById(id);if(box&&p.track){box.innerHTML="";const el=p.track.attach();el.autoplay=true;el.playsInline=true;el.muted=true;el.className="absolute inset-0 w-full h-full object-contain";box.appendChild(el)}});await r.connect(data.livekit_url,data.livekit_token);setStatus("Live");const token=localStorage.getItem("dexmy_token"),s=new WebSocket(`${wsUrl}?token=${encodeURIComponent(token||"")}`);ws.current=s;s.onmessage=ev=>{const m=JSON.parse(ev.data);if(m.type==="waiting_for_teacher")setStatus("Waiting for teacher…");if(m.type==="admitted"||m.type==="class_started")setStudentId(m.student_id||null);if(m.type==="student_joined"){setStudentId(m.user_id);setPeer(m.name||"Student")}if(m.type==="participant_info")setPeer(m.name||"Participant");if(m.type==="chat")setChat(x=>[...x,{mine:m.sender_id===String(user.id),text:m.message_text||"",file_url:m.file_url,file_name:m.file_name}]);if(m.type==="permissions_state")setPermissions(x=>({...x,...m.permissions}));if(m.type==="permission_update"){setPermissions(x=>({...x,[m.permission]:m.granted}));if(!m.granted&&m.permission==="mic")setMic(false);if(!m.granted&&m.permission==="camera")setCamera(false);if(!m.granted&&m.permission==="screen_share"){setScreen(false);setShare(false)}}if(m.type==="pdf_pages_ready"){const p=m.pages||[{page_number:1,image_url:null}];setSlideList(p);setSlide(1);history.current=[];redo.current=[]}if(m.type==="whiteboard_state"){const p=m.pages?.length?m.pages:[{page_number:m.page_number||1,image_url:m.image_url||null}];setSlideList(p);setSlide(m.page_number||1);history.current=m.canvas_json?.strokes||[];redo.current=[];setTimeout(redraw,0)}if(m.type==="whiteboard_live"){const p=m.payload||{},s=p.stroke;if(p.page_number!==page.current||!s?.id)return;let l=live.current.get(s.id);if(!l){l={...s,points:[]};live.current.set(s.id,l)}const last=l.points.at(-1),fresh=(s.points||[]).filter(q=>!last||q.x!==last.x||q.y!==last.y);if(fresh.length){const ctx=canvas.current?.getContext("2d");if(ctx){ctx.save();ctx.lineCap="round";ctx.lineJoin="round";ctx.strokeStyle=l.tool==="eraser"?"#fff":l.color;ctx.lineWidth=l.tool==="highlighter"?l.width*5:l.width;ctx.globalAlpha=l.tool==="highlighter"?.24:1;ctx.beginPath();(last?[last,...fresh]:fresh).forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y));ctx.stroke();ctx.restore()}l.points.push(...fresh)}if(p.final){live.current.delete(s.id);if(!history.current.some(x=>x.id===s.id))history.current.push({...l,points:[...l.points]})}}if(m.type==="whiteboard_event"){const p=m.payload||{};if(p.kind==="stroke"&&p.page_number===page.current&&p.stroke){drawStroke(p.stroke,true);live.current.delete(p.stroke.id)}if(p.kind==="move"&&p.page_number===page.current){const i=history.current.findIndex(x=>x.id===p.stroke?.id);if(i>=0)history.current[i]=p.stroke;redraw()}if(p.kind==="delete"&&p.page_number===page.current){history.current=history.current.filter(x=>x.id!==p.stroke_id);redraw()}if(p.kind==="undo"&&p.page_number===page.current){history.current.pop();redraw()}if(p.kind==="clear"&&p.page_number===page.current){history.current=[];redo.current=[];redraw()}if(p.kind==="pdf"){setSlideList(p.pages||[{page_number:1,image_url:null}]);setSlide(1);history.current=[];redo.current=[]}if(p.kind==="page"){setSlide(clamp(p.page_number||1,1,pages.current.length));history.current=[];redo.current=[]}}if(m.type==="session_ended"){setEnding(true);api.get(`/classroom/sessions/${sessionId}/notes`).then(x=>setNotes(x.data.pdf_url)).catch(()=>{});setTimeout(()=>navigate("/dashboard"),2200)}};s.onclose=e=>{if(!dead.current&&!([4401,4403,4404,4409].includes(e.code)))reconnect=setTimeout(connect,2200)}}catch(e){if(!dead.current)reconnect=setTimeout(connect,3000)}};connect();return()=>{dead.current=true;clearTimeout(reconnect);ws.current?.close();room.current?.disconnect()}},[sessionId,user,wsUrl,teacher,drawStroke,redraw]);
+ const end=async()=>{if(!teacher||ending)return;if(!window.confirm("End this class for both participants?"))return;setEnding(true);try{const{data}=await api.post(`/classroom/sessions/${sessionId}/end`);if(data?.pdf_url)setNotes(data.pdf_url)}catch(e){setEnding(false);setNotice(e.response?.data?.detail||"Could not end class.")}};
+ return <div className="h-[100dvh] w-full overflow-hidden bg-[#0b1020] text-white flex flex-col select-none"><header className="h-14 shrink-0 px-4 border-b border-white/10 bg-[#111827] flex items-center justify-between"><div><b>Dexmy Classroom</b><div className="text-[11px] text-slate-400">{status}</div></div><span className="text-xs text-slate-400">Secure classroom</span></header><main className="flex-1 min-h-0 flex overflow-hidden"><section className="flex-1 min-w-0 flex flex-col"><div className="h-12 shrink-0 px-2 flex items-center gap-1 border-b border-white/10 bg-[#0f172a] overflow-x-auto">{TOOLS.map(([id,l])=><button key={id} onClick={()=>setTool(id)} className={`px-2.5 py-1.5 rounded text-[11px] shrink-0 ${tool===id?"bg-red-600":"bg-white/5"}`}>{l}</button>)}<button onClick={undo} className="px-2.5 py-1.5 bg-white/5 rounded text-[11px]">Undo</button><button onClick={redoDo} className="px-2.5 py-1.5 bg-white/5 rounded text-[11px]">Redo</button><button onClick={clearBoard} className="px-2.5 py-1.5 bg-white/5 rounded text-[11px]">Clear</button><button onClick={()=>setGrid(x=>!x)} className="px-2.5 py-1.5 bg-white/5 rounded text-[11px]">Grid</button>{teacher&&<label className="px-3 py-1.5 bg-white/5 rounded text-[11px] cursor-pointer">Upload PDF<input hidden type="file" accept="application/pdf,.pdf" disabled={pdfLoading} onChange={e=>{uploadPdf(e.target.files?.[0]);e.target.value=""}}/></label>}<button onClick={addSlide} className="px-3 py-1.5 bg-white/5 rounded text-[11px]">＋ Slide</button><input type="color" value={color} onChange={e=>setColor(e.target.value)} className="w-7 h-7 ml-auto"/><select value={width} onChange={e=>setWidth(Number(e.target.value))} className="bg-white/10 text-xs rounded p-1"><option value="2">2px</option><option value="3">3px</option><option value="5">5px</option><option value="8">8px</option><option value="12">12px</option></select></div><div className="flex-1 min-h-0 flex items-center justify-center p-3 bg-[#070b16]"><div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl"><canvas ref={canvas} width={W} height={H} className="absolute inset-0 w-full h-full touch-none" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}/>{slideList.length>1&&<div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2 bg-black/70 rounded-xl px-2 py-1.5"><button onClick={()=>goSlide(slide-1)}>‹</button><span className="text-xs px-2">Slide {slide}/{slideList.length}</span><button onClick={()=>goSlide(slide+1)}>›</button></div>}{pdfLoading&&<div className="absolute inset-0 z-30 grid place-items-center bg-black/55"><div className="bg-[#111827] rounded-2xl p-6">Importing PDF slides…</div></div>}</div></div><div className="h-16 shrink-0 border-t border-white/10 bg-[#111827] flex items-center justify-center gap-2"><button onClick={()=>media("mic")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{mic?"Mute":"Mic"}</button><button onClick={()=>media("camera")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{camera?"Camera off":"Camera"}</button><button onClick={()=>media("screen")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{screen?"Stop sharing":"Share screen"}</button>{teacher&&<button onClick={end} disabled={ending} className="h-10 px-4 rounded-full bg-red-600 text-xs">{ending?"Ending…":"End class"}</button>}</div></section><aside className="w-[380px] shrink-0 border-l border-white/10 bg-[#0f172a] flex flex-col"><div className="h-14 px-3 border-b border-white/10 flex items-center text-sm font-semibold">{peer||(teacher?"Dexmy Student":"Dexmy Tutor")}</div><div className="h-[280px] shrink-0 p-2 flex flex-col gap-2"><div id="remote-video" className="relative flex-1 rounded-lg bg-black overflow-hidden"/><div id="local-video" className="relative flex-1 rounded-lg bg-slate-800 overflow-hidden"/><div id="remote-screen" className={share?"relative flex-1 rounded-lg bg-black overflow-hidden":"hidden"}/><div id="local-screen" className="hidden"/><div id="remote-audio" className="hidden"/></div>{teacher&&<div className="px-3 pb-2"><div className="text-[10px] uppercase text-slate-500 mb-1">Student permissions</div><div className="grid grid-cols-2 gap-1.5">{[["mic","Mic"],["camera","Camera"],["annotate","Annotate"],["screen_share","Screen share"]].map(([k,l])=><button key={k} onClick={()=>{if(!studentId)return setNotice("Waiting for the student to join.");send({type:"permission_update",target_user_id:studentId,permission:k,granted:!permissions[k]})}} className={`px-2 py-2 rounded text-[10px] ${permissions[k]?"bg-emerald-600/80":"bg-white/5"}`}>{permissions[k]?"✓ ":""}{l}</button>)}</div></div>}<div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">{chat.length===0&&<div className="h-full grid place-items-center text-xs text-slate-600">No messages yet</div>}{chat.map((m,i)=><div key={i} className={`flex ${m.mine?"justify-end":"justify-start"}`}><div className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs ${m.mine?"bg-red-600":"bg-white/10"}`}>{m.file_url?<a href={m.file_url} target="_blank" rel="noreferrer" className="underline">{m.file_name||"Open file"}</a>:m.text}</div></div>)}</div><form onSubmit={e=>{e.preventDefault();const t=message.trim();if(!t)return;send({type:"chat",message_text:t});setChat(x=>[...x,{mine:true,text:t}]);setMessage("")}} className="shrink-0 p-2 border-t border-white/10 flex gap-2"><input value={message} onChange={e=>setMessage(e.target.value)} placeholder="Message…" className="flex-1 h-9 bg-white/5 rounded px-3 text-xs"/><button className="h-9 px-3 bg-red-600 rounded text-xs">Send</button></form></aside></main>{(notice||ending)&&<div className="fixed inset-0 z-[100] grid place-items-center pointer-events-none">{ending?<div className="pointer-events-auto bg-[#111827] rounded-2xl px-7 py-6 text-center"><b>Class ended — preparing notes</b>{notes&&<a className="block mt-3 text-xs underline text-emerald-300" href={notes} target="_blank" rel="noreferrer">Open class notes PDF</a>}</div>:<button onClick={()=>setNotice("")} className="pointer-events-auto px-4 py-2 rounded-full bg-slate-800 border border-white/10 text-xs">{notice}</button>}</div>}</div>;
 }
