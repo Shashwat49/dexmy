@@ -183,3 +183,31 @@ table {
 .bg-white {
   background-color: #F2ECDD !important;
 }
+
+/* ---- Classroom presentation/video fixes ----
+   The participant column is intentionally stacked: remote participant on top,
+   local teacher/student preview below. This prevents the two feeds from being
+   squeezed side-by-side on the teacher screen.
+*/
+[class~="h-[280px]"][class~="grid-cols-2"] {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) !important;
+}
+
+/* Use the real Dexmy image asset on every slide, on both teacher and student
+   clients. The canvas remains responsible for the student-email watermark. */
+.relative.w-full:has(> canvas[width="1600"][height="900"])::before {
+  content: "";
+  position: absolute;
+  z-index: 10;
+  top: 18px;
+  left: 18px;
+  width: 112px;
+  height: 42px;
+  background-image: url('/dexmy-logo-bg-removed.png');
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: contain;
+  pointer-events: none;
+  opacity: 0.92;
+}
