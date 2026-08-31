@@ -14,7 +14,7 @@ os.environ["ENVIRONMENT"] = "test"
 
 # Optional: Ensure it uses a test DB, but for now we expect DATABASE_URL to be set correctly in env
 if not os.environ.get("DATABASE_URL"):
-    os.environ["DATABASE_URL"] = "sqlite:///./test.db" # Fallback, though tests might fail on Postgres constraints
+    raise RuntimeError("DATABASE_URL must be set for tests")
 
 from app.main import app
 from app.db.session import get_db
@@ -37,14 +37,25 @@ def setup_test_database():
     Base.metadata.create_all(bind=engine)
     
     # Run the raw sql migration file to apply DB-specific constraints (e.g. EXCLUDE USING GIST)
-    sql_file_path = os.path.join(os.path.dirname(__file__), "..", "sql_migrations", "001_booking_constraints_and_audit.sql")
-    if os.path.exists(sql_file_path):
-        with open(sql_file_path, "r") as f:
-            sql = f.read()
-            # Execute the sql file
-            with engine.connect() as conn:
-                conn.execute(sa.text(sql))
-                conn.commit()
+    sql_file_path = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "sql_migrations",
+            "001_booking_constraints_and_audit.sql",
+        )
+    )
+    if not os.path.exists(sql_file_path):
+        raise FileNotFoundError(
+            f"Booking migration not found: {sql_file_path}"
+        )
+
+    with open(sql_file_path, "r", encoding="utf-8") as f:
+        sql = f.read()
+
+    with engine.connect() as conn:
+        conn.execute(sa.text(sql))
+        conn.commit()
 
     yield
 
