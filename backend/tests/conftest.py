@@ -4,8 +4,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 import sqlalchemy as sa
-from alembic import command
-from alembic.config import Config
 from dotenv import load_dotenv
 
 # Load env variables from .env if present
@@ -16,7 +14,7 @@ os.environ["ENVIRONMENT"] = "test"
 
 # Optional: Ensure it uses a test DB, but for now we expect DATABASE_URL to be set correctly in env
 if not os.environ.get("DATABASE_URL"):
-    os.environ["DATABASE_URL"] = "sqlite:///./test.db" # Fallback, though tests might fail on Postgres constraints
+    raise RuntimeError("DATABASE_URL must be set for tests")
 
 from app.main import app
 from app.db.session import get_db
@@ -32,21 +30,32 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 def setup_test_database():
     """
     Setup the database for the entire test session.
-    Runs Alembic migrations to ensure the DB schema and constraints match production.
+    Runs raw SQL migrations to ensure the DB schema and constraints match production.
     """
     # Create tables that are in Base.metadata
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     
-    alembic_cfg = Config("alembic.ini")
-    alembic_cfg.set_main_option("sqlalchemy.url", TEST_DATABASE_URL)
-    
-    # Ensure alembic_version table is clean
+    # Run the raw sql migration file to apply DB-specific constraints (e.g. EXCLUDE USING GIST)
+    sql_file_path = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "sql_migrations",
+            "001_booking_constraints_and_audit.sql",
+        )
+    )
+    if not os.path.exists(sql_file_path):
+        raise FileNotFoundError(
+            f"Booking migration not found: {sql_file_path}"
+        )
+
+    with open(sql_file_path, "r", encoding="utf-8") as f:
+        sql = f.read()
+
     with engine.connect() as conn:
-        conn.execute(sa.text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-        conn.execute(sa.text("DROP TABLE IF EXISTS booking_assignment_audits CASCADE"))
+        conn.execute(sa.text(sql))
         conn.commit()
-        
-    command.upgrade(alembic_cfg, "head")
 
     yield
 
