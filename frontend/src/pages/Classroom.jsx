@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Room, RoomEvent, Track } from "livekit-client";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import "./Classroom.css";
 
 const W = 1600, H = 900;
 const TOOLS = [["select", "Select"], ["pen", "Pen"], ["highlighter", "Highlight"], ["line", "Line"], ["arrow", "Arrow"], ["rect", "Rectangle"], ["circle", "Circle"], ["text", "Text"], ["sticky", "Sticky"], ["eraser", "Eraser"]];
@@ -11,317 +12,44 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
 export default function Classroom() {
-  const { user } = useAuth();
-  const { sessionId } = useParams();
-  const navigate = useNavigate();
-  const isTeacher = user?.role === "teacher";
-  const email = user?.email || "";
-
-  const canvasRef = useRef(null);
-  const wsRef = useRef(null);
-  const roomRef = useRef(null);
-  const drawRef = useRef(null);
-  const slidesRef = useRef([{ page_number: 1, image_url: null }]);
-  const strokesByPageRef = useRef(new Map([[1, []]]));
-  const slideRef = useRef(1);
-  const liveRef = useRef(new Map());
-  const pendingLiveRef = useRef(null);
-  const liveTimerRef = useRef(null);
-  const snapshotTimerRef = useRef(null);
-  const disposedRef = useRef(false);
-
-  const [status, setStatus] = useState("Connecting…");
-  const [notice, setNotice] = useState("");
-  const [tool, setTool] = useState("pen");
-  const [color, setColor] = useState("#111827");
-  const [width, setWidth] = useState(3);
-  const [grid, setGrid] = useState(false);
-  const [slides, setSlides] = useState([{ page_number: 1, image_url: null }]);
-  const [slide, setSlide] = useState(1);
-  const [chat, setChat] = useState([]);
-  const [message, setMessage] = useState("");
-  const [mic, setMic] = useState(false);
-  const [camera, setCamera] = useState(false);
-  const [screen, setScreen] = useState(false);
-  const [studentId, setStudentId] = useState(null);
-  const [peerName, setPeerName] = useState("");
-  const [permissions, setPermissions] = useState({ mic: true, camera: true, annotate: false, screen_share: false });
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const [ending, setEnding] = useState(false);
-  const [notesUrl, setNotesUrl] = useState(null);
-  const [timer, setTimer] = useState(null);
-  const [deadline, setDeadline] = useState(null);
-
-  const wsUrl = useMemo(() => {
-    const base = import.meta.env.VITE_API_BASE_URL;
-    if (!base || !sessionId) return null;
-    const url = new URL(base);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    return `${url.origin}/ws/classroom/${sessionId}`;
-  }, [sessionId]);
-
-  useEffect(() => { slidesRef.current = slides; }, [slides]);
-  useEffect(() => { slideRef.current = slide; }, [slide]);
-  useEffect(() => {
-    if (!deadline) return undefined;
-    const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000)));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [deadline]);
-
-  const send = useCallback((payload) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(payload));
-  }, []);
-
+  const { user } = useAuth(); const { sessionId } = useParams(); const navigate = useNavigate();
+  const isTeacher = user?.role === "teacher"; const email = user?.email || "";
+  const canvasRef = useRef(null), wsRef = useRef(null), roomRef = useRef(null), drawRef = useRef(null);
+  const slidesRef = useRef([{ page_number: 1, image_url: null }]), strokesByPageRef = useRef(new Map([[1, []]])), slideRef = useRef(1);
+  const liveRef = useRef(new Map()), pendingLiveRef = useRef(null), liveTimerRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false);
+  const [status, setStatus] = useState("Connecting…"), [notice, setNotice] = useState(""), [tool, setTool] = useState("pen"), [color, setColor] = useState("#111827"), [width, setWidth] = useState(3), [grid, setGrid] = useState(false);
+  const [slides, setSlides] = useState([{ page_number: 1, image_url: null }]), [slide, setSlide] = useState(1), [chat, setChat] = useState([]), [message, setMessage] = useState("");
+  const [mic, setMic] = useState(false), [camera, setCamera] = useState(false), [screen, setScreen] = useState(false), [studentId, setStudentId] = useState(null), [peerName, setPeerName] = useState("");
+  const [permissions, setPermissions] = useState({ mic: true, camera: true, annotate: false, screen_share: false }), [pdfLoading, setPdfLoading] = useState(false), [ending, setEnding] = useState(false), [notesUrl, setNotesUrl] = useState(null), [timer, setTimer] = useState(null), [deadline, setDeadline] = useState(null);
+  const wsUrl = useMemo(() => { const base = import.meta.env.VITE_API_BASE_URL; if (!base || !sessionId) return null; const url = new URL(base); url.protocol = url.protocol === "https:" ? "wss:" : "ws:"; return `${url.origin}/ws/classroom/${sessionId}`; }, [sessionId]);
+  useEffect(() => { slidesRef.current = slides; }, [slides]); useEffect(() => { slideRef.current = slide; }, [slide]);
+  useEffect(() => { if (!deadline) return; const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))); tick(); const id = setInterval(tick, 1000); return () => clearInterval(id); }, [deadline]);
+  const send = useCallback((payload) => { if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(payload)); }, []);
   const currentStrokes = useCallback(() => strokesByPageRef.current.get(slideRef.current) || [], []);
-
-  const renderStroke = useCallback((s, record = false) => {
-    const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx || !s?.points?.length) return;
-    const a = s.points[0], b = s.points[s.points.length - 1];
-    ctx.save();
-    ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.strokeStyle = s.tool === "eraser" ? "#fff" : s.color;
-    ctx.fillStyle = s.color;
-    ctx.lineWidth = s.tool === "highlighter" ? s.width * 5 : s.width;
-    ctx.globalAlpha = s.tool === "highlighter" ? 0.24 : 1;
-    if (["pen", "highlighter", "eraser"].includes(s.tool)) {
-      ctx.beginPath(); s.points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke();
-    } else if (s.tool === "line") {
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    } else if (s.tool === "arrow") {
-      const angle = Math.atan2(b.y - a.y, b.x - a.x), head = 16 + s.width * 2;
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6));
-      ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6)); ctx.stroke();
-    } else if (s.tool === "rect") ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
-    else if (s.tool === "circle") { ctx.beginPath(); ctx.arc(a.x, a.y, Math.hypot(b.x - a.x, b.y - a.y), 0, Math.PI * 2); ctx.stroke(); }
-    else if (s.tool === "text") { ctx.globalAlpha = 1; ctx.font = `${Math.max(18, s.width * 6)}px sans-serif`; ctx.fillText(s.text || "Text", a.x, a.y); }
-    else if (s.tool === "sticky") {
-      ctx.globalAlpha = 0.92; ctx.fillStyle = "#fff7a8"; ctx.fillRect(a.x, a.y, Math.max(160, b.x - a.x), Math.max(100, b.y - a.y));
-      ctx.globalAlpha = 1; ctx.fillStyle = "#111827"; ctx.font = "20px sans-serif";
-      String(s.text || "Note").split("\n").forEach((line, i) => ctx.fillText(line.slice(0, 45), a.x + 12, a.y + 28 + i * 24));
-    }
-    ctx.restore();
-    if (record) {
-      const list = currentStrokes();
-      if (!list.some((x) => x.id === s.id)) list.push(s);
-    }
-  }, [currentStrokes]);
-
-  const redraw = useCallback(async () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-    const bg = slidesRef.current[slideRef.current - 1]?.image_url;
-    if (bg) {
-      await new Promise((resolve) => {
-        const img = new Image(); img.crossOrigin = "anonymous";
-        img.onload = () => { const scale = Math.min(W / img.width, H / img.height); const w = img.width * scale, h = img.height * scale; ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h); resolve(); };
-        img.onerror = resolve; img.src = bg;
-      });
-    }
-    if (grid) {
-      ctx.save(); ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1;
-      for (let x = 0; x <= W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-      for (let y = 0; y <= H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-      ctx.restore();
-    }
-    (strokesByPageRef.current.get(slideRef.current) || []).forEach((s) => renderStroke(s));
-    ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = "#64748b"; ctx.font = "18px sans-serif"; ctx.textAlign = "right"; ctx.fillText(email, W - 30, H - 25);
-    ctx.globalAlpha = 0.9; ctx.textAlign = "left"; ctx.fillStyle = "#111827"; ctx.font = "bold 24px sans-serif"; ctx.fillText("DEXMY", 30, 40); ctx.restore();
-  }, [email, grid, renderStroke]);
-
+  const renderStroke = useCallback((s, record = false) => { const ctx = canvasRef.current?.getContext("2d"); if (!ctx || !s?.points?.length) return; const a = s.points[0], b = s.points[s.points.length - 1]; ctx.save(); ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = s.tool === "eraser" ? "#fff" : s.color; ctx.fillStyle = s.color; ctx.lineWidth = s.tool === "highlighter" ? s.width * 5 : s.width; ctx.globalAlpha = s.tool === "highlighter" ? 0.24 : 1; if (["pen", "highlighter", "eraser"].includes(s.tool)) { ctx.beginPath(); s.points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke(); } else if (s.tool === "line") { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); } else if (s.tool === "arrow") { const angle = Math.atan2(b.y - a.y, b.x - a.x), head = 16 + s.width * 2; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6)); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6)); ctx.stroke(); } else if (s.tool === "rect") ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y); else if (s.tool === "circle") { ctx.beginPath(); ctx.arc(a.x, a.y, Math.hypot(b.x - a.x, b.y - a.y), 0, Math.PI * 2); ctx.stroke(); } else if (s.tool === "text") { ctx.globalAlpha = 1; ctx.font = `${Math.max(18, s.width * 6)}px sans-serif`; ctx.fillText(s.text || "Text", a.x, a.y); } else if (s.tool === "sticky") { ctx.globalAlpha = 0.92; ctx.fillStyle = "#fff7a8"; ctx.fillRect(a.x, a.y, Math.max(160, b.x - a.x), Math.max(100, b.y - a.y)); ctx.globalAlpha = 1; ctx.fillStyle = "#111827"; ctx.font = "20px sans-serif"; String(s.text || "Note").split("\n").forEach((line, i) => ctx.fillText(line.slice(0, 45), a.x + 12, a.y + 28 + i * 24)); } ctx.restore(); if (record) { const list = currentStrokes(); if (!list.some((x) => x.id === s.id)) list.push(s); } }, [currentStrokes]);
+  const redraw = useCallback(async () => { const canvas = canvasRef.current; if (!canvas) return; const ctx = canvas.getContext("2d"); ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); const bg = slidesRef.current[slideRef.current - 1]?.image_url; if (bg) await new Promise((resolve) => { const img = new Image(); img.crossOrigin = "anonymous"; img.onload = () => { const scale = Math.min(W / img.width, H / img.height), w = img.width * scale, h = img.height * scale; ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h); resolve(); }; img.onerror = resolve; img.src = bg; }); if (grid) { ctx.save(); ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1; for (let x = 0; x <= W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } for (let y = 0; y <= H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } ctx.restore(); } (strokesByPageRef.current.get(slideRef.current) || []).forEach((s) => renderStroke(s)); ctx.save(); ctx.globalAlpha = 0.5; ctx.fillStyle = "#64748b"; ctx.font = "18px sans-serif"; ctx.textAlign = "right"; ctx.fillText(email, W - 30, H - 25); ctx.globalAlpha = 0.9; ctx.textAlign = "left"; ctx.fillStyle = "#111827"; ctx.font = "bold 24px sans-serif"; ctx.fillText("DEXMY", 30, 40); ctx.restore(); }, [email, grid, renderStroke]);
   useEffect(() => { redraw(); }, [slide, slides, grid, redraw]);
-
-  const saveSnapshot = useCallback(() => {
-    clearTimeout(snapshotTimerRef.current);
-    snapshotTimerRef.current = setTimeout(async () => {
-      await redraw();
-      const imageBase64 = canvasRef.current?.toDataURL("image/png");
-      send({ type: "save_snapshot", page_number: slideRef.current, canvas_json: { strokes: currentStrokes().map((s) => ({ ...s })) }, image_base64: imageBase64 });
-    }, 500);
-  }, [currentStrokes, redraw, send]);
-
-  const queueLive = useCallback((stroke, points, final = false) => {
-    const pending = pendingLiveRef.current;
-    if (pending?.id === stroke.id) { pending.points.push(...points); pending.final = final; }
-    else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final };
-  }, []);
-
-  const flushLive = useCallback((force = false) => {
-    const pending = pendingLiveRef.current;
-    if (!pending || (!force && !pending.points.length)) return;
-    pendingLiveRef.current = null;
-    send({ type: "whiteboard_live", payload: { stroke: { ...pending.stroke, points: pending.points.slice(0, 64) }, page_number: pending.page_number, final: pending.final } });
-    if (pending.points.length > 64) { pending.points = pending.points.slice(64); pending.final = false; pendingLiveRef.current = pending; }
-  }, [send]);
-
-  useEffect(() => {
-    liveTimerRef.current = setInterval(() => flushLive(false), 20);
-    return () => { clearInterval(liveTimerRef.current); flushLive(true); clearTimeout(snapshotTimerRef.current); };
-  }, [flushLive]);
-
+  const saveSnapshot = useCallback(() => { clearTimeout(snapshotTimerRef.current); snapshotTimerRef.current = setTimeout(async () => { await redraw(); const imageBase64 = canvasRef.current?.toDataURL("image/png"); send({ type: "save_snapshot", page_number: slideRef.current, canvas_json: { strokes: currentStrokes().map((s) => ({ ...s })) }, image_base64: imageBase64 }); }, 500); }, [currentStrokes, redraw, send]);
+  const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; if (pending?.id === stroke.id) { pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);
+  const flushLive = useCallback((force = false) => { const pending = pendingLiveRef.current; if (!pending || (!force && !pending.points.length)) return; pendingLiveRef.current = null; send({ type: "whiteboard_live", payload: { stroke: { ...pending.stroke, points: pending.points.slice(0, 64) }, page_number: pending.page_number, final: pending.final } }); if (pending.points.length > 64) { pending.points = pending.points.slice(64); pending.final = false; pendingLiveRef.current = pending; } }, [send]);
+  useEffect(() => { liveTimerRef.current = setInterval(() => flushLive(false), 20); return () => { clearInterval(liveTimerRef.current); flushLive(true); clearTimeout(snapshotTimerRef.current); }; }, [flushLive]);
   const point = (event) => { const r = canvasRef.current.getBoundingClientRect(); return { x: clamp((event.clientX - r.left) * W / r.width, 0, W), y: clamp((event.clientY - r.top) * H / r.height, 0, H) }; };
-
-  const onPointerDown = (event) => {
-    const p = point(event);
-    if (tool === "select") return;
-    if (!DRAW_TOOLS.has(tool)) return;
-    if (!isTeacher && !permissions.annotate) return setNotice("The teacher has not enabled annotation for you.");
-    drawRef.current = { id: newId(), tool, color, width, points: [p] };
-    canvasRef.current.setPointerCapture(event.pointerId);
-    if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]);
-  };
-  const onPointerMove = (event) => {
-    const d = drawRef.current; if (!d) return;
-    d.points.push(point(event));
-    if (["pen", "highlighter", "eraser"].includes(d.tool)) {
-      const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]);
-    } else redraw();
-  };
-  const onPointerUp = (event) => {
-    const d = drawRef.current; drawRef.current = null; canvasRef.current?.releasePointerCapture?.(event.pointerId); if (!d) return;
-    if (["text", "sticky"].includes(d.tool)) { const text = window.prompt(d.tool === "sticky" ? "Sticky note text" : "Text"); if (!text) return; d.text = text; if (d.tool === "text") d.points = [d.points[0]]; }
-    if (!["pen", "highlighter", "eraser"].includes(d.tool)) queueLive(d, d.points, true); else { queueLive(d, [], true); flushLive(true); }
-    renderStroke(d, true); send({ type: "whiteboard_event", payload: { kind: "stroke", stroke: d, page_number: slideRef.current } }); saveSnapshot();
-  };
-
-  const changeSlide = async (target) => {
-    const next = clamp(target, 1, slidesRef.current.length);
-    if (next === slideRef.current) return;
-    saveSnapshot();
-    slideRef.current = next; setSlide(next);
-    strokesByPageRef.current.set(next, strokesByPageRef.current.get(next) || []);
-    send({ type: "whiteboard_event", payload: { kind: "page", page_number: next } });
-  };
-  const addSlide = async () => {
-    saveSnapshot();
-    const next = slidesRef.current.length + 1;
-    strokesByPageRef.current.set(next, []);
-    const updated = [...slidesRef.current, { page_number: next, image_url: null }];
-    slidesRef.current = updated; setSlides(updated); slideRef.current = next; setSlide(next);
-    send({ type: "whiteboard_event", payload: { kind: "page", page_number: next } });
-  };
+  const onPointerDown = (event) => { const p = point(event); if (tool === "select" || !DRAW_TOOLS.has(tool)) return; if (!isTeacher && !permissions.annotate) return setNotice("The teacher has not enabled annotation for you."); drawRef.current = { id: newId(), tool, color, width, points: [p] }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
+  const onPointerMove = (event) => { const d = drawRef.current; if (!d) return; d.points.push(point(event)); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else redraw(); };
+  const onPointerUp = (event) => { const d = drawRef.current; drawRef.current = null; canvasRef.current?.releasePointerCapture?.(event.pointerId); if (!d) return; if (["text", "sticky"].includes(d.tool)) { const text = window.prompt(d.tool === "sticky" ? "Sticky note text" : "Text"); if (!text) return; d.text = text; if (d.tool === "text") d.points = [d.points[0]]; } if (!["pen", "highlighter", "eraser"].includes(d.tool)) queueLive(d, d.points, true); else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); send({ type: "whiteboard_event", payload: { kind: "stroke", stroke: d, page_number: slideRef.current } }); saveSnapshot(); };
+  const changeSlide = (target) => { const next = clamp(target, 1, slidesRef.current.length); if (next === slideRef.current) return; saveSnapshot(); slideRef.current = next; setSlide(next); strokesByPageRef.current.set(next, strokesByPageRef.current.get(next) || []); send({ type: "whiteboard_event", payload: { kind: "page", page_number: next } }); };
+  const addSlide = () => { saveSnapshot(); const next = slidesRef.current.length + 1; strokesByPageRef.current.set(next, []); const updated = [...slidesRef.current, { page_number: next, image_url: null }]; slidesRef.current = updated; setSlides(updated); slideRef.current = next; setSlide(next); send({ type: "whiteboard_event", payload: { kind: "page", page_number: next } }); };
   const undo = () => { const list = currentStrokes(); if (!list.length) return; list.pop(); redraw(); send({ type: "whiteboard_event", payload: { kind: "undo", page_number: slideRef.current } }); saveSnapshot(); };
   const clearBoard = () => { strokesByPageRef.current.set(slideRef.current, []); redraw(); send({ type: "whiteboard_event", payload: { kind: "clear", page_number: slideRef.current } }); saveSnapshot(); };
-
-  const uploadPdf = async (file) => {
-    if (!isTeacher || !file) return;
-    if (file.size > 30 * 1024 * 1024) return setNotice("PDFs are limited to 30 MB.");
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return setNotice("Please select a PDF file.");
-    setPdfLoading(true);
-    try {
-      const form = new FormData(); form.append("file", file);
-      const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`, form);
-      const imported = data.map((item, i) => ({ page_number: i + 1, image_url: item.file_url }));
-      const next = imported.length ? imported : [{ page_number: 1, image_url: null }];
-      slidesRef.current = next; setSlides(next); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(next.map((p) => [p.page_number, []]));
-      send({ type: "whiteboard_event", payload: { kind: "pdf", pages: next } });
-      setNotice(`${imported.length} PDF page${imported.length === 1 ? "" : "s"} loaded.`);
-    } catch (error) { setNotice(error.response?.data?.detail || "PDF upload failed."); }
-    finally { setPdfLoading(false); }
-  };
-
-  const uploadChatFile = async (file) => {
-    if (!file) return;
-    if (file.size > 20 * 1024 * 1024) return setNotice("Chat files are limited to 20 MB.");
-    try {
-      const form = new FormData(); form.append("file", file);
-      const { data } = await api.post(`/classroom/sessions/${sessionId}/chat-file`, form);
-      send({ type: "chat", file_url: data.file_url, file_name: data.file_name, message_text: "" });
-      setChat((items) => [...items, { mine: true, file_url: data.file_url, file_name: data.file_name }]);
-    } catch (error) { setNotice(error.response?.data?.detail || "Upload failed."); }
-  };
-
-  const media = async (kind) => {
-    const participant = roomRef.current?.localParticipant; if (!participant) return;
-    try {
-      if (kind === "mic") { if (!isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); const next = !mic; await participant.setMicrophoneEnabled(next); setMic(next); }
-      if (kind === "camera") { if (!isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); const next = !camera; await participant.setCameraEnabled(next); setCamera(next); }
-      if (kind === "screen") { if (!isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); const next = !screen; await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" }); setScreen(next); }
-    } catch (error) { setNotice(error?.message || "Could not change media."); }
-  };
-
-  useEffect(() => {
-    if (!sessionId || !user || !wsUrl) return undefined;
-    disposedRef.current = false;
-    let reconnectTimer;
-    const connect = async () => {
-      try {
-        setStatus("Authorizing…");
-        const { data } = await api.post("/classroom/join-token", { session_id: sessionId });
-        if (disposedRef.current) return;
-        const room = new Room({ adaptiveStream: true, dynacast: true }); roomRef.current = room;
-        room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-          const share = publication.source === Track.Source.ScreenShare;
-          const target = share ? "remote-screen" : track.kind === Track.Kind.Video ? "remote-video" : "remote-audio";
-          const box = document.getElementById(target); if (!box) return;
-          box.innerHTML = ""; const el = track.attach(); el.autoplay = true; el.playsInline = true; el.className = "absolute inset-0 w-full h-full object-contain bg-black"; box.appendChild(el);
-          if (participant.identity !== String(user.id)) setPeerName(participant.name || "Participant");
-        });
-        room.on(RoomEvent.LocalTrackPublished, (publication) => {
-          const track = publication.track; if (!track) return;
-          const target = publication.source === Track.Source.ScreenShare ? "local-screen" : "local-video";
-          const box = document.getElementById(target); if (!box) return;
-          box.innerHTML = ""; const el = track.attach(); el.autoplay = true; el.playsInline = true; el.muted = true; el.className = "absolute inset-0 w-full h-full object-contain bg-black"; box.appendChild(el);
-        });
-        room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
-        await room.connect(data.livekit_url, data.livekit_token); setStatus("Live");
-        const token = localStorage.getItem("dexmy_token");
-        const socket = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token || "")}`); wsRef.current = socket;
-        socket.onmessage = (event) => {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "waiting_for_teacher") setStatus("Waiting for teacher…");
-          if (msg.type === "admitted" || msg.type === "class_started") { setStatus("Live"); if (msg.deadline) setDeadline(msg.deadline); if (msg.student_id) setStudentId(msg.student_id); }
-          if (msg.type === "student_joined") { setStudentId(msg.user_id); setPeerName(msg.name || "Student"); }
-          if (msg.type === "participant_info") setPeerName(msg.name || "Participant");
-          if (msg.type === "chat") setChat((items) => [...items, { mine: msg.sender_id === String(user.id), text: msg.message_text || "", file_url: msg.file_url, file_name: msg.file_name }]);
-          if (msg.type === "permissions_state") setPermissions((p) => ({ ...p, ...(msg.permissions || {}) }));
-          if (msg.type === "permission_update") setPermissions((p) => ({ ...p, [msg.permission]: msg.granted }));
-          if (msg.type === "pdf_pages_ready") { const p = msg.pages || [{ page_number: 1, image_url: null }]; slidesRef.current = p; setSlides(p); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(p.map((x) => [x.page_number, []])); }
-          if (msg.type === "whiteboard_state") {
-            const p = msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }];
-            slidesRef.current = p; setSlides(p); slideRef.current = msg.page_number || 1; setSlide(msg.page_number || 1);
-            strokesByPageRef.current = new Map(p.map((x) => [x.page_number, []]));
-            const strokes = msg.canvas_json?.strokes || []; strokesByPageRef.current.set(msg.page_number || 1, strokes); setTimeout(redraw, 0);
-          }
-          if (msg.type === "whiteboard_live") {
-            const payload = msg.payload || {}, stroke = payload.stroke;
-            if (!stroke?.id || payload.page_number !== slideRef.current) return;
-            let live = liveRef.current.get(stroke.id);
-            if (!live) { live = { ...stroke, points: [] }; liveRef.current.set(stroke.id, live); }
-            const last = live.points.at(-1); const fresh = (stroke.points || []).filter((p) => !last || p.x !== last.x || p.y !== last.y);
-            if (fresh.length) { renderStroke({ ...live, points: last ? [last, ...fresh] : fresh }); live.points.push(...fresh); }
-            if (payload.final) { liveRef.current.delete(stroke.id); const list = currentStrokes(); if (!list.some((s) => s.id === stroke.id)) list.push({ ...live, points: [...live.points] }); }
-          }
-          if (msg.type === "whiteboard_event") {
-            const p = msg.payload || {};
-            if (p.kind === "stroke" && p.stroke && p.page_number === slideRef.current) { const list = currentStrokes(); if (!list.some((s) => s.id === p.stroke.id)) list.push(p.stroke); redraw(); }
-            if (p.kind === "undo" && p.page_number === slideRef.current) { currentStrokes().pop(); redraw(); }
-            if (p.kind === "clear" && p.page_number === slideRef.current) { strokesByPageRef.current.set(slideRef.current, []); redraw(); }
-            if (p.kind === "pdf") { const next = p.pages || [{ page_number: 1, image_url: null }]; slidesRef.current = next; setSlides(next); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(next.map((x) => [x.page_number, []])); }
-            if (p.kind === "page") { const next = clamp(Number(p.page_number) || 1, 1, slidesRef.current.length); slideRef.current = next; setSlide(next); strokesByPageRef.current.set(next, strokesByPageRef.current.get(next) || []); redraw(); }
-          }
-          if (msg.type === "extend_prompt") setNotice(`Class ends in about ${Math.ceil(msg.seconds_remaining / 60)} minutes.`);
-          if (msg.type === "class_extended") setDeadline(msg.new_deadline);
-          if (msg.type === "session_ended") { setEnding(true); api.get(`/classroom/sessions/${sessionId}/notes`).then((r) => setNotesUrl(r.data.pdf_url)).catch(() => {}); setTimeout(() => navigate("/dashboard"), 2200); }
-        };
-        socket.onclose = (event) => { if (!disposedRef.current && ![4401, 4403, 4404, 4409].includes(event.code)) reconnectTimer = setTimeout(connect, 2500); };
-      } catch (error) { if (!disposedRef.current) { setStatus(error.response?.data?.detail || error.message || "Unable to join classroom"); reconnectTimer = setTimeout(connect, 3500); } }
-    };
-    connect();
-    return () => { disposedRef.current = true; clearTimeout(reconnectTimer); clearTimeout(snapshotTimerRef.current); wsRef.current?.close(); roomRef.current?.disconnect(); roomRef.current = null; };
-  }, [sessionId, user, wsUrl, isTeacher, navigate, redraw, renderStroke, currentStrokes]);
-
+  const uploadPdf = async (file) => { if (!isTeacher || !file) return; if (file.size > 30 * 1024 * 1024) return setNotice("PDFs are limited to 30 MB."); if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return setNotice("Please select a PDF file."); setPdfLoading(true); try { const form = new FormData(); form.append("file", file); const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`, form); const imported = data.map((item, i) => ({ page_number: i + 1, image_url: item.file_url })); const next = imported.length ? imported : [{ page_number: 1, image_url: null }]; slidesRef.current = next; setSlides(next); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(next.map((p) => [p.page_number, []])); send({ type: "whiteboard_event", payload: { kind: "pdf", pages: next } }); setNotice(`${imported.length} PDF page${imported.length === 1 ? "" : "s"} loaded.`); } catch (error) { setNotice(error.response?.data?.detail || "PDF upload failed."); } finally { setPdfLoading(false); } };
+  const uploadChatFile = async (file) => { if (!file) return; if (file.size > 20 * 1024 * 1024) return setNotice("Chat files are limited to 20 MB."); try { const form = new FormData(); form.append("file", file); const { data } = await api.post(`/classroom/sessions/${sessionId}/chat-file`, form); send({ type: "chat", file_url: data.file_url, file_name: data.file_name, message_text: "" }); setChat((items) => [...items, { mine: true, file_url: data.file_url, file_name: data.file_name }]); } catch (error) { setNotice(error.response?.data?.detail || "Upload failed."); } };
+  const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant) return; try { if (kind === "mic") { if (!isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); const next = !mic; await participant.setMicrophoneEnabled(next); setMic(next); } if (kind === "camera") { if (!isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); const next = !camera; await participant.setCameraEnabled(next); setCamera(next); } if (kind === "screen") { if (!isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); const next = !screen; await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" }); setScreen(next); } } catch (error) { setNotice(error?.message || "Could not change media."); } };
+  useEffect(() => { if (!sessionId || !user || !wsUrl) return; disposedRef.current = false; let reconnectTimer; const connect = async () => { try { setStatus("Authorizing…"); const { data } = await api.post("/classroom/join-token", { session_id: sessionId }); if (disposedRef.current) return; const room = new Room({ adaptiveStream: true, dynacast: true }); roomRef.current = room; room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => { const share = publication.source === Track.Source.ScreenShare; const target = share ? "remote-screen" : track.kind === Track.Kind.Video ? "remote-video" : "remote-audio"; const box = document.getElementById(target); if (!box) return; box.innerHTML = ""; const el = track.attach(); el.autoplay = true; el.playsInline = true; el.className = "absolute inset-0 w-full h-full object-contain bg-black"; box.appendChild(el); if (participant.identity !== String(user.id)) setPeerName(participant.name || "Participant"); }); room.on(RoomEvent.LocalTrackPublished, (publication) => { const track = publication.track; if (!track) return; const target = publication.source === Track.Source.ScreenShare ? "local-screen" : "local-video"; const box = document.getElementById(target); if (!box) return; box.innerHTML = ""; const el = track.attach(); el.autoplay = true; el.playsInline = true; el.muted = true; el.className = "absolute inset-0 w-full h-full object-contain bg-black"; box.appendChild(el); }); room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove())); await room.connect(data.livekit_url, data.livekit_token); setStatus("Live"); const token = localStorage.getItem("dexmy_token"); const socket = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token || "")}`); wsRef.current = socket; socket.onmessage = (event) => { const msg = JSON.parse(event.data); if (msg.type === "waiting_for_teacher") setStatus("Waiting for teacher…"); if (msg.type === "admitted" || msg.type === "class_started") { setStatus("Live"); if (msg.deadline) setDeadline(msg.deadline); if (msg.student_id) setStudentId(msg.student_id); } if (msg.type === "student_joined") { setStudentId(msg.user_id); setPeerName(msg.name || "Student"); } if (msg.type === "participant_info") setPeerName(msg.name || "Participant"); if (msg.type === "chat") setChat((items) => [...items, { mine: msg.sender_id === String(user.id), text: msg.message_text || "", file_url: msg.file_url, file_name: msg.file_name }]); if (msg.type === "permissions_state") setPermissions((p) => ({ ...p, ...(msg.permissions || {}) })); if (msg.type === "permission_update") setPermissions((p) => ({ ...p, [msg.permission]: msg.granted })); if (msg.type === "pdf_pages_ready") { const p = msg.pages || [{ page_number: 1, image_url: null }]; slidesRef.current = p; setSlides(p); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(p.map((x) => [x.page_number, []])); } if (msg.type === "whiteboard_state") { const p = msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }]; slidesRef.current = p; setSlides(p); slideRef.current = msg.page_number || 1; setSlide(msg.page_number || 1); strokesByPageRef.current = new Map(p.map((x) => [x.page_number, []])); const strokes = msg.canvas_json?.strokes || []; strokesByPageRef.current.set(msg.page_number || 1, strokes); setTimeout(redraw, 0); } if (msg.type === "whiteboard_live") { const payload = msg.payload || {}, stroke = payload.stroke; if (!stroke?.id || payload.page_number !== slideRef.current) return; let live = liveRef.current.get(stroke.id); if (!live) { live = { ...stroke, points: [] }; liveRef.current.set(stroke.id, live); } const last = live.points.at(-1); const fresh = (stroke.points || []).filter((p) => !last || p.x !== last.x || p.y !== last.y); if (fresh.length) { renderStroke({ ...live, points: last ? [last, ...fresh] : fresh }); live.points.push(...fresh); } if (payload.final) { liveRef.current.delete(stroke.id); const list = currentStrokes(); if (!list.some((s) => s.id === stroke.id)) list.push({ ...live, points: [...live.points] }); } } if (msg.type === "whiteboard_event") { const p = msg.payload || {}; if (p.kind === "stroke" && p.stroke && p.page_number === slideRef.current) { const list = currentStrokes(); if (!list.some((s) => s.id === p.stroke.id)) list.push(p.stroke); redraw(); } if (p.kind === "undo" && p.page_number === slideRef.current) { currentStrokes().pop(); redraw(); } if (p.kind === "clear" && p.page_number === slideRef.current) { strokesByPageRef.current.set(slideRef.current, []); redraw(); } if (p.kind === "pdf") { const next = p.pages || [{ page_number: 1, image_url: null }]; slidesRef.current = next; setSlides(next); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(next.map((x) => [x.page_number, []])); } if (p.kind === "page") { const next = clamp(Number(p.page_number) || 1, 1, slidesRef.current.length); slideRef.current = next; setSlide(next); strokesByPageRef.current.set(next, strokesByPageRef.current.get(next) || []); redraw(); } } if (msg.type === "extend_prompt") setNotice(`Class ends in about ${Math.ceil(msg.seconds_remaining / 60)} minutes.`); if (msg.type === "class_extended") setDeadline(msg.new_deadline); if (msg.type === "session_ended") { setEnding(true); api.get(`/classroom/sessions/${sessionId}/notes`).then((r) => setNotesUrl(r.data.pdf_url)).catch(() => {}); setTimeout(() => navigate("/dashboard"), 2200); } }; socket.onclose = (event) => { if (!disposedRef.current && ![4401, 4403, 4404, 4409].includes(event.code)) reconnectTimer = setTimeout(connect, 2500); }; } catch (error) { if (!disposedRef.current) { setStatus(error.response?.data?.detail || error.message || "Unable to join classroom"); reconnectTimer = setTimeout(connect, 3500); } } }; connect(); return () => { disposedRef.current = true; clearTimeout(reconnectTimer); clearTimeout(snapshotTimerRef.current); wsRef.current?.close(); roomRef.current?.disconnect(); roomRef.current = null; }; }, [sessionId, user, wsUrl, isTeacher, navigate, redraw, renderStroke, currentStrokes]);
   const sendMessage = (event) => { event.preventDefault(); const text = message.trim(); if (!text) return; send({ type: "chat", message_text: text }); setChat((items) => [...items, { mine: true, text }]); setMessage(""); };
   const setPermission = (permission, granted) => { if (!studentId) return setNotice("Waiting for the student to join."); send({ type: "permission_update", target_user_id: studentId, permission, granted }); };
   const endClass = async () => { if (!isTeacher || ending || !window.confirm("End this class for both participants?")) return; setEnding(true); try { const { data } = await api.post(`/classroom/sessions/${sessionId}/end`); if (data?.pdf_url) setNotesUrl(data.pdf_url); } catch (error) { setEnding(false); setNotice(error.response?.data?.detail || "Could not end class."); } };
-
-  return <div className="h-[100dvh] w-full overflow-hidden bg-[#0b1020] text-white flex flex-col select-none">
+  return <div className="dexmy-classroom-shell h-[100dvh] w-full overflow-hidden bg-[#0b1020] text-white flex flex-col select-none">
+    <div className="classroom-mobile-orientation"><div><strong>Rotate your device</strong><span>Dexmy Classroom is optimized for landscape mode on mobile.</span></div></div>
     <header className="h-14 shrink-0 px-4 border-b border-white/10 bg-[#111827] flex items-center justify-between"><div><b>Dexmy Classroom</b><div className="text-[11px] text-slate-400">{status}</div></div><div className="flex gap-3 text-xs text-slate-400"><span>● Secure</span>{timer !== null && <span className="font-mono">{Math.floor(timer / 60)}:{String(timer % 60).padStart(2, "0")}</span>}</div></header>
     <main className="flex-1 min-h-0 flex overflow-hidden">
       <section className="flex-1 min-w-0 flex flex-col">
@@ -329,7 +57,7 @@ export default function Classroom() {
         <div className="flex-1 min-h-0 flex items-center justify-center p-3 bg-[#070b16]"><div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl"><canvas ref={canvasRef} width={W} height={H} className="absolute inset-0 w-full h-full touch-none" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} />{slides.length > 1 && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2 bg-black/70 rounded-xl px-2 py-1.5"><button onClick={() => changeSlide(slide - 1)}>‹</button><span className="text-xs px-2">Slide {slide}/{slides.length}</span><button onClick={() => changeSlide(slide + 1)}>›</button></div>}{pdfLoading && <div className="absolute inset-0 z-30 grid place-items-center bg-black/55"><div className="bg-[#111827] rounded-2xl p-6">Importing PDF slides…</div></div>}</div></div>
         <div className="h-16 shrink-0 border-t border-white/10 bg-[#111827] flex items-center justify-center gap-2"><button onClick={() => media("mic")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{mic ? "Mute" : "Mic"}</button><button onClick={() => media("camera")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{camera ? "Camera off" : "Camera"}</button><button onClick={() => media("screen")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{screen ? "Stop sharing" : "Share screen"}</button>{isTeacher && <button onClick={() => send({ type: "extend_class" })} className="h-10 px-4 rounded-full bg-white/10 text-xs">+5 min</button>}{isTeacher && <button onClick={endClass} disabled={ending} className="h-10 px-4 rounded-full bg-red-600 text-xs">{ending ? "Ending…" : "End class"}</button>}</div>
       </section>
-      <aside className="w-[380px] shrink-0 border-l border-white/10 bg-[#0f172a] flex flex-col"><div className="h-14 px-3 border-b border-white/10 flex items-center text-sm font-semibold">{peerName || (isTeacher ? "Dexmy Student" : "Dexmy Tutor")}</div><div className="h-[280px] shrink-0 p-2 grid grid-cols-2 gap-2"><div id="remote-video" className="relative rounded-lg bg-black overflow-hidden" /><div id="local-video" className="relative rounded-lg bg-slate-800 overflow-hidden" /><div id="remote-screen" className="hidden" /><div id="local-screen" className="hidden" /><div id="remote-audio" className="hidden" /></div>{isTeacher && <div className="px-3 pb-2"><div className="text-[10px] uppercase text-slate-500 mb-1">Student permissions</div><div className="grid grid-cols-2 gap-1.5">{[["mic", "Mic"], ["camera", "Camera"], ["annotate", "Annotate"], ["screen_share", "Screen share"]].map(([key, label]) => <button key={key} onClick={() => setPermission(key, !permissions[key])} className={`px-2 py-2 rounded text-[10px] ${permissions[key] ? "bg-emerald-600/80" : "bg-white/5"}`}>{permissions[key] ? "✓ " : "✕ "}{label}</button>)}</div></div>}<div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">{chat.length === 0 && <div className="h-full grid place-items-center text-xs text-slate-600">No messages yet</div>}{chat.map((item, i) => <div key={i} className={`flex ${item.mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs ${item.mine ? "bg-red-600" : "bg-white/10"}`}>{item.file_url ? <a href={item.file_url} target="_blank" rel="noreferrer" className="underline">{item.file_name || "Open file"}</a> : item.text}</div></div>)}</div><form onSubmit={sendMessage} className="shrink-0 p-2 border-t border-white/10 flex gap-2"><label className="h-9 w-9 grid place-items-center bg-white/5 rounded cursor-pointer">＋<input hidden type="file" onChange={(e) => { uploadChatFile(e.target.files?.[0]); e.target.value = ""; }} /></label><input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Message…" className="flex-1 h-9 bg-white/5 rounded px-3 text-xs" /><button className="h-9 px-3 bg-red-600 rounded text-xs">Send</button></form></aside>
+      <aside className="classroom-side-panel border-l border-white/10 bg-[#0f172a]"><div className="h-14 shrink-0 px-3 border-b border-white/10 flex items-center text-sm font-semibold">{peerName || (isTeacher ? "Dexmy Student" : "Dexmy Tutor")}</div><div className="classroom-video-stack"><div className="classroom-video"><span className="absolute left-2 top-2 z-10 rounded bg-black/60 px-2 py-1 text-[10px]">{isTeacher ? "Teacher" : "Teacher"}</span><div id="local-video" className="absolute inset-0" /></div><div className="classroom-video"><span className="absolute left-2 top-2 z-10 rounded bg-black/60 px-2 py-1 text-[10px]">Student</span><div id="remote-video" className="absolute inset-0" /></div><div id="remote-screen" className="hidden" /><div id="local-screen" className="hidden" /><div id="remote-audio" className="hidden" /></div>{isTeacher && <div className="classroom-permissions"><div className="text-[10px] uppercase text-slate-500 mb-1">Student permissions</div><div className="grid grid-cols-2 gap-1.5">{[["mic", "Mic"], ["camera", "Camera"], ["annotate", "Annotate"], ["screen_share", "Screen share"]].map(([key, label]) => <button key={key} onClick={() => setPermission(key, !permissions[key])} className={`px-2 py-2 rounded text-[10px] ${permissions[key] ? "bg-emerald-600/80" : "bg-white/5"}`}>{permissions[key] ? "✓ " : "✕ "}{label}</button>)}</div></div>}<div className="classroom-chat"><div className="classroom-chat-messages">{chat.length === 0 && <div className="h-full grid place-items-center text-xs text-slate-600">No messages yet</div>}{chat.map((item, i) => <div key={i} className={`flex mb-2 ${item.mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs ${item.mine ? "bg-red-600" : "bg-white/10"}`}>{item.file_url ? <a href={item.file_url} target="_blank" rel="noreferrer" className="underline">{item.file_name || "Open file"}</a> : item.text}</div></div>)}</div><form onSubmit={sendMessage} className="classroom-chat-form p-2 border-t border-white/10 flex gap-2"><label className="h-9 w-9 grid place-items-center bg-white/5 rounded cursor-pointer">＋<input hidden type="file" onChange={(e) => { uploadChatFile(e.target.files?.[0]); e.target.value = ""; }} /></label><input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Message…" className="flex-1 h-9 bg-white/5 rounded px-3 text-xs" /><button className="h-9 px-3 bg-red-600 rounded text-xs">Send</button></form></div></aside>
     </main>
     {(notice || ending || notesUrl) && <div className="fixed inset-0 z-[100] grid place-items-center pointer-events-none">{ending ? <div className="pointer-events-auto bg-[#111827] rounded-2xl px-7 py-6 text-center"><b>Class ended — preparing notes</b>{notesUrl && <a className="block mt-3 text-xs underline text-emerald-300" href={notesUrl} target="_blank" rel="noreferrer">Open class notes PDF</a>}</div> : <button onClick={() => setNotice("")} className="pointer-events-auto px-4 py-2 rounded-full bg-slate-800 border border-white/10 text-xs">{notice || "Class notes are ready."}</button>}</div>}
   </div>;
