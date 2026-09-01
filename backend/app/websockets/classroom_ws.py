@@ -22,6 +22,16 @@ from app.websockets.connection_manager import manager
 router = APIRouter()
 
 
+async def _heartbeat(websocket: WebSocket) -> None:
+    """Keep the classroom WebSocket alive through idle/load-balancing proxies."""
+    try:
+        while True:
+            await asyncio.sleep(20)
+            await websocket.send_json({"type": "heartbeat"})
+    except (WebSocketDisconnect, RuntimeError, ConnectionError, asyncio.CancelledError):
+        return
+
+
 def _authenticate(token: str, db) -> User | None:
     try:
         payload = decode_access_token(token)
@@ -58,7 +68,6 @@ def _permission_payload(room, user_id: uuid.UUID) -> dict[str, bool]:
 
 
 async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.UUID, room) -> None:
-    """Synchronize only media permissions with the already-connected LiveKit participant."""
     sources = _allowed_sources(room, user_id)
     last_error = None
     for attempt in range(10):
@@ -134,6 +143,7 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
 @router.websocket("/ws/classroom/{session_id}")
 async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: str = Query(...)):
     db = SessionLocal()
+    heartbeat_task = None
     try:
         user = _authenticate(token, db)
         if user is None:
@@ -156,6 +166,7 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
             await websocket.close(code=4403)
             return
         await websocket.accept()
+        heartbeat_task = asyncio.create_task(_heartbeat(websocket))
         room = manager.get_room(session_id)
         if is_teacher:
             room.teacher_ws = websocket
@@ -216,6 +227,12 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
     except WebSocketDisconnect:
         pass
     finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except asyncio.CancelledError:
+                pass
         room = manager.rooms.get(session_id)
         if room:
             if room.teacher_ws is websocket:
@@ -241,6 +258,8 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
 async def _handle_message(data, user, is_teacher, session_id, room, db, websocket, class_session, booking):
     msg_type = data.get("type")
     peer = room.student_ws if is_teacher else room.teacher_ws
+    if msg_type == "heartbeat":
+        return
     if msg_type == "chat":
         if peer:
             await peer.send_json({"type": "chat", "sender_id": str(user.id), "message_text": str(data.get("message_text") or "")[:4000], "file_url": data.get("file_url"), "file_name": data.get("file_name")})
