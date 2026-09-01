@@ -6,6 +6,7 @@ from app.db.session import get_db
 from app.models.booking import Booking
 from app.models.classroom import ClassSession, PermissionEvent, PermissionType
 from app.models.user import User
+from app.models.teacher import Subject
 from app.schemas.classroom import JoinTokenRequest, JoinTokenResponse, ClassSessionRead, ClassNotesRead
 from app.services.livekit_service import create_join_token
 import uuid
@@ -161,7 +162,7 @@ async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(.
                 pass
     return pages
 
-@router.get("/sessions/{session_id}", response_model=ClassSessionRead)
+@router.get("/sessions/{session_id}", response_model=None)
 def get_session_status(session_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     cs = db.get(ClassSession, session_id)
     if cs is None:
@@ -169,4 +170,13 @@ def get_session_status(session_id: uuid.UUID, current_user: User = Depends(get_c
     booking = db.get(Booking, cs.booking_id)
     if current_user.id not in (booking.teacher_id, booking.student_id):
         raise HTTPException(status_code=403, detail="Not part of this classroom")
-    return cs
+    subject = db.get(Subject, booking.subject_id)
+    return {
+        "id": cs.id,
+        "booking_id": cs.booking_id,
+        "livekit_room_name": cs.livekit_room_name,
+        "status": cs.status,
+        "started_at": cs.started_at,
+        "ended_at": cs.ended_at,
+        "subject_name": subject.name if subject else "Class",
+    }
