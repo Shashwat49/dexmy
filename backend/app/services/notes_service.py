@@ -1,27 +1,34 @@
 import io
 
-from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as pdf_canvas
 
 
+# 16:9 landscape page, matching the classroom whiteboard/PPT aspect ratio.
+PAGE_WIDTH = 13.333333 * 72
+PAGE_HEIGHT = 7.5 * 72
+
+
 def compile_notes_pdf(image_streams: list[io.BytesIO]) -> bytes:
-    """One whiteboard page image per PDF page, centered and scaled to fit."""
+    """One 16:9 whiteboard page image per PDF page, centered and scaled to fit."""
     buffer = io.BytesIO()
-    c = pdf_canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
+    c = pdf_canvas.Canvas(buffer, pagesize=(PAGE_WIDTH, PAGE_HEIGHT))
 
     for stream in image_streams:
         img = ImageReader(stream)
         img_width, img_height = img.getSize()
-        aspect = img_height / img_width
-        draw_width = width - 60
-        draw_height = draw_width * aspect
-        if draw_height > height - 60:
-            draw_height = height - 60
-            draw_width = draw_height / aspect
-        x = (width - draw_width) / 2
-        y = (height - draw_height) / 2
+        image_aspect = img_width / img_height
+        page_aspect = PAGE_WIDTH / PAGE_HEIGHT
+
+        if image_aspect > page_aspect:
+            draw_width = PAGE_WIDTH
+            draw_height = draw_width / image_aspect
+        else:
+            draw_height = PAGE_HEIGHT
+            draw_width = draw_height * image_aspect
+
+        x = (PAGE_WIDTH - draw_width) / 2
+        y = (PAGE_HEIGHT - draw_height) / 2
         c.drawImage(img, x, y, width=draw_width, height=draw_height)
         c.showPage()
 
