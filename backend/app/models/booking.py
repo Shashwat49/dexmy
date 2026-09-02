@@ -21,6 +21,7 @@ class TeacherAssignmentStatus(str, enum.Enum):
     pending = "pending"
     assigned = "assigned"
     failed = "failed"
+    discarded = "discarded"
 
 
 class DemoStatus(str, enum.Enum):
