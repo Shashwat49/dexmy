@@ -9,6 +9,7 @@ export default function AdminBookings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [assigning, setAssigning] = useState(null);
+  const [discarding, setDiscarding] = useState(null);
   const [teacherLists, setTeacherLists] = useState({});
   const [selected, setSelected] = useState({});
 
@@ -74,6 +75,26 @@ export default function AdminBookings() {
     }
   }
 
+  async function discardAssignment(request) {
+    if (!window.confirm("Discard the teacher assignment request for this booking? The booking will remain confirmed, but it will no longer appear in Pending Teacher Assignment.")) return;
+
+    setDiscarding(request.booking_id);
+    setError("");
+    try {
+      await api.post(`/admin/bookings/${request.booking_id}/discard-teacher-assignment`);
+      setPendingRequests((x) => x.filter((row) => row.booking_id !== request.booking_id));
+      setItems((x) => x.map((row) => row.id === request.booking_id
+        ? { ...row, teacher_assignment_status: "discarded" }
+        : row));
+      setTeacherLists((x) => ({ ...x, [request.booking_id]: undefined }));
+      setSelected((x) => ({ ...x, [request.booking_id]: undefined }));
+    } catch (e) {
+      setError(e.response?.data?.detail || "Unable to discard teacher assignment request.");
+    } finally {
+      setDiscarding(null);
+    }
+  }
+
   const pendingIds = new Set(pendingRequests.map((request) => request.booking_id));
   const pendingItems = items.filter((booking) => pendingIds.has(booking.id));
 
@@ -98,7 +119,7 @@ export default function AdminBookings() {
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-chalk-faint bg-panel-2">
-              <table className="w-full min-w-[1000px] text-left text-sm">
+              <table className="w-full min-w-[1100px] text-left text-sm">
                 <thead className="border-b border-chalk-faint text-xs uppercase tracking-wide text-chalk-muted">
                   <tr>
                     <th className="px-5 py-4">Student</th>
@@ -126,11 +147,11 @@ export default function AdminBookings() {
                         <td className="px-5 py-4 text-amber-300">{request.teacher_assignment_status || "pending"}</td>
                         <td className="px-5 py-4">
                           {booking && teacherLists[booking.id] !== undefined ? (
-                            <div className="min-w-[320px]">
+                            <div className="min-w-[420px]">
                               <div className="mb-2 text-xs text-chalk-muted">
                                 {candidates.filter((t) => t.is_available).length} available / {candidates.length} eligible
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <select
                                   value={selected[booking.id] || ""}
                                   onChange={(e) => setSelected((x) => ({ ...x, [booking.id]: e.target.value }))}
@@ -144,23 +165,39 @@ export default function AdminBookings() {
                                   ))}
                                 </select>
                                 <button
-                                  disabled={!selected[booking.id] || assigning === booking.id}
+                                  disabled={!selected[booking.id] || assigning === booking.id || discarding === booking.id}
                                   onClick={() => assign(booking)}
                                   className="rounded-lg bg-brand-red px-3 py-2 text-xs font-semibold disabled:opacity-50"
                                 >
                                   Assign
                                 </button>
+                                <button
+                                  disabled={assigning === booking.id || discarding === booking.id}
+                                  onClick={() => discardAssignment(request)}
+                                  className="rounded-lg border border-chalk-faint px-3 py-2 text-xs font-semibold text-chalk-muted hover:border-brand-red hover:text-brand-red disabled:opacity-50"
+                                >
+                                  {discarding === booking.id ? "Discarding…" : "Discard"}
+                                </button>
                               </div>
                               {candidates.length === 0 && <div className="text-xs text-brand-red">No eligible teachers found.</div>}
                             </div>
                           ) : booking ? (
-                            <button
-                              disabled={assigning === booking.id}
-                              onClick={() => openAssign(booking)}
-                              className="rounded-lg border border-chalk-faint px-3 py-2 text-xs font-semibold hover:border-brand-red"
-                            >
-                              {assigning === booking.id ? "Loading…" : "View Eligible Teachers"}
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                disabled={assigning === booking.id || discarding === booking.id}
+                                onClick={() => openAssign(booking)}
+                                className="rounded-lg border border-chalk-faint px-3 py-2 text-xs font-semibold hover:border-brand-red disabled:opacity-50"
+                              >
+                                {assigning === booking.id ? "Loading…" : "View Eligible Teachers"}
+                              </button>
+                              <button
+                                disabled={assigning === booking.id || discarding === booking.id}
+                                onClick={() => discardAssignment(request)}
+                                className="rounded-lg border border-chalk-faint px-3 py-2 text-xs font-semibold text-chalk-muted hover:border-brand-red hover:text-brand-red disabled:opacity-50"
+                              >
+                                {discarding === booking.id ? "Discarding…" : "Discard"}
+                              </button>
+                            </div>
                           ) : (
                             <span className="text-xs text-brand-red">Booking not found in current list</span>
                           )}
@@ -204,11 +241,11 @@ export default function AdminBookings() {
                       <td className="px-5 py-4">{b.price == null ? "—" : b.price}</td>
                       <td className="px-5 py-4">
                         {!b.teacher_id && b.status === "confirmed" ? (
-                          <div className="min-w-[280px]">
+                          <div className="min-w-[360px]">
                             {teacherLists[b.id] !== undefined ? (
                               <>
                                 <div className="mb-2 text-xs text-chalk-muted">{candidates.filter((t) => t.is_available).length} available / {candidates.length} eligible</div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <select value={selected[b.id] || ""} onChange={(e) => setSelected((x) => ({ ...x, [b.id]: e.target.value }))} className="max-w-[210px] rounded-lg border border-chalk-faint bg-panel px-2 py-2 text-xs">
                                     <option value="">Select available teacher</option>
                                     {candidates.map((t) => <option key={t.id} value={t.id} disabled={!t.is_available}>{t.full_name}{t.is_available ? " — Available" : " — Busy"}</option>)}
