@@ -13,7 +13,7 @@ from app.models.teacher import Subject, TeacherProfile, TeacherSubject
 from app.models.user import User, UserRole
 from app.schemas.admin import AdminMeRead, AdminUserCreate, AdminUserRead, AdminUserUpdate, AuditLogRead
 from app.schemas.booking import PendingTeacherAssignmentRead, TeacherAssignmentRead, TeacherAssignmentRequest
-from app.schemas.user import UserRead
+from app.schemas.user import UserRead, UserRoleUpdate
 from app.services.audit_service import record_admin_action
 from app.services.booking_service import assign_teacher_atomic
 from app.services.scheduling_service import can_assign_teacher
@@ -269,6 +269,26 @@ def activate_user(
     user.is_active = True
     record_admin_action(db, admin_user_id=current_user.id, action="user.activate", resource_type="user", resource_id=user.id,
                         old_values={"is_active": old_active}, new_values={"is_active": True},
+                        ip_address=request.client.host if request.client else None, user_agent=request.headers.get("user-agent"))
+    db.commit(); db.refresh(user)
+    return user
+
+
+@router.patch("/users/{user_id}/role", response_model=UserRead)
+def update_user_role(
+    user_id: uuid.UUID,
+    payload: UserRoleUpdate,
+    request: Request,
+    current_user: User = Depends(require_permission("student.update")),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    old_role = user.role
+    user.role = payload.role
+    record_admin_action(db, admin_user_id=current_user.id, action="user.update_role", resource_type="user", resource_id=user.id,
+                        old_values={"role": old_role.value}, new_values={"role": payload.role.value},
                         ip_address=request.client.host if request.client else None, user_agent=request.headers.get("user-agent"))
     db.commit(); db.refresh(user)
     return user
