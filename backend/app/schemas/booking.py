@@ -164,6 +164,7 @@ class DemoRequestRead(DemoRequestCreate):
     status: DemoStatus
     created_at: datetime
 
+
 # ============================================================
 # ADMIN TEACHER ASSIGNMENT
 # ============================================================
@@ -198,7 +199,9 @@ class PendingTeacherAssignmentRead(BaseModel):
 
 class TeacherAssignmentRead(BaseModel):
     """
-    Result after a teacher has been assigned.
+    Result after a teacher has been assigned or an assignment request
+    has been discarded. A discarded assignment intentionally has no
+    teacher yet and may be reassigned later.
     """
 
     booking_id: uuid.UUID
@@ -209,8 +212,8 @@ class TeacherAssignmentRead(BaseModel):
     subject_id: int
     subject_name: str
 
-    teacher_id: uuid.UUID
-    teacher_name: str
+    teacher_id: uuid.UUID | None
+    teacher_name: str | None
 
     scheduled_at: datetime
     duration_minutes: int
@@ -246,4 +249,4 @@ class BookingAssignmentAuditRead(BaseModel):
     # "assigned" | "reassigned"
     action: str
 
-    created_at: datetime
+    created_at: datetime
