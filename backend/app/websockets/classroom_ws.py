@@ -126,8 +126,8 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
     if not latest_by_page:
         return
     pages = [
-        {"page_number": n, "image_url": get_presigned_url(s.image_url, expires_in=3600)}
-        for n, s in sorted(latest_by_page.items()) if s.image_url
+        {"page_number": n, "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None}
+        for n, s in sorted(latest_by_page.items())
     ]
     current_page = max(latest_by_page)
     snapshot = latest_by_page[current_page]
@@ -263,18 +263,6 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
     if msg_type == "chat":
         if peer:
             await peer.send_json({"type": "chat", "sender_id": str(user.id), "message_text": str(data.get("message_text") or "")[:4000], "file_url": data.get("file_url"), "file_name": data.get("file_name")})
-    elif msg_type == "whiteboard_live":
-        if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
-            await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
-            return
-        if peer:
-            payload = data.get("payload") or {}
-            stroke = payload.get("stroke") or {}
-            points = stroke.get("points") or []
-            if len(points) > 64:
-                stroke = {**stroke, "points": points[-64:]}
-            payload = {"stroke": stroke, "page_number": max(1, int(payload.get("page_number", 1))), "final": bool(payload.get("final"))}
-            await peer.send_json({"type": "whiteboard_live", "payload": payload})
     elif msg_type == "whiteboard_event":
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
