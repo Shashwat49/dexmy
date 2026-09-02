@@ -4,10 +4,10 @@ import SEO from "../components/SEO";
 import { getPackages } from "../api/packages";
 
 const DEFAULTS = [
-  { class_count: 25, name: "25 Classes Package", inr: 500, usd: 6 },
-  { class_count: 50, name: "50 Classes Package", inr: 475, usd: 5.75 },
-  { class_count: 75, name: "75 Classes Package", inr: 450, usd: 5.5 },
-  { class_count: 100, name: "100 Classes Package", inr: 425, usd: 5.25 },
+  { class_count: 25, name: "25 Classes Package", inr: 2000, usd: 20 },
+  { class_count: 50, name: "50 Classes Package", inr: 1950, usd: 19.5 },
+  { class_count: 75, name: "75 Classes Package", inr: 1900, usd: 19 },
+  { class_count: 100, name: "100 Classes Package", inr: 1850, usd: 18.5 },
   { class_count: 0, name: "Customize Your Package", inr: 550, usd: 6.5, is_custom: true },
 ];
 
