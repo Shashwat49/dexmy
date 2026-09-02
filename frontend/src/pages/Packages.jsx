@@ -8,7 +8,7 @@ const DEFAULTS = [
   { class_count: 50, name: "50 Classes Package", inr: 1950, usd: 19.5 },
   { class_count: 75, name: "75 Classes Package", inr: 1900, usd: 19 },
   { class_count: 100, name: "100 Classes Package", inr: 1850, usd: 18.5 },
-  { class_count: 0, name: "Customize Your Package", inr: 550, usd: 6.5, is_custom: true },
+  { class_count: 0, name: "Customize Your Package", inr: 2000, usd: 20, is_custom: true },
 ];
 
 export default function Packages() {
