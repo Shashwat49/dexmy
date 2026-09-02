@@ -31,7 +31,9 @@ class Settings(BaseSettings):
     WHATSAPP_VERIFY_TOKEN: str = ""
     META_APP_SECRET: str = ""
 
-    FRONTEND_ORIGIN: str = "https://dexmy.vercel.app"
+    # Keep the legacy single-origin setting for compatibility. The API also
+    # accepts the production custom domain and Vercel domain in main.py.
+    FRONTEND_ORIGIN: str = "https://dexmyedu.com"
 
     class Config:
         env_file = ".env"
