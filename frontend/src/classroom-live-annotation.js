@@ -4,6 +4,7 @@ const TOPIC = "dexmy-whiteboard-stroke-v2";
 const W = 1600;
 const H = 900;
 const LIVE_TOOLS = new Set(["pen", "highlighter", "line", "arrow", "rect", "circle", "eraser"]);
+const TOOL_LABELS = { pen: "pen", highlighter: "highlight", line: "line", arrow: "arrow", rect: "rectangle", circle: "circle", eraser: "eraser" };
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_LOSSY_BYTES = 1200;
@@ -34,9 +35,11 @@ function ensureOverlay() {
 function currentTool() {
   const selected = [...document.querySelectorAll("button")].find((button) => {
     const text = button.textContent?.trim().toLowerCase();
-    return LIVE_TOOLS.has(text) && button.className?.includes("bg-red-600");
+    return Object.values(TOOL_LABELS).includes(text) && button.className?.includes("bg-red-600");
   });
-  return selected?.textContent?.trim().toLowerCase() || null;
+  if (!selected) return null;
+  const label = selected.textContent?.trim().toLowerCase();
+  return Object.entries(TOOL_LABELS).find(([, value]) => value === label)?.[0] || null;
 }
 
 function currentColor() { return document.querySelector('input[type="color"]')?.value || "#111827"; }
@@ -169,6 +172,24 @@ function installLegacyLiveFilter() {
         } catch {}
         return nativeSend(data);
       };
+      const descriptor = Object.getOwnPropertyDescriptor(NativeWebSocket.prototype, "onmessage");
+      if (descriptor?.get && descriptor?.set) {
+        let handler = null;
+        Object.defineProperty(this, "onmessage", {
+          configurable: true,
+          get: () => handler,
+          set: (value) => {
+            handler = typeof value === "function" ? (event) => {
+              try {
+                const message = typeof event.data === "string" ? JSON.parse(event.data) : null;
+                if (message?.type === "whiteboard_live") return;
+              } catch {}
+              return value(event);
+            } : value;
+            descriptor.set.call(this, handler);
+          }
+        });
+      }
     }
   }
   for (const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) Object.defineProperty(ClassroomWebSocket, key, { value: NativeWebSocket[key] });
@@ -195,6 +216,7 @@ function installPointerPublisher() {
     if (!(target instanceof HTMLCanvasElement) || target.width !== W || target.height !== H) return;
     const tool = currentTool();
     if (!tool || !activeRoom) return;
+    if (event.pointerId != null && typeof target.hasPointerCapture === "function" && !target.hasPointerCapture(event.pointerId)) return;
     outgoing = { id: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`, page: currentPage(), tool, color: currentColor(), width: currentWidth(), seq: 0, points: [pointFromEvent(event, target)] };
     publish({ v: 2, type: "stroke_chunk", id: outgoing.id, page: outgoing.page, tool: outgoing.tool, color: outgoing.color, width: outgoing.width, seq: outgoing.seq++, points: outgoing.points.splice(0, POINT_BATCH), final: false });
   });
