@@ -230,6 +230,7 @@ export default function AdminBookings() {
               <tbody className="divide-y divide-chalk-faint">
                 {items.map((b) => {
                   const candidates = teacherLists[b.id] || [];
+                  const isDiscarded = b.teacher_assignment_status === "discarded";
                   return (
                     <tr key={b.id}>
                       <td className="px-5 py-4"><div className="font-semibold">{b.student_name}</div><div className="text-xs text-chalk-muted">{b.student_id}</div></td>
@@ -237,10 +238,10 @@ export default function AdminBookings() {
                       <td className="px-5 py-4">{b.teacher_name || "Unassigned"}</td>
                       <td className="px-5 py-4">{new Date(b.scheduled_at).toLocaleString()}<div className="text-xs text-chalk-muted">{b.duration_minutes} min</div></td>
                       <td className="px-5 py-4">{b.status}</td>
-                      <td className="px-5 py-4">{b.teacher_assignment_status || "—"}</td>
+                      <td className={`px-5 py-4 ${isDiscarded ? "font-semibold text-red-300" : ""}`}>{isDiscarded ? "Discarded" : (b.teacher_assignment_status || "—")}</td>
                       <td className="px-5 py-4">{b.price == null ? "—" : b.price}</td>
                       <td className="px-5 py-4">
-                        {!b.teacher_id && b.status === "confirmed" ? (
+                        {!b.teacher_id && b.status === "confirmed" && !isDiscarded ? (
                           <div className="min-w-[360px]">
                             {teacherLists[b.id] !== undefined ? (
                               <>
@@ -258,7 +259,7 @@ export default function AdminBookings() {
                               <button disabled={assigning === b.id} onClick={() => openAssign(b)} className="rounded-lg border border-chalk-faint px-3 py-2 text-xs font-semibold hover:border-brand-red">{assigning === b.id ? "Loading…" : "View Eligible Teachers"}</button>
                             )}
                           </div>
-                        ) : b.teacher_id ? <span className="text-xs text-chalk-muted">Assigned</span> : "—"}
+                        ) : b.teacher_id ? <span className="text-xs text-chalk-muted">Assigned</span> : isDiscarded ? <span className="text-xs font-semibold text-red-300">Discarded</span> : "—"}
                       </td>
                     </tr>
                   );
