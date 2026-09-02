@@ -1,5 +1,6 @@
 import asyncio
 import io
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -14,17 +15,34 @@ from app.services.storage_service import download_bytes, save_bytes_file
 
 
 def _generate_notes(session_id: uuid.UUID) -> None:
+    # Give the browser a short window to flush its final debounced whiteboard
+    # snapshot after the teacher presses "End class". This avoids generating a
+    # PDF one stroke behind the final classroom state.
+    time.sleep(1.5)
     db = SessionLocal()
     try:
         if db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first():
             return
-        snapshots = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id).order_by(WhiteboardSnapshot.page_number, WhiteboardSnapshot.created_at.desc()).all()
-        latest_by_page = {}
-        for snap in snapshots:
-            latest_by_page.setdefault(snap.page_number, snap)
-        image_keys = [latest_by_page[p].image_url for p in sorted(latest_by_page) if latest_by_page[p].image_url]
+
+        image_keys = []
+        for _ in range(5):
+            snapshots = (
+                db.query(WhiteboardSnapshot)
+                .filter(WhiteboardSnapshot.session_id == session_id)
+                .order_by(WhiteboardSnapshot.page_number, WhiteboardSnapshot.created_at.desc())
+                .all()
+            )
+            latest_by_page = {}
+            for snap in snapshots:
+                latest_by_page.setdefault(snap.page_number, snap)
+            image_keys = [latest_by_page[p].image_url for p in sorted(latest_by_page) if latest_by_page[p].image_url]
+            if image_keys:
+                break
+            time.sleep(0.5)
+
         if not image_keys:
             return
+
         image_streams = [io.BytesIO(download_bytes(key)) for key in image_keys]
         pdf_bytes = compile_notes_pdf(image_streams)
         pdf_key = save_bytes_file(pdf_bytes, f"notes_{session_id}", "pdf")
