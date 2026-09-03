@@ -1,38 +1,21 @@
 name: Temporary classroom RAF fix
 
-on:
-  push:
-    branches: [main]
+on: push
 
 permissions:
   contents: write
 
 jobs:
   fix:
-    if: github.event.head_commit.message != 'Use requestAnimationFrame for live whiteboard flush'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Change only Classroom live flush hook
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('frontend/src/pages/Classroom.jsx')
-          s = p.read_text()
-          old = '  useEffect(() => { liveTimerRef.current = setInterval(() => flushLive(false), 20); return () => { clearInterval(liveTimerRef.current); flushLive(true); clearTimeout(snapshotTimerRef.current); }; }, [flushLive]);'
-          new = '''  useEffect(() => {
-    let rafId;
-    const tick = () => { flushLive(false); rafId = requestAnimationFrame(tick); };
-    rafId = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(rafId); flushLive(true); clearTimeout(snapshotTimerRef.current); };
-  }, [flushLive]);'''
-          if s.count(old) != 1:
-              raise SystemExit(f'Expected exactly one target hook, found {s.count(old)}')
-          p.write_text(s.replace(old, new, 1))
-          PY
+          python -c "from pathlib import Path; p=Path('frontend/src/pages/Classroom.jsx'); s=p.read_text(); old='  useEffect(() => { liveTimerRef.current = setInterval(() => flushLive(false), 20); return () => { clearInterval(liveTimerRef.current); flushLive(true); clearTimeout(snapshotTimerRef.current); }; }, [flushLive]);'; new='  useEffect(() => {\n    let rafId;\n    const tick = () => { flushLive(false); rafId = requestAnimationFrame(tick); };\n    rafId = requestAnimationFrame(tick);\n    return () => { cancelAnimationFrame(rafId); flushLive(true); clearTimeout(snapshotTimerRef.current); };\n  }, [flushLive]);'; assert s.count(old)==1, f'Expected exactly one target hook, found {s.count(old)}'; p.write_text(s.replace(old,new,1))"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add frontend/src/pages/Classroom.jsx
           git rm .github/workflows/temporary-classroom-raf-fix.yml
-          git commit -m 'Use requestAnimationFrame for live whiteboard flush'
+          git commit -m 'Change student booking slot display to 60 minutes'
           git push
