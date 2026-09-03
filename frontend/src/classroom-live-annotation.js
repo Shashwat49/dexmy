@@ -3,12 +3,10 @@ import { Room, RoomEvent } from "livekit-client";
 const TOPIC = "dexmy-whiteboard-stroke-v2";
 const W = 1600;
 const H = 900;
-const LIVE_TOOLS = new Set(["pen", "highlighter", "line", "arrow", "rect", "circle", "eraser"]);
 const TOOL_LABELS = { pen: "pen", highlighter: "highlight", line: "line", arrow: "arrow", rect: "rectangle", circle: "circle", eraser: "eraser" };
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const MAX_LOSSY_BYTES = 1200;
-const POINT_BATCH = 8;
+const POINT_BATCH = 4;
 
 let activeRoom = null;
 let outgoing = null;
@@ -56,11 +54,10 @@ function pointFromEvent(event, target) {
   return { x: Math.max(0, Math.min(W, ((event.clientX - rect.left) * W) / rect.width)), y: Math.max(0, Math.min(H, ((event.clientY - rect.top) * H) / rect.height)) };
 }
 
-function publish(message, reliable = false) {
+function publish(message) {
   if (!activeRoom?.localParticipant || activeRoom.state !== "connected") return;
   const payload = encoder.encode(JSON.stringify(message));
-  if (!reliable && payload.byteLength > MAX_LOSSY_BYTES) return;
-  activeRoom.localParticipant.publishData(payload, { reliable, topic: TOPIC }).catch(() => {});
+  activeRoom.localParticipant.publishData(payload, { reliable: true, topic: TOPIC }).catch(() => {});
 }
 
 function flushOutgoing() {
@@ -206,7 +203,7 @@ function installPointerPublisher() {
     outgoingRaf = 0;
     while (outgoing.points.length) {
       const points = outgoing.points.splice(0, POINT_BATCH);
-      publish({ v: 2, type: "stroke_chunk", id: outgoing.id, page: outgoing.page, tool: outgoing.tool, color: outgoing.color, width: outgoing.width, seq: outgoing.seq++, points, final: outgoing.points.length === 0 }, true);
+      publish({ v: 2, type: "stroke_chunk", id: outgoing.id, page: outgoing.page, tool: outgoing.tool, color: outgoing.color, width: outgoing.width, seq: outgoing.seq++, points, final: outgoing.points.length === 0 });
     }
     outgoing = null;
   };
