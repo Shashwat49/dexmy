@@ -269,6 +269,12 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             return
         if peer:
             await peer.send_json({"type": "whiteboard_event", "payload": data.get("payload") or {}})
+    elif msg_type == "whiteboard_live":
+        if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
+            await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
+            return
+        if peer:
+            await peer.send_json({"type": "whiteboard_live", "payload": data.get("payload") or {}})
     elif msg_type == "permission_update" and is_teacher:
         try:
             target_user_id = uuid.UUID(data["target_user_id"])
