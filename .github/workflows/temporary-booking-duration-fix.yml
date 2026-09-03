@@ -1,0 +1,32 @@
+name: Temporary booking duration display fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.head_commit.message != 'Change student booking slot display to 60 minutes'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Change student display only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('frontend/src/pages/dashboard/student/BookClass.jsx')
+          s = p.read_text()
+          old = '55 minutes'
+          if old not in s:
+              raise SystemExit('Expected 55 minutes display text was not found')
+          p.write_text(s.replace(old, '60 minutes', 1))
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/pages/dashboard/student/BookClass.jsx
+          git rm .github/workflows/temporary-booking-duration-fix.yml
+          git commit -m 'Change student booking slot display to 60 minutes'
+          git push
