@@ -1,0 +1,36 @@
+name: Temporary Classroom Live Reliability Fix
+on:
+  push:
+    branches: [fix/classroom-live-reliability]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply exact live send reliability fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('frontend/src/pages/Classroom.jsx')
+          s = p.read_text()
+          old = '''  const send = useCallback((payload) => { if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(payload)); }, []);'''
+          new = '''  const send = useCallback((payload) => { if (wsRef.current?.readyState === WebSocket.OPEN) { wsRef.current.send(JSON.stringify(payload)); return true; } return false; }, []);'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = '''  const flushLive = useCallback((force = false) => { const pending = pendingLiveRef.current; if (!pending || (!force && !pending.points.length)) return; pendingLiveRef.current = null; send({ type: "whiteboard_live", payload: { stroke: { ...pending.stroke, points: pending.points.slice(0, 64) }, page_number: pending.page_number, final: pending.final } }); if (pending.points.length > 64) { pending.points = pending.points.slice(64); pending.final = false; pendingLiveRef.current = pending; } }, [send]);'''
+          new = '''  const flushLive = useCallback((force = false) => { const pending = pendingLiveRef.current; if (!pending || (!force && !pending.points.length)) return; const sent = send({ type: "whiteboard_live", payload: { stroke: { ...pending.stroke, points: pending.points.slice(0, 64) }, page_number: pending.page_number, final: pending.final } }); if (!sent) return; pendingLiveRef.current = null; if (pending.points.length > 64) { pending.points = pending.points.slice(64); pending.final = false; pendingLiveRef.current = pending; } }, [send]);'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Commit fix and remove temporary workflow
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add frontend/src/pages/Classroom.jsx
+          git commit -m "Keep live whiteboard points during websocket reconnect"
+          git rm .github/workflows/temporary-classroom-live-reliability.yml
+          git commit -m "Remove temporary classroom reliability workflow"
+          git push
