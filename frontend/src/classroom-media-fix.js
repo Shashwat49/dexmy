@@ -1,6 +1,7 @@
 import { Room, RoomEvent, Track } from "livekit-client";
 
 const WHITEBOARD_TOPIC = "dexmy-whiteboard-live";
+const LIVE_POINT_CHUNK = 24;
 const classroomSockets = new Set();
 const socketState = new WeakMap();
 const encoder = new TextEncoder();
@@ -47,8 +48,6 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
             if (state) state.annotate = Boolean(message.granted);
           }
 
-          // Once LiveKit is active, live packets arrive through DataReceived.
-          // Other classroom messages remain on the original WebSocket.
           if (message.type !== "whiteboard_live") handler.call(this, event);
         });
       },
@@ -77,12 +76,31 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
       return nativeSend.call(this, data);
     }
 
+    const points = message.payload?.stroke?.points;
+    const chunks = Array.isArray(points) && points.length > LIVE_POINT_CHUNK
+      ? Array.from({ length: Math.ceil(points.length / LIVE_POINT_CHUNK) }, (_, index) => points.slice(index * LIVE_POINT_CHUNK, (index + 1) * LIVE_POINT_CHUNK))
+      : [points];
+
     try {
-      const publish = localParticipant.publishData(encoder.encode(data), {
-        reliable: false,
-        topic: WHITEBOARD_TOPIC,
+      const publishes = chunks.map((chunk, index) => {
+        const packet = {
+          ...message,
+          payload: {
+            ...message.payload,
+            stroke: {
+              ...message.payload.stroke,
+              ...(Array.isArray(chunk) ? { points: chunk } : {}),
+            },
+            final: Boolean(message.payload.final) && index === chunks.length - 1,
+          },
+        };
+        return localParticipant.publishData(encoder.encode(JSON.stringify(packet)), {
+          reliable: false,
+          topic: WHITEBOARD_TOPIC,
+        });
       });
-      publish.catch(() => {
+
+      Promise.all(publishes).catch(() => {
         try {
           if (this.readyState === WebSocket.OPEN) nativeSend.call(this, data);
         } catch {}
