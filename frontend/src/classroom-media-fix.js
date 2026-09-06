@@ -1,19 +1,14 @@
 import { Room, RoomEvent, Track } from "livekit-client";
 
-// The classroom UI has separate video boxes for teacher/student, but its
-// LocalTrackPublished handler historically used the same video box for every
-// local publication. Publishing the microphone therefore cleared the camera
-// element. Keep track of the camera preview target and restore it after any
-// non-video local publication.
 const WHITEBOARD_TOPIC = "dexmy-whiteboard-live";
 const classroomSockets = new Set();
 const socketState = new WeakMap();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// Route high-frequency live whiteboard packets through the already-connected
-// LiveKit realtime data channel. Durable whiteboard events and snapshots still
-// use the existing classroom WebSocket/database path.
+// High-frequency live whiteboard packets use LiveKit's low-latency lossy data
+// channel. Durable stroke/page/snapshot messages continue using the existing
+// classroom WebSocket path, preserving persistence and reconnect behavior.
 if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
   WebSocket.prototype.__dexmyWhiteboardTransportHooked = true;
 
@@ -35,7 +30,7 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
         }
 
         classroomSockets.add(this);
-        socketState.set(this, { annotate: false });
+        socketState.set(this, { annotate: false, handler });
         onMessageDescriptor.set.call(this, (event) => {
           let message;
           try {
@@ -52,9 +47,8 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
             if (state) state.annotate = Boolean(message.granted);
           }
 
-          // Live annotation packets are delivered through LiveKit instead.
-          // Keep the WebSocket path available as a fallback when LiveKit is not
-          // connected, so classroom behavior remains resilient.
+          // Once LiveKit is active, live packets arrive through DataReceived.
+          // Other classroom messages remain on the original WebSocket.
           if (message.type !== "whiteboard_live") handler.call(this, event);
         });
       },
@@ -100,6 +94,7 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
   };
 }
 
+// Keep the existing camera-preview fix intact.
 if (!Room.prototype.__dexmyMediaFixHooked) {
   Room.prototype.__dexmyMediaFixHooked = true;
 
@@ -125,9 +120,7 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
       if (!cameraTrack || !cameraTargetId) return;
       const box = document.getElementById(cameraTargetId);
       if (!box) return;
-
-      const existing = box.querySelector("video");
-      if (existing) return;
+      if (box.querySelector("video")) return;
 
       const element = cameraTrack.attach();
       element.autoplay = true;
@@ -141,7 +134,8 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
       if (topic !== WHITEBOARD_TOPIC || !participant) return;
       const data = decoder.decode(payload);
       for (const socket of classroomSockets) {
-        const handler = socketState.get(socket)?.handler;
+        const state = socketState.get(socket);
+        const handler = state?.handler;
         if (handler && socket.readyState === WebSocket.OPEN) {
           try {
             handler.call(socket, new MessageEvent("message", { data }));
@@ -163,9 +157,7 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
         return;
       }
 
-      if (publication.source === Track.Source.Microphone) {
-        setTimeout(restoreCamera, 0);
-      }
+      if (publication.source === Track.Source.Microphone) setTimeout(restoreCamera, 0);
     });
 
     room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
