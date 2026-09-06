@@ -5,6 +5,101 @@ import { Room, RoomEvent, Track } from "livekit-client";
 // local publication. Publishing the microphone therefore cleared the camera
 // element. Keep track of the camera preview target and restore it after any
 // non-video local publication.
+const WHITEBOARD_TOPIC = "dexmy-whiteboard-live";
+const classroomSockets = new Set();
+const socketState = new WeakMap();
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+// Route high-frequency live whiteboard packets through the already-connected
+// LiveKit realtime data channel. Durable whiteboard events and snapshots still
+// use the existing classroom WebSocket/database path.
+if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
+  WebSocket.prototype.__dexmyWhiteboardTransportHooked = true;
+
+  const nativeSend = WebSocket.prototype.send;
+  const onMessageDescriptor = Object.getOwnPropertyDescriptor(WebSocket.prototype, "onmessage");
+
+  if (onMessageDescriptor?.get && onMessageDescriptor?.set) {
+    Object.defineProperty(WebSocket.prototype, "onmessage", {
+      configurable: onMessageDescriptor.configurable,
+      enumerable: onMessageDescriptor.enumerable,
+      get() {
+        return onMessageDescriptor.get.call(this);
+      },
+      set(handler) {
+        const isClassroom = typeof this.url === "string" && this.url.includes("/ws/classroom/");
+        if (!isClassroom || typeof handler !== "function") {
+          onMessageDescriptor.set.call(this, handler);
+          return;
+        }
+
+        classroomSockets.add(this);
+        socketState.set(this, { annotate: false });
+        onMessageDescriptor.set.call(this, (event) => {
+          let message;
+          try {
+            message = JSON.parse(event.data);
+          } catch {
+            handler.call(this, event);
+            return;
+          }
+
+          const state = socketState.get(this);
+          if (message.type === "permissions_state") {
+            if (state) state.annotate = Boolean(message.permissions?.annotate);
+          } else if (message.type === "permission_update" && message.permission === "annotate") {
+            if (state) state.annotate = Boolean(message.granted);
+          }
+
+          // Live annotation packets are delivered through LiveKit instead.
+          // Keep the WebSocket path available as a fallback when LiveKit is not
+          // connected, so classroom behavior remains resilient.
+          if (message.type !== "whiteboard_live") handler.call(this, event);
+        });
+      },
+    });
+  }
+
+  WebSocket.prototype.send = function (data) {
+    const isClassroom = typeof this.url === "string" && this.url.includes("/ws/classroom/");
+    if (!isClassroom || typeof data !== "string") return nativeSend.call(this, data);
+
+    let message;
+    try {
+      message = JSON.parse(data);
+    } catch {
+      return nativeSend.call(this, data);
+    }
+
+    if (message.type !== "whiteboard_live") return nativeSend.call(this, data);
+
+    const state = socketState.get(this);
+    const room = window.__dexmyClassroomLiveKitRoom;
+    const localParticipant = room?.localParticipant;
+    const canPublishData = localParticipant?.permissions?.canPublishData;
+
+    if (!state?.annotate || !room || room.state !== "connected" || canPublishData === false) {
+      return nativeSend.call(this, data);
+    }
+
+    try {
+      const publish = localParticipant.publishData(encoder.encode(data), {
+        reliable: false,
+        topic: WHITEBOARD_TOPIC,
+      });
+      publish.catch(() => {
+        try {
+          if (this.readyState === WebSocket.OPEN) nativeSend.call(this, data);
+        } catch {}
+      });
+      return;
+    } catch {
+      return nativeSend.call(this, data);
+    }
+  };
+}
+
 if (!Room.prototype.__dexmyMediaFixHooked) {
   Room.prototype.__dexmyMediaFixHooked = true;
 
@@ -13,6 +108,7 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
   Room.prototype.connect = async function (...args) {
     const result = await originalConnect.apply(this, args);
     const room = this;
+    window.__dexmyClassroomLiveKitRoom = room;
 
     let cameraTargetId = null;
     let cameraTrack = null;
@@ -41,14 +137,24 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
       box.appendChild(element);
     };
 
+    room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
+      if (topic !== WHITEBOARD_TOPIC || !participant) return;
+      const data = decoder.decode(payload);
+      for (const socket of classroomSockets) {
+        const handler = socketState.get(socket)?.handler;
+        if (handler && socket.readyState === WebSocket.OPEN) {
+          try {
+            handler.call(socket, new MessageEvent("message", { data }));
+          } catch {}
+        }
+      }
+    });
+
     room.on(RoomEvent.LocalTrackPublished, (publication) => {
       if (publication.source === Track.Source.Camera && publication.track) {
         cameraTrack = publication.track;
         cameraTargetId = findVideoTarget();
         if (!cameraTargetId) {
-          // The normal Classroom handler may run after this hook in some
-          // browser/event-order combinations. Give it a tick, then detect the
-          // box it populated.
           setTimeout(() => {
             cameraTargetId = findVideoTarget();
             restoreCamera();
@@ -57,7 +163,6 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
         return;
       }
 
-      // Microphone publication must never replace the camera preview.
       if (publication.source === Track.Source.Microphone) {
         setTimeout(restoreCamera, 0);
       }
@@ -73,6 +178,8 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
     room.on(RoomEvent.Disconnected, () => {
       cameraTrack = null;
       cameraTargetId = null;
+      if (window.__dexmyClassroomLiveKitRoom === room) window.__dexmyClassroomLiveKitRoom = null;
+      for (const socket of classroomSockets) socketState.delete(socket);
     });
 
     return result;
