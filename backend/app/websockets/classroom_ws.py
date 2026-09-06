@@ -21,7 +21,6 @@ from app.websockets.connection_manager import manager
 
 router = APIRouter()
 
-
 async def _heartbeat(websocket: WebSocket) -> None:
     """Keep the classroom WebSocket alive through idle/load-balancing proxies."""
     try:
@@ -31,7 +30,6 @@ async def _heartbeat(websocket: WebSocket) -> None:
     except (WebSocketDisconnect, RuntimeError, ConnectionError, asyncio.CancelledError):
         return
 
-
 def _authenticate(token: str, db) -> User | None:
     try:
         payload = decode_access_token(token)
@@ -40,10 +38,8 @@ def _authenticate(token: str, db) -> User | None:
         return None
     return db.get(User, user_id)
 
-
 def _default_student_permissions() -> set[str]:
     return {"mic", "camera"}
-
 
 def _allowed_sources(room, user_id: uuid.UUID) -> list[str]:
     permissions = room.permissions.get(str(user_id), set())
@@ -56,16 +52,9 @@ def _allowed_sources(room, user_id: uuid.UUID) -> list[str]:
         sources.append("screen_share")
     return sources
 
-
 def _permission_payload(room, user_id: uuid.UUID) -> dict[str, bool]:
     permissions = room.permissions.get(str(user_id), set())
-    return {
-        "mic": "mic" in permissions,
-        "camera": "camera" in permissions,
-        "annotate": "annotate" in permissions,
-        "screen_share": "screen_share" in permissions,
-    }
-
+    return {"mic": "mic" in permissions, "camera": "camera" in permissions, "annotate": "annotate" in permissions, "screen_share": "screen_share" in permissions}
 
 async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.UUID, room) -> None:
     sources = _allowed_sources(room, user_id)
@@ -81,18 +70,7 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
                     await asyncio.sleep(0.35)
                     continue
                 raise
-            await lkapi.room.update_participant(
-                api.UpdateParticipantRequest(
-                    room=class_session.livekit_room_name,
-                    identity=str(user_id),
-                    permission=api.ParticipantPermission(
-                        can_subscribe=True,
-                        can_publish=bool(sources),
-                        can_publish_data=True,
-                        can_publish_sources=sources,
-                    ),
-                )
-            )
+            await lkapi.room.update_participant(api.UpdateParticipantRequest(room=class_session.livekit_room_name, identity=str(user_id), permission=api.ParticipantPermission(can_subscribe=True, can_publish=bool(sources), can_publish_data=True, can_publish_sources=sources)))
             return
         except Exception as exc:
             last_error = exc
@@ -101,7 +79,6 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
         finally:
             await lkapi.aclose()
     raise last_error or RuntimeError("LiveKit permission synchronization failed")
-
 
 def _restore_student_permissions(session_id: uuid.UUID, student_id: uuid.UUID, db) -> set[str]:
     permissions = _default_student_permissions()
@@ -117,7 +94,6 @@ def _restore_student_permissions(session_id: uuid.UUID, student_id: uuid.UUID, d
             permissions.discard(permission.value)
     return permissions
 
-
 async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, db) -> None:
     snapshots = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id).order_by(WhiteboardSnapshot.page_number.asc(), WhiteboardSnapshot.created_at.desc()).all()
     latest_by_page = {}
@@ -125,20 +101,10 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
         latest_by_page.setdefault(snapshot.page_number, snapshot)
     if not latest_by_page:
         return
-    pages = [
-        {"page_number": n, "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None}
-        for n, s in sorted(latest_by_page.items())
-    ]
+    pages = [{"page_number": n, "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None} for n, s in sorted(latest_by_page.items())]
     current_page = max(latest_by_page)
     snapshot = latest_by_page[current_page]
-    await websocket.send_json({
-        "type": "whiteboard_state",
-        "page_number": current_page,
-        "canvas_json": snapshot.snapshot_data or {},
-        "image_url": get_presigned_url(snapshot.image_url, expires_in=3600) if snapshot.image_url else None,
-        "pages": pages,
-    })
-
+    await websocket.send_json({"type": "whiteboard_state", "page_number": current_page, "canvas_json": snapshot.snapshot_data or {}, "image_url": get_presigned_url(snapshot.image_url, expires_in=3600) if snapshot.image_url else None, "pages": pages})
 
 @router.websocket("/ws/classroom/{session_id}")
 async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: str = Query(...)):
@@ -191,7 +157,7 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 student = db.get(User, booking.student_id)
                 if student:
                     room.permissions[str(booking.student_id)] = _restore_student_permissions(session_id, booking.student_id, db)
-                    await websocket.send_json({"type": "participant_info", "role": "student", "name": student.full_name})
+                    await websocket.send_json({"type": "participant_info", "role": "student", "name": student.full_name, "email": student.email})
                     await websocket.send_json({"type": "permissions_state", "permissions": _permission_payload(room, booking.student_id)})
             if room.pending_student:
                 room.student_ws = room.pending_student
@@ -203,7 +169,7 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 await room.student_ws.send_json({"type": "participant_info", "role": "teacher", "name": user.full_name})
                 await room.student_ws.send_json({"type": "permissions_state", "permissions": permissions_state})
                 student = db.get(User, student_id)
-                await websocket.send_json({"type": "student_joined", "user_id": str(student_id), "name": student.full_name if student else "Student"})
+                await websocket.send_json({"type": "student_joined", "user_id": str(student_id), "name": student.full_name if student else "Student", "email": student.email if student else ""})
                 await websocket.send_json({"type": "permissions_state", "permissions": permissions_state})
         else:
             room.permissions[str(user.id)] = _restore_student_permissions(session_id, user.id, db)
@@ -218,7 +184,7 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 if teacher:
                     await websocket.send_json({"type": "participant_info", "role": "teacher", "name": teacher.full_name})
                 await websocket.send_json({"type": "permissions_state", "permissions": permissions_state})
-                await room.teacher_ws.send_json({"type": "student_joined", "user_id": str(user.id), "name": user.full_name})
+                await room.teacher_ws.send_json({"type": "student_joined", "user_id": str(user.id), "name": user.full_name, "email": user.email})
                 await room.teacher_ws.send_json({"type": "permissions_state", "permissions": permissions_state})
         await _send_latest_whiteboard(session_id, websocket, db)
         while True:
@@ -253,7 +219,6 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 room.pending_student = None
             manager.drop_room_if_empty(session_id)
         db.close()
-
 
 async def _handle_message(data, user, is_teacher, session_id, room, db, websocket, class_session, booking):
     msg_type = data.get("type")
@@ -343,7 +308,6 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
     elif msg_type == "leave":
         await websocket.close(code=1000)
 
-
 async def session_timer(session_id):
     while True:
         await asyncio.sleep(1)
@@ -365,7 +329,6 @@ async def session_timer(session_id):
         if remaining <= 0:
             await _auto_end_session(session_id, room)
             return
-
 
 async def _auto_end_session(session_id, room):
     db = SessionLocal()
