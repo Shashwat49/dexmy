@@ -157,7 +157,7 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 student = db.get(User, booking.student_id)
                 if student:
                     room.permissions[str(booking.student_id)] = _restore_student_permissions(session_id, booking.student_id, db)
-                    await websocket.send_json({"type": "participant_info", "role": "student", "name": student.full_name, "email": student.email})
+                    await websocket.send_json({"type": "participant_info", "role": "student", "user_id": str(booking.student_id), "name": student.full_name, "email": student.email})
                     await websocket.send_json({"type": "permissions_state", "permissions": _permission_payload(room, booking.student_id)})
             if room.pending_student:
                 room.student_ws = room.pending_student
