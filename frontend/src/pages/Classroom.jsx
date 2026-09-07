@@ -34,7 +34,7 @@ export default function Classroom() {
   const { user } = useAuth(); const { sessionId } = useParams(); const navigate = useNavigate();
   const isTeacher = user?.role === "teacher"; const email = user?.email || "";
   const canvasRef = useRef(null), wsRef = useRef(null), roomRef = useRef(null), drawRef = useRef(null);
-  const slidesRef = useRef([{ page_number: 1, image_url: null }]), strokesByPageRef = useRef(new Map([[1, []]]), slideRef = useRef(1);
+  const slidesRef = useRef([{ page_number: 1, image_url: null }]), strokesByPageRef = useRef(new Map([[1, []]])), slideRef = useRef(1);
   const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false);
   const mediaBusyRef = useRef(false);
   const [status, setStatus] = useState("Connecting…"), [notice, setNotice] = useState(""), [tool, setTool] = useState("pen"), [color, setColor] = useState("#111827"), [width, setWidth] = useState(3), [grid, setGrid] = useState(false);
