@@ -1,15 +1,19 @@
 import { Room, RoomEvent, Track } from "livekit-client";
 
+// The classroom UI has separate video boxes for teacher/student, but its
+// LocalTrackPublished handler historically used the same video box for every
+// local publication. Publishing the microphone therefore cleared the camera
+// element. Keep track of the camera preview target and restore it after any
+// non-video local publication.
 const WHITEBOARD_TOPIC = "dexmy-whiteboard-live";
-const LIVE_POINT_CHUNK = 24;
 const classroomSockets = new Set();
 const socketState = new WeakMap();
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-// High-frequency live whiteboard packets use LiveKit's low-latency lossy data
-// channel. Durable stroke/page/snapshot messages continue using the existing
-// classroom WebSocket path, preserving persistence and reconnect behavior.
+// Route high-frequency live whiteboard packets through the already-connected
+// LiveKit realtime data channel. Durable whiteboard events and snapshots still
+// use the existing classroom WebSocket/database path.
 if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
   WebSocket.prototype.__dexmyWhiteboardTransportHooked = true;
 
@@ -31,7 +35,7 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
         }
 
         classroomSockets.add(this);
-        socketState.set(this, { annotate: false, handler });
+        socketState.set(this, { annotate: false });
         onMessageDescriptor.set.call(this, (event) => {
           let message;
           try {
@@ -48,6 +52,9 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
             if (state) state.annotate = Boolean(message.granted);
           }
 
+          // Live annotation packets are delivered through LiveKit instead.
+          // Keep the WebSocket path available as a fallback when LiveKit is not
+          // connected, so classroom behavior remains resilient.
           if (message.type !== "whiteboard_live") handler.call(this, event);
         });
       },
@@ -76,31 +83,12 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
       return nativeSend.call(this, data);
     }
 
-    const points = message.payload?.stroke?.points;
-    const chunks = Array.isArray(points) && points.length > LIVE_POINT_CHUNK
-      ? Array.from({ length: Math.ceil(points.length / LIVE_POINT_CHUNK) }, (_, index) => points.slice(index * LIVE_POINT_CHUNK, (index + 1) * LIVE_POINT_CHUNK))
-      : [points];
-
     try {
-      const publishes = chunks.map((chunk, index) => {
-        const packet = {
-          ...message,
-          payload: {
-            ...message.payload,
-            stroke: {
-              ...message.payload.stroke,
-              ...(Array.isArray(chunk) ? { points: chunk } : {}),
-            },
-            final: Boolean(message.payload.final) && index === chunks.length - 1,
-          },
-        };
-        return localParticipant.publishData(encoder.encode(JSON.stringify(packet)), {
-          reliable: false,
-          topic: WHITEBOARD_TOPIC,
-        });
+      const publish = localParticipant.publishData(encoder.encode(data), {
+        reliable: false,
+        topic: WHITEBOARD_TOPIC,
       });
-
-      Promise.all(publishes).catch(() => {
+      publish.catch(() => {
         try {
           if (this.readyState === WebSocket.OPEN) nativeSend.call(this, data);
         } catch {}
@@ -112,7 +100,6 @@ if (!WebSocket.prototype.__dexmyWhiteboardTransportHooked) {
   };
 }
 
-// Keep the existing camera-preview fix intact.
 if (!Room.prototype.__dexmyMediaFixHooked) {
   Room.prototype.__dexmyMediaFixHooked = true;
 
@@ -138,7 +125,9 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
       if (!cameraTrack || !cameraTargetId) return;
       const box = document.getElementById(cameraTargetId);
       if (!box) return;
-      if (box.querySelector("video")) return;
+
+      const existing = box.querySelector("video");
+      if (existing) return;
 
       const element = cameraTrack.attach();
       element.autoplay = true;
@@ -152,8 +141,7 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
       if (topic !== WHITEBOARD_TOPIC || !participant) return;
       const data = decoder.decode(payload);
       for (const socket of classroomSockets) {
-        const state = socketState.get(socket);
-        const handler = state?.handler;
+        const handler = socketState.get(socket)?.handler;
         if (handler && socket.readyState === WebSocket.OPEN) {
           try {
             handler.call(socket, new MessageEvent("message", { data }));
@@ -175,7 +163,9 @@ if (!Room.prototype.__dexmyMediaFixHooked) {
         return;
       }
 
-      if (publication.source === Track.Source.Microphone) setTimeout(restoreCamera, 0);
+      if (publication.source === Track.Source.Microphone) {
+        setTimeout(restoreCamera, 0);
+      }
     });
 
     room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
