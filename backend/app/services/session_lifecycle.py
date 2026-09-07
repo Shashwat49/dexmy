@@ -15,17 +15,17 @@ from app.services.storage_service import download_bytes, save_bytes_file
 
 
 def _generate_notes(session_id: uuid.UUID) -> None:
-    # Give the browser enough time to flush its final debounced whiteboard
+    # Give the browser a short window to flush its final debounced whiteboard
     # snapshot after the teacher presses "End class". This avoids generating a
     # PDF one stroke behind the final classroom state.
-    time.sleep(2.5)
+    time.sleep(1.5)
     db = SessionLocal()
     try:
         if db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first():
             return
 
         image_keys = []
-        for _ in range(6):
+        for _ in range(5):
             snapshots = (
                 db.query(WhiteboardSnapshot)
                 .filter(WhiteboardSnapshot.session_id == session_id)
