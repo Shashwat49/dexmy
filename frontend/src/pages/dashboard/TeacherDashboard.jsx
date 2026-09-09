@@ -5,7 +5,7 @@ import { getMyBookings, getBookingSession } from "../../api/bookings";
 import { getMyTeacherProfile } from "../../api/teachers";
 
 const TEACHER_NAV = [
-  { label: "Teaching", items: [{ path: "/dashboard/teacher", label: "Dashboard" }, { path: "/dashboard/teacher/calendar", label: "Calendar" }] },
+  { label: "Teaching", items: [{ path: "/dashboard/teacher", label: "Dashboard" }, { path: "/dashboard/teacher/calendar", label: "Calendar" }, { path: "/dashboard/teacher/class-records", label: "Class Records" }] },
   { label: "Profile", items: [{ path: "/dashboard/teacher/profile", label: "Teacher Profile" }] },
 ];
 const formatDate = (v) => new Date(v).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
