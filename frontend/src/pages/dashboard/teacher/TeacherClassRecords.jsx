@@ -1,0 +1,85 @@
+import { useEffect, useMemo, useState } from "react";
+import DashboardLayout from "../../../components/dashboard/DashboardLayout";
+import { createClassRecord, getTeacherClassRecords, getTeacherClassStudents } from "../../../api/classRecords";
+
+const NAV = [
+  { label: "Teaching", items: [
+    { path: "/dashboard/teacher", label: "Dashboard" },
+    { path: "/dashboard/teacher/calendar", label: "Calendar" },
+    { path: "/dashboard/teacher/class-records", label: "Class Records" },
+  ] },
+  { label: "Profile", items: [{ path: "/dashboard/teacher/profile", label: "Teacher Profile" }] },
+];
+
+const pad = (n) => String(n).padStart(2, "0");
+const toLocalInput = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+const fmt = (v) => new Date(v).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+
+export default function TeacherClassRecords() {
+  const [students, setStudents] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [form, setForm] = useState(() => {
+    const end = new Date();
+    const start = new Date(end.getTime() - 60 * 60 * 1000);
+    return { student_id: "", student_package_id: "", subject: "Mathematics", topic: "", started_at: toLocalInput(start), ended_at: toLocalInput(end), teacher_notes: "", homework: "", google_meet_link: "" };
+  });
+
+  const load = async () => {
+    setLoading(true); setError("");
+    try {
+      const [studentData, recordData] = await Promise.all([getTeacherClassStudents(), getTeacherClassRecords()]);
+      setStudents(Array.isArray(studentData) ? studentData : []);
+      setRecords(Array.isArray(recordData) ? recordData : []);
+      if (!form.student_id && studentData?.length) {
+        setForm((f) => ({ ...f, student_id: studentData[0].student_id, student_package_id: studentData[0].id }));
+      }
+    } catch (e) { setError(e.response?.data?.detail || "Unable to load class records."); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const selectedStudent = useMemo(() => students.find((s) => s.student_id === form.student_id), [students, form.student_id]);
+  const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const selectStudent = (id) => { const s = students.find((x) => x.student_id === id); setForm((f) => ({ ...f, student_id: id, student_package_id: s?.id || "" })); };
+
+  const submit = async (e) => {
+    e.preventDefault(); setSaving(true); setError(""); setSuccess("");
+    try {
+      const created = await createClassRecord({ ...form, student_id: form.student_id, student_package_id: form.student_package_id, started_at: new Date(form.started_at).toISOString(), ended_at: new Date(form.ended_at).toISOString() });
+      setRecords((prev) => [created, ...prev]);
+      setStudents((prev) => prev.map((s) => s.student_id === created.student_id ? { ...s, completed_classes: s.completed_classes + (created.status === "completed" ? 1 : 0), remaining_classes: Math.max(0, s.remaining_classes - (created.status === "completed" ? 1 : 0)) } : s));
+      setForm((f) => ({ ...f, topic: "", teacher_notes: "", homework: "", google_meet_link: "" }));
+      setSuccess("Class recorded successfully. The student's package balance has been updated.");
+    } catch (e) { setError(e.response?.data?.detail || "Unable to save the class record."); }
+    finally { setSaving(false); }
+  };
+
+  return <DashboardLayout navItems={NAV}>
+    <div className="border-b border-chalk-faint px-8 py-5.5"><h1 className="text-2xl font-semibold">Class Records</h1><p className="mt-1 text-sm text-chalk-muted">Log classes conducted on Google Meet and keep student package balances accurate.</p></div>
+    <div className="flex-1 overflow-auto px-8 py-7">
+      {error && <div className="mb-5 rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">{error}</div>}
+      {success && <div className="mb-5 rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-400">{success}</div>}
+      <div className="grid gap-7 xl:grid-cols-[minmax(0,520px)_minmax(0,1fr)]">
+        <section className="rounded-2xl border border-chalk-faint bg-panel p-6">
+          <h2 className="text-lg font-semibold">Log a completed class</h2><p className="mt-1 text-sm text-chalk-muted">Teacher is automatically taken from your account. Duration is calculated from the times.</p>
+          {selectedStudent && <div className="mt-4 grid grid-cols-3 gap-2">{[["Total",selectedStudent.total_classes],["Completed",selectedStudent.completed_classes],["Remaining",selectedStudent.remaining_classes]].map(([l,v])=><div key={l} className="rounded-xl border border-chalk-faint p-3"><p className="text-xs text-chalk-muted">{l}</p><p className="mt-1 text-xl font-semibold">{v}</p></div>)}</div>}
+          <form onSubmit={submit} className="mt-6 space-y-4">
+            <Field label="Student"><select required value={form.student_id} onChange={(e) => selectStudent(e.target.value)} className="input"><option value="">Select student</option>{students.map((s) => <option key={s.student_id} value={s.student_id}>{s.student_name} — {s.student_email}</option>)}</select></Field>
+            <div className="grid gap-4 sm:grid-cols-2"><Field label="Subject"><input required value={form.subject} onChange={(e) => setField("subject", e.target.value)} className="input" placeholder="Mathematics" /></Field><Field label="Topic"><input required value={form.topic} onChange={(e) => setField("topic", e.target.value)} className="input" placeholder="Quadratic Equations" /></Field></div>
+            <div className="grid gap-4 sm:grid-cols-2"><Field label="Start time"><input required type="datetime-local" value={form.started_at} onChange={(e) => setField("started_at", e.target.value)} className="input" /></Field><Field label="End time"><input required type="datetime-local" value={form.ended_at} onChange={(e) => setField("ended_at", e.target.value)} className="input" /></Field></div>
+            <Field label="Google Meet link (optional)"><input type="url" value={form.google_meet_link} onChange={(e) => setField("google_meet_link", e.target.value)} className="input" placeholder="https://meet.google.com/..." /></Field>
+            <Field label="Teacher notes"><textarea value={form.teacher_notes} onChange={(e) => setField("teacher_notes", e.target.value)} className="input min-h-24" placeholder="What was covered, student performance, observations..." /></Field>
+            <Field label="Homework / assignment"><textarea value={form.homework} onChange={(e) => setField("homework", e.target.value)} className="input min-h-20" placeholder="Optional homework" /></Field>
+            <button disabled={saving || !form.student_id || !form.student_package_id} className="w-full rounded-xl bg-brand-red px-4 py-3 text-sm font-semibold disabled:opacity-50">{saving ? "Saving class..." : "Save Class Record"}</button>
+          </form>
+        </section>
+        <section><div className="mb-4"><h2 className="text-lg font-semibold">Class history</h2><p className="mt-1 text-sm text-chalk-muted">Every class you have logged appears here.</p></div>{loading ? <p className="text-sm text-chalk-muted">Loading records…</p> : records.length === 0 ? <div className="rounded-2xl border border-chalk-faint bg-panel p-8 text-sm text-chalk-muted">No class records yet.</div> : <div className="space-y-3">{records.map((r) => <article key={r.id} className="rounded-2xl border border-chalk-faint bg-panel p-5"><div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div><h3 className="font-semibold">{r.subject} — {r.topic}</h3><p className="mt-1 text-sm text-chalk-muted">{r.student_name} · {r.student_email}</p><p className="mt-1 text-sm text-chalk-muted">{fmt(r.started_at)} → {new Date(r.ended_at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} · {r.duration_minutes} min</p><p className="mt-1 text-xs text-chalk-muted">Teacher: {r.teacher_name}</p></div><span className="rounded-full bg-green-500/10 px-3 py-1.5 text-xs font-medium text-green-400">{r.status}</span></div>{r.teacher_notes && <p className="mt-4 whitespace-pre-wrap text-sm text-chalk-muted"><strong className="text-chalk">Notes:</strong> {r.teacher_notes}</p>}{r.homework && <p className="mt-2 whitespace-pre-wrap text-sm text-chalk-muted"><strong className="text-chalk">Homework:</strong> {r.homework}</p>}{r.google_meet_link && <a href={r.google_meet_link} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm text-brand-gold hover:underline">Open Google Meet link</a>}</article>)}</div>}</section>
+      </div>
+    </div>
+  </DashboardLayout>;
+}
+function Field({ label, children }) { return <label className="block"><span className="mb-2 block text-xs font-semibold text-chalk-muted">{label}</span>{children}</label>; }
