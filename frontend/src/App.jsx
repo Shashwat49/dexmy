@@ -4,6 +4,7 @@ import ProgramPage from "./pages/ProgramPage";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardRedirect from "./pages/dashboard/DashboardRedirect";
 import TeacherProfileGuard from "./components/TeacherProfileGuard";
@@ -41,6 +42,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/privacy" element={<Privacy />} />
+      <Route path="/terms" element={<Terms />} />
       <Route path="/packages" element={<Packages />} />
       <Route path="/checkout/package" element={<PackageCheckout />} />
       <Route path="/sat-tutoring" element={<ProgramPage slug="sat" />} />
