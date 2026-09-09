@@ -35,12 +35,7 @@ export default function Footer() {
                 aria-label="Facebook"
                 className="w-10 h-10 rounded-lg border border-chalk-faint flex items-center justify-center text-chalk-muted hover:text-chalk hover:border-brand-red hover:bg-brand-red-soft transition-all duration-200"
               >
-                <svg
-                  width="19"
-                  height="19"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M13.5 22v-8h2.75l.4-3h-3.15V9.08c0-.87.24-1.46 1.5-1.46h1.75V4.94c-.3-.04-1.32-.13-2.5-.13-2.47 0-4.16 1.51-4.16 4.29V11H7.3v3h2.79v8h3.41Z" />
                 </svg>
               </a>
@@ -53,23 +48,10 @@ export default function Footer() {
                 aria-label="Instagram"
                 className="w-10 h-10 rounded-lg border border-chalk-faint flex items-center justify-center text-chalk-muted hover:text-chalk hover:border-brand-red hover:bg-brand-red-soft transition-all duration-200"
               >
-                <svg
-                  width="19"
-                  height="19"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                >
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
                   <rect x="3" y="3" width="18" height="18" rx="5" />
                   <circle cx="12" cy="12" r="4" />
-                  <circle
-                    cx="17.5"
-                    cy="6.5"
-                    r="1"
-                    fill="currentColor"
-                    stroke="none"
-                  />
+                  <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
                 </svg>
               </a>
 
@@ -81,12 +63,7 @@ export default function Footer() {
                 aria-label="LinkedIn"
                 className="w-10 h-10 rounded-lg border border-chalk-faint flex items-center justify-center text-chalk-muted hover:text-chalk hover:border-brand-red hover:bg-brand-red-soft transition-all duration-200"
               >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M5.2 3.5A2.2 2.2 0 1 1 5.2 7.9a2.2 2.2 0 0 1 0-4.4ZM3.3 9.4h3.8V21H3.3V9.4Zm6.2 0h3.6V11h.05c.5-.95 1.72-1.95 3.54-1.95 3.78 0 4.48 2.49 4.48 5.73V21h-3.75v-5.5c0-1.31-.02-3-1.83-3-1.83 0-2.11 1.43-2.11 2.9V21H9.5V9.4Z" />
                 </svg>
               </a>
@@ -99,12 +76,7 @@ export default function Footer() {
                 aria-label="YouTube"
                 className="w-10 h-10 rounded-lg border border-chalk-faint flex items-center justify-center text-chalk-muted hover:text-chalk hover:border-brand-red hover:bg-brand-red-soft transition-all duration-200"
               >
-                <svg
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8ZM9.6 15.9V8.1l6.5 3.9-6.5 3.9Z" />
                 </svg>
               </a>
@@ -114,75 +86,21 @@ export default function Footer() {
 
           {/* Company */}
           <div>
-            <h3 className="text-sm font-semibold text-chalk mb-5">
-              Company
-            </h3>
-
+            <h3 className="text-sm font-semibold text-chalk mb-5">Company</h3>
             <ul className="space-y-3">
-              <li>
-                <a
-                  href="#about"
-                  className="text-sm text-chalk-muted hover:text-chalk transition-colors"
-                >
-                  About us
-                </a>
-              </li>
-
-              <li>
-                <a
-                  href="#contact"
-                  className="text-sm text-chalk-muted hover:text-chalk transition-colors"
-                >
-                  Contact us
-                </a>
-              </li>
-
-              <li>
-                <a
-                  href="/signup?role=teacher"
-                  className="text-sm text-chalk-muted hover:text-chalk transition-colors"
-                >
-                  Become a tutor
-                </a>
-              </li>
+              <li><a href="#about" className="text-sm text-chalk-muted hover:text-chalk transition-colors">About us</a></li>
+              <li><a href="#contact" className="text-sm text-chalk-muted hover:text-chalk transition-colors">Contact us</a></li>
+              <li><a href="/signup?role=teacher" className="text-sm text-chalk-muted hover:text-chalk transition-colors">Become a tutor</a></li>
             </ul>
           </div>
 
           {/* Support */}
           <div>
-            <h3 className="text-sm font-semibold text-chalk mb-5">
-              Support
-            </h3>
-
+            <h3 className="text-sm font-semibold text-chalk mb-5">Support</h3>
             <ul className="space-y-3">
-              <li>
-                <a
-                  href="#contact"
-                  className="text-sm text-chalk-muted hover:text-chalk transition-colors"
-                >
-                  Help & enquiries
-                </a>
-              </li>
-
-              <li>
-                <a
-                  href="mailto:dexmyedu@gmail.com"
-                  className="text-sm text-chalk-muted hover:text-chalk transition-colors"
-                >
-                  Email us
-                </a>
-              </li>
-
-              <li>
-                <a
-                  href="https://wa.me/918929839177"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-sm text-chalk-muted hover:text-chalk transition-colors"
-                >
-                  WhatsApp
-                </a>
-              </li>
+              <li><a href="#contact" className="text-sm text-chalk-muted hover:text-chalk transition-colors">Help & enquiries</a></li>
+              <li><a href="mailto:dexmyedu@gmail.com" className="text-sm text-chalk-muted hover:text-chalk transition-colors">Email us</a></li>
+              <li><a href="https://wa.me/918929839177" target="_blank" rel="noreferrer" className="text-sm text-chalk-muted hover:text-chalk transition-colors">WhatsApp</a></li>
             </ul>
           </div>
 
@@ -190,31 +108,19 @@ export default function Footer() {
 
         {/* Divider */}
         <div className="border-t border-chalk-faint mt-12 pt-6">
-
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-
             <p className="text-xs text-chalk-faint text-center md:text-left">
               © {new Date().getFullYear()} Dexmy. All rights reserved.
             </p>
-
             <div className="flex items-center gap-5">
-              <a
-                href="/privacy"
-                className="text-xs text-chalk-faint hover:text-chalk transition-colors"
-              >
+              <a href="/privacy" className="text-xs text-chalk-faint hover:text-chalk transition-colors">
                 Privacy Policy
               </a>
-
-              <a
-                href="/terms"
-                className="text-xs text-chalk-faint hover:text-chalk transition-colors"
-              >
+              <a href="/terms" className="text-xs text-chalk-faint hover:text-chalk transition-colors">
                 Terms of Service
               </a>
             </div>
-
           </div>
-
         </div>
 
       </div>
