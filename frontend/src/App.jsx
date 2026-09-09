@@ -29,6 +29,7 @@ import MyAccount from "./pages/dashboard/MyAccount";
 import TeacherProfile from "./pages/dashboard/teacher/TeacherProfile";
 import TeacherProfileView from "./pages/dashboard/teacher/TeacherProfileView";
 import TeacherCalendar from "./pages/dashboard/teacher/TeacherCalendar";
+import TeacherClassRecords from "./pages/dashboard/teacher/TeacherClassRecords";
 import CourseDetails from "./pages/dashboard/CourseDetails";
 import TeacherDashboardLayout from "./components/TeacherDashboardLayout";
 import Packages from "./pages/Packages";
@@ -60,6 +61,7 @@ export default function App() {
       <Route path="/classroom/:sessionId" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
       <Route path="/classroom" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
       <Route path="/dashboard/teacher" element={<ProtectedRoute roles={["teacher"]}><TeacherProfileGuard><TeacherDashboard /></TeacherProfileGuard></ProtectedRoute>} />
+      <Route path="/dashboard/teacher/class-records" element={<ProtectedRoute roles={["teacher"]}><TeacherClassRecords /></ProtectedRoute>} />
       <Route path="/dashboard/student" element={<ProtectedRoute roles={["student"]}><StudentDashboard /></ProtectedRoute>} />
       <Route path="/dashboard/student/book" element={<ProtectedRoute roles={["student"]}><BookClass /></ProtectedRoute>} />
       <Route path="/dashboard/student/notes" element={<ProtectedRoute roles={["student"]}><MyNotes /></ProtectedRoute>} />
