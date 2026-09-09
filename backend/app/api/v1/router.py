@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    admin, admin_dashboard, admin_students, admin_teachers, admin_bookings, admin_teacher_candidates, admin_teacher_profile_requests, admin_packages, admin_student_packages, admin_payouts, admin_finance, package_payments, package_payment_webhooks, auth, bookings, package_bookings, classroom, marketing, parents, students, teachers, users, payments, system, profiles, subjects, whatsapp, packages,
+    admin, admin_dashboard, admin_students, admin_teachers, admin_bookings, admin_teacher_candidates, admin_teacher_profile_requests, admin_packages, admin_student_packages, admin_payouts, admin_finance, package_payments, package_payment_webhooks, auth, bookings, package_bookings, classroom, external_class_records, marketing, parents, students, teachers, users, payments, system, profiles, subjects, whatsapp, packages,
 )
 api_router=APIRouter()
 api_router.include_router(auth.router,prefix="/auth",tags=["auth"])
@@ -11,10 +11,10 @@ api_router.include_router(students.router,prefix="/students",tags=["students"])
 api_router.include_router(parents.router,prefix="/parents",tags=["parents"])
 api_router.include_router(bookings.router,prefix="/bookings",tags=["bookings"])
 api_router.include_router(package_bookings.router,prefix="/bookings/package",tags=["package-bookings"])
+api_router.include_router(external_class_records.router,prefix="/class-records",tags=["class-records"])
 api_router.include_router(marketing.router,tags=["marketing"])
 api_router.include_router(packages.router,prefix="/packages",tags=["packages"])
 # Register the dedicated candidate endpoint BEFORE the legacy /admin router.
-# The candidate endpoint returns availability metadata required by the admin UI.
 api_router.include_router(admin_teacher_candidates.router,prefix="/admin/bookings",tags=["admin-booking-candidates"])
 api_router.include_router(admin.router,prefix="/admin",tags=["admin"])
 api_router.include_router(admin_dashboard.router,prefix="/admin/dashboard",tags=["admin-dashboard"])
