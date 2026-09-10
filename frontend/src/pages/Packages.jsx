@@ -26,6 +26,9 @@ export default function Packages() {
   const [packages, setPackages] = useState(getCachedPackages);
   const [currency, setCurrency] = useState("INR");
   const [error, setError] = useState("");
+  const freeClassLimitReached =
+    new URLSearchParams(window.location.search).get("reason") ===
+    "free-class-limit";
 
   useEffect(() => {
     let mounted = true;
@@ -87,6 +90,17 @@ export default function Packages() {
             <button onClick={() => setCurrency("USD")} className={`px-5 py-2 rounded-lg text-sm font-semibold ${currency === "USD" ? "bg-brand-red text-white" : "text-chalk-muted"}`}>USD $</button>
           </div>
         </div>
+
+        {freeClassLimitReached && (
+          <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-brand-gold/40 bg-brand-gold/10 px-6 py-5 text-center">
+            <p className="text-base font-semibold text-brand-gold">
+              You’ve exhausted your 2 free classes.
+            </p>
+            <p className="mt-1 text-sm leading-6 text-chalk-muted">
+              You’ve used all 2 free classes available with your Dexmy account. Please choose a package below to continue booking classes.
+            </p>
+          </div>
+        )}
 
         {error && <p className="mt-8 text-center text-sm text-chalk-muted">{error}</p>}
 
