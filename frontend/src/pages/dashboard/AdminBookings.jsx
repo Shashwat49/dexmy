@@ -7,14 +7,16 @@ export default function AdminBookings() {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [assigning, setAssigning] = useState(null);
   const [discarding, setDiscarding] = useState(null);
   const [teacherLists, setTeacherLists] = useState({});
   const [selected, setSelected] = useState({});
 
-  async function load() {
-    setLoading(true);
+  async function load({ manual = false } = {}) {
+    if (manual) setRefreshing(true);
+    else setLoading(true);
     setError("");
     try {
       const [bookingsResponse, pendingResponse] = await Promise.all([
@@ -29,6 +31,7 @@ export default function AdminBookings() {
       setError(e.response?.data?.detail || "Unable to load bookings.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
@@ -101,8 +104,20 @@ export default function AdminBookings() {
   return (
     <DashboardLayout>
       <div className="border-b border-chalk-faint px-8 py-5.5">
-        <h1 className="font-display text-2xl">Bookings</h1>
-        <p className="mt-1 text-sm text-chalk-muted">Monitor class schedules and assign eligible teachers.</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="font-display text-2xl">Bookings</h1>
+            <p className="mt-1 text-sm text-chalk-muted">Monitor class schedules and assign eligible teachers.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => load({ manual: true })}
+            disabled={loading || refreshing}
+            className="rounded-lg border border-chalk-faint px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
+          >
+            {refreshing ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto px-8 py-7">
