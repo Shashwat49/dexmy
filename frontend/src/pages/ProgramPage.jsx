@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import SEO from "../components/SEO";
 
@@ -739,13 +740,13 @@ function Card({ children }) {
 }
 
 export default function ProgramPage({ slug }) {
+  const [showAllPrograms, setShowAllPrograms] = useState(false);
   const program = programs[slug];
 
   if (!program) return null;
 
   const relatedPrograms = allPrograms
-    .filter((item) => item.path !== program.path)
-    .slice(0, 3);
+    .filter((item) => item.path !== program.path);
 
   return (
     <div className="min-h-screen bg-void text-chalk">
@@ -1066,28 +1067,35 @@ export default function ProgramPage({ slug }) {
             />
 
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
-              {relatedPrograms.map((item) => (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className="rounded-2xl border border-chalk-faint bg-panel-2 p-6 transition-colors hover:border-brand-gold"
-                >
-                  <span className="font-semibold">{item.name}</span>
-                  <span className="mt-2 block text-sm text-chalk-muted">
-                    Explore program →
-                  </span>
-                </Link>
-              ))}
+              {relatedPrograms
+                .filter((item) => item.path !== program.path)
+                .slice(0, showAllPrograms ? relatedPrograms.length : 3)
+                .map((item) => (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className="rounded-2xl border border-chalk-faint bg-panel-2 p-6 transition-colors hover:border-brand-gold"
+                  >
+                    <span className="font-semibold">{item.name}</span>
+
+                    <span className="mt-2 block text-sm text-chalk-muted">
+                      Explore program →
+                    </span>
+                  </Link>
+                ))}
             </div>
 
-            <div className="mt-6">
-              <Link
-                to="/packages"
-                className="text-sm font-semibold text-brand-gold hover:underline"
-              >
-                View all packages →
-              </Link>
-            </div>
+            {!showAllPrograms && (
+              <div className="mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowAllPrograms(true)}
+                  className="text-sm font-semibold text-brand-gold hover:underline"
+                >
+                  View all programs →
+                </button>
+              </div>
+            )}
           </div>
         </section>
 
