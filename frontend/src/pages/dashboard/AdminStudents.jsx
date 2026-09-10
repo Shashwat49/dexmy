@@ -13,7 +13,6 @@ export default function AdminStudents() {
 
   const load = useCallback(async ({ manual = false } = {}) => {
     if (manual) setRefreshing(true);
-    else if (data.items.length === 0) setLoading(true);
     setError("");
     try {
       const params = { page, page_size: 25 };
@@ -28,7 +27,7 @@ export default function AdminStudents() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [page, search, active, data.items.length]);
+  }, [page, search, active]);
 
   useEffect(() => { load(); }, [load]);
 
