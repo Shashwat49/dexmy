@@ -7,14 +7,16 @@
   "theme_color": "#0B0B0C",
   "icons": [
     {
-      "src": "/dexmy-logo-bg-removed.png",
+      "src": "/dexmy-icon-192.svg",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/svg+xml",
+      "purpose": "any"
     },
     {
-      "src": "/dexmy-logo-bg-removed.png",
+      "src": "/dexmy-icon-512.svg",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ]
 }
