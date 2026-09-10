@@ -8,10 +8,12 @@ export default function AdminStudents() {
   const [active, setActive] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ manual = false } = {}) => {
+    if (manual) setRefreshing(true);
+    else if (data.items.length === 0) setLoading(true);
     setError("");
     try {
       const params = { page, page_size: 25 };
@@ -24,30 +26,18 @@ export default function AdminStudents() {
       setError(err.response?.data?.detail || "Unable to load students.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [page, search, active]);
+  }, [page, search, active, data.items.length]);
 
   useEffect(() => { load(); }, [load]);
-
-  // Refresh when the admin returns to this tab, so newly registered students appear.
-  useEffect(() => {
-    const refreshOnFocus = () => load();
-    window.addEventListener("focus", refreshOnFocus);
-    return () => window.removeEventListener("focus", refreshOnFocus);
-  }, [load]);
-
-  // Also refresh periodically while the Students page is open.
-  useEffect(() => {
-    const interval = window.setInterval(load, 30000);
-    return () => window.clearInterval(interval);
-  }, [load]);
 
   async function toggle(student) {
     const reason = window.prompt(student.is_active ? "Reason for suspension:" : "Reason for activation:");
     if (!reason?.trim()) return;
     try {
       await api.patch(`/admin/students/${student.id}/status`, { is_active: !student.is_active, reason: reason.trim() });
-      await load();
+      await load({ manual: true });
     } catch (err) {
       setError(err.response?.data?.detail || "Unable to update student.");
     }
@@ -67,7 +57,7 @@ export default function AdminStudents() {
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email or phone" className="min-w-0 flex-1 rounded-lg border border-chalk-faint bg-panel-2 px-4 py-2.5 text-sm outline-none focus:border-brand-red" />
         <select value={active} onChange={e => { setActive(e.target.value); setPage(1); }} className="rounded-lg border border-chalk-faint bg-panel-2 px-4 py-2.5 text-sm"><option value="">All students</option><option value="true">Active</option><option value="false">Suspended</option></select>
         <button className="rounded-lg bg-brand-red px-5 py-2.5 text-sm font-semibold">Search</button>
-        <button type="button" onClick={load} disabled={loading} className="rounded-lg border border-chalk-faint px-5 py-2.5 text-sm font-semibold disabled:opacity-50">Refresh</button>
+        <button type="button" onClick={() => load({ manual: true })} disabled={refreshing || loading} className="rounded-lg border border-chalk-faint px-5 py-2.5 text-sm font-semibold disabled:opacity-50">{refreshing ? "Refreshing…" : "Refresh"}</button>
       </form>
       <div className="overflow-hidden rounded-xl border border-chalk-faint bg-panel-2">
         {loading ? <div className="px-6 py-10 text-sm text-chalk-muted">Loading students…</div> : data.items.length === 0 ? <div className="px-6 py-10 text-sm text-chalk-muted">No students found.</div> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-chalk-faint text-xs uppercase tracking-wide text-chalk-muted"><tr><th className="px-5 py-4">Student</th><th className="px-5 py-4">Grade / School</th><th className="px-5 py-4">Classes</th><th className="px-5 py-4">Status</th><th className="px-5 py-4" /></tr></thead><tbody className="divide-y divide-chalk-faint">{data.items.map(student => <tr key={student.id}><td className="px-5 py-4"><div className="font-semibold">{student.full_name}</div><div className="text-xs text-chalk-muted">{student.email}</div></td><td className="px-5 py-4 text-chalk-muted">{student.grade_level || "—"}<br />{student.school_name || "—"}</td><td className="px-5 py-4"><span>{student.completed_classes} completed</span><br /><span className="text-xs text-chalk-muted">{student.upcoming_classes} upcoming</span></td><td className="px-5 py-4"><span className={student.is_active ? "text-emerald-400" : "text-brand-red"}>{student.is_active ? "Active" : "Suspended"}</span></td><td className="px-5 py-4 text-right"><button onClick={() => toggle(student)} className="rounded-lg border border-chalk-faint px-3 py-2 text-xs font-semibold hover:border-brand-red">{student.is_active ? "Suspend" : "Activate"}</button></td></tr>)}</tbody></table></div>}
