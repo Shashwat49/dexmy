@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import require_role
+from app.core.dependencies import get_current_admin
 from app.db.session import get_db
 from app.models.external_class_record import ExternalClassRecord
-from app.models.user import User, UserRole
+from app.models.user import User
 from app.schemas.external_class_record import ExternalClassRecordRead
 
 router = APIRouter()
@@ -37,7 +37,7 @@ def _record_read(record: ExternalClassRecord, db: Session) -> ExternalClassRecor
 
 @router.get("", response_model=list[ExternalClassRecordRead])
 def list_meet_class_records(
-    current_user: User = Depends(require_role(UserRole.admin)),
+    current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
     records = db.scalars(
