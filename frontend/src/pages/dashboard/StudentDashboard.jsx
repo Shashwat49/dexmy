@@ -52,7 +52,7 @@ export default function StudentDashboard() {
 
   const nextClass = upcoming[0];
   const pkg = classData.package;
-  const isAyansh = String(classData.student_email || "").toLowerCase() === "ayansh.abhilash@gmail.com";
+  const isSubjectBalanceStudent = ["ayansh.abhilash@gmail.com", "wargod3508@gmail.com"].includes(String(classData.student_email || "").toLowerCase());
   const completedSubjectClasses = (subject) => classData.classes.filter((r) => String(r.subject || "").trim().toLowerCase() === subject && r.status === "completed").length;
   const englishCompleted = completedSubjectClasses("english");
   const mathematicsCompleted = completedSubjectClasses("mathematics");
@@ -69,7 +69,7 @@ export default function StudentDashboard() {
         {tab === "upcoming" ? (upcoming.length === 0 ? <div className="text-center py-16 text-chalk-muted"><h3 className="font-display text-xl text-chalk mb-2">No upcoming classes</h3><p className="text-sm">Book a class to get started.</p></div> : <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 mb-8">{upcoming.map((b) => <ClassCard key={b.id} booking={b} otherPartyName={b.teacher_name} onJoin={handleJoin} />)}</div>) : (past.length === 0 ? <div className="text-center py-16 text-chalk-muted"><h3 className="font-display text-xl text-chalk mb-2">No past classes yet</h3></div> : <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 mb-8">{past.map((b) => <ClassCard key={b.id} booking={b} otherPartyName={b.teacher_name} isPast />)}</div>)}
       </>}
 
-      {isAyansh && <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+      {isSubjectBalanceStudent && <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
         <SubjectClassBox subject="English Classes" completed={englishCompleted} />
         <SubjectClassBox subject="Mathematics Classes" completed={mathematicsCompleted} />
       </section>}
