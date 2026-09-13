@@ -45,12 +45,12 @@ function installMediaGuard() {
         const desired = getDesired(participant);
         const source = track.source;
         try {
-          if (source === Track.Source.Camera && desired.camera && !participant.isCameraEnabled) {
-            await participant.setCameraEnabled(true);
-          } else if (source === Track.Source.Microphone && desired.microphone && !participant.isMicrophoneEnabled) {
-            await participant.setMicrophoneEnabled(true);
-          } else if (source === Track.Source.Camera && desired.camera && track.restartTrack) {
-            await track.restartTrack();
+          if (source === Track.Source.Camera && desired.camera) {
+            if (!participant.isCameraEnabled) await participant.setCameraEnabled(true);
+            else if (track.restartTrack) await track.restartTrack();
+          } else if (source === Track.Source.Microphone && desired.microphone) {
+            if (!participant.isMicrophoneEnabled) await participant.setMicrophoneEnabled(true);
+            else if (track.restartTrack) await track.restartTrack();
           }
         } catch (error) {
           console.warn("Dexmy media recovery failed:", error);
@@ -91,8 +91,16 @@ export default function ClassroomMediaGuard() {
     import("./Classroom").then((module) => {
       if (active) setClassroom(() => module.default);
     });
+    const playbackWatch = setInterval(() => {
+      document.querySelectorAll(".classroom-video video").forEach((video) => {
+        const stream = video.srcObject;
+        const hasLiveTrack = stream?.getVideoTracks?.().some((track) => track.readyState === "live");
+        if (hasLiveTrack && video.paused) video.play?.().catch(() => {});
+      });
+    }, 1000);
     return () => {
       active = false;
+      clearInterval(playbackWatch);
     };
   }, []);
 
