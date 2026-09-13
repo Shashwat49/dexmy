@@ -39,7 +39,7 @@ const TeacherClassRecords = lazy(() => import("./pages/dashboard/teacher/Teacher
 const CourseDetails = lazy(() => import("./pages/dashboard/CourseDetails"));
 const Packages = lazy(() => import("./pages/Packages"));
 const PackageCheckout = lazy(() => import("./pages/dashboard/PackageCheckout"));
-const Classroom = lazy(() => import("./pages/Classroom"));
+const Classroom = lazy(() => import("./pages/ClassroomMediaGuard"));
 
 const ADMIN_ROLES = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"];
 
