@@ -156,6 +156,7 @@ def student_records(
         .order_by(ExternalClassRecord.started_at.desc())
     ).all()
     return {
+        "student_email": current_user.email,
         "package": {
             "id": package.id,
             "name": plan.name,
