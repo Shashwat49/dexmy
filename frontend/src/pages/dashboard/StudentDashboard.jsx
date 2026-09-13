@@ -21,7 +21,7 @@ const formatTime = (v) => new Date(v).toLocaleTimeString("en-US", { hour: "numer
 export default function StudentDashboard() {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState([]);
-  const [classData, setClassData] = useState({ package: null, classes: [] });
+  const [classData, setClassData] = useState({ package: null, classes: [], student_email: "" });
   const [loading, setLoading] = useState(true);
   const [recordLoading, setRecordLoading] = useState(true);
   const [error, setError] = useState("");
@@ -33,7 +33,7 @@ export default function StudentDashboard() {
     setLoading(true); setRecordLoading(true); setError(""); setRecordError("");
     const [bookingResult, recordResult] = await Promise.allSettled([bookingsApi.getMyBookings(), getMyClassRecords()]);
     if (bookingResult.status === "fulfilled") setBookings(bookingResult.value || []); else setError(bookingResult.reason?.response?.data?.detail || "Unable to load classes.");
-    if (recordResult.status === "fulfilled") setClassData(recordResult.value || { package: null, classes: [] }); else setRecordError(recordResult.reason?.response?.data?.detail || "Unable to load package information.");
+    if (recordResult.status === "fulfilled") setClassData(recordResult.value || { package: null, classes: [], student_email: "" }); else setRecordError(recordResult.reason?.response?.data?.detail || "Unable to load package information.");
     setLoading(false); setRecordLoading(false);
   };
   useEffect(() => { load(); }, []);
@@ -52,6 +52,11 @@ export default function StudentDashboard() {
 
   const nextClass = upcoming[0];
   const pkg = classData.package;
+  const isAyansh = String(classData.student_email || "").toLowerCase() === "ayansh.abhilash@gmail.com";
+  const completedSubjectClasses = (subject) => classData.classes.filter((r) => String(r.subject || "").trim().toLowerCase() === subject && r.status === "completed").length;
+  const englishCompleted = completedSubjectClasses("english");
+  const mathematicsCompleted = completedSubjectClasses("mathematics");
+
   return <DashboardLayout navItems={navItems}>
     <div className="flex items-center justify-between px-8 py-5.5 border-b border-chalk-faint"><h1 className="font-display text-2xl">My classes</h1><div className="flex gap-1 bg-panel-2 rounded-lg p-1"><button onClick={() => setTab("upcoming")} className={`px-4.5 py-2 rounded-md text-[13.5px] font-semibold ${tab === "upcoming" ? "bg-brand-red text-chalk" : "text-chalk-muted"}`}>Upcoming</button><button onClick={() => setTab("past")} className={`px-4.5 py-2 rounded-md text-[13.5px] font-semibold ${tab === "past" ? "bg-brand-red text-chalk" : "text-chalk-muted"}`}>Past</button></div></div>
     <div className="relative flex-1 overflow-auto px-8 py-7">
@@ -64,6 +69,11 @@ export default function StudentDashboard() {
         {tab === "upcoming" ? (upcoming.length === 0 ? <div className="text-center py-16 text-chalk-muted"><h3 className="font-display text-xl text-chalk mb-2">No upcoming classes</h3><p className="text-sm">Book a class to get started.</p></div> : <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 mb-8">{upcoming.map((b) => <ClassCard key={b.id} booking={b} otherPartyName={b.teacher_name} onJoin={handleJoin} />)}</div>) : (past.length === 0 ? <div className="text-center py-16 text-chalk-muted"><h3 className="font-display text-xl text-chalk mb-2">No past classes yet</h3></div> : <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 mb-8">{past.map((b) => <ClassCard key={b.id} booking={b} otherPartyName={b.teacher_name} isPast />)}</div>)}
       </>}
 
+      {isAyansh && <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <SubjectClassBox subject="English Classes" completed={englishCompleted} />
+        <SubjectClassBox subject="Mathematics Classes" completed={mathematicsCompleted} />
+      </section>}
+
       <section className="mb-8 rounded-2xl border border-chalk-faint bg-panel p-5 md:p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs uppercase tracking-widest text-brand-gold">Package</p><h2 className="mt-1 text-xl font-semibold">{recordLoading ? "Loading package…" : pkg?.name || "No active package"}</h2></div>{pkg && <span className="rounded-full bg-green-500/10 px-3 py-1.5 text-xs font-medium text-green-400">{pkg.status}</span>}</div>
         {recordError && <p className="mt-3 text-sm text-chalk-muted">{recordError}</p>}
@@ -74,4 +84,10 @@ export default function StudentDashboard() {
     </div>
   </DashboardLayout>;
 }
+
+function SubjectClassBox({ subject, completed }) {
+  const remaining = Math.max(0, 50 - completed);
+  return <article className="rounded-2xl border border-chalk-faint bg-panel p-5 md:p-6"><h2 className="text-lg font-semibold">{subject}</h2><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl border border-chalk-faint bg-panel-2 p-4"><p className="text-xs text-chalk-muted">Total classes</p><p className="mt-1 text-2xl font-semibold">50</p></div><div className="rounded-xl border border-chalk-faint bg-panel-2 p-4"><p className="text-xs text-chalk-muted">Remaining classes</p><p className="mt-1 text-2xl font-semibold">{remaining}</p></div></div></article>;
+}
+
 function PackageStat({ label, value }) { return <div className="rounded-xl border border-chalk-faint bg-panel-2 p-4"><p className="text-xs text-chalk-muted">{label}</p><p className="mt-1 text-2xl font-semibold">{value}</p></div>; }
