@@ -150,8 +150,8 @@ export default function Classroom() {
           setSlides(p);
           slideRef.current = msg.page_number || 1;
           setSlide(msg.page_number || 1);
-          strokesByPageRef.current = new Map(p.map((x) => [x.page_number, []]));
-          strokesByPageRef.current.set(msg.page_number || 1, msg.canvas_json?.strokes || []);
+          strokesByPageRef.current = new Map(p.map((x) => [x.page_number, Array.isArray(x.strokes) ? x.strokes : []]));
+          strokesByPageRef.current.set(msg.page_number || 1, msg.canvas_json?.strokes || strokesByPageRef.current.get(msg.page_number || 1) || []);
           setTimeout(redraw, 0);
         }
         if (msg.type === "whiteboard_event") {
@@ -160,11 +160,12 @@ export default function Classroom() {
           if (p.kind === "stroke" && p.stroke) {
             const pageNumber = Number(p.page_number) || 1;
             const list = strokesByPageRef.current.get(pageNumber) || [];
-            if (!list.some((s) => s.id === p.stroke.id)) list.push(p.stroke);
+            const isNewStroke = !list.some((s) => s.id === p.stroke.id);
+            if (isNewStroke) list.push(p.stroke);
             strokesByPageRef.current.set(pageNumber, list);
             committedRef.current.add(p.stroke.id);
             liveRef.current.delete(p.stroke.id);
-            if (pageNumber === slideRef.current) renderStroke(p.stroke);
+            if (isNewStroke && pageNumber === slideRef.current) renderStroke(p.stroke);
           }
           if (p.kind === "undo" && p.page_number === slideRef.current) {
             currentStrokes().pop();
@@ -376,9 +377,10 @@ export default function Classroom() {
             committedRef.current.add(stroke.id);
             liveRef.current.delete(stroke.id);
             const list = strokesByPageRef.current.get(pageNumber) || [];
-            if (!list.some((s) => s.id === stroke.id)) list.push(stroke);
+            const isNewStroke = !list.some((s) => s.id === stroke.id);
+            if (isNewStroke) list.push(stroke);
             strokesByPageRef.current.set(pageNumber, list);
-            if (pageNumber === slideRef.current) renderStroke(stroke);
+            if (isNewStroke && pageNumber === slideRef.current) renderStroke(stroke);
             return;
           }
         });
