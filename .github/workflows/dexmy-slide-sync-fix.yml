@@ -3,7 +3,7 @@ name: Apply classroom slide sync fix
 on:
   push:
     paths:
-      - '.github/workflows/dexmy-slide-sync-fix.yml'
+      - 'frontend/src/pages/.slide-sync-trigger'
 
 permissions:
   contents: write
@@ -70,12 +70,14 @@ jobs:
             raise SystemExit('No changes made')
           path.write_text(text, encoding='utf-8')
 
+          trigger = Path('frontend/src/pages/.slide-sync-trigger')
+          if trigger.exists():
+            trigger.unlink()
+
       - name: Commit patched file
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add frontend/src/pages/Classroom.jsx
+          git add frontend/src/pages/Classroom.jsx frontend/src/pages/.slide-sync-trigger
           git commit -m 'fix: make teacher slide sync authoritative' || exit 0
           git push
-
-      # Triggered intentionally by this workflow-file update; the final cleanup removes this helper.
