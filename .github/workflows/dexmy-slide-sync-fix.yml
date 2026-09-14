@@ -21,3 +21,4 @@ jobs:
           git diff --cached -- frontend/src/pages/Classroom.jsx
           git commit -m 'fix: make teacher slide changes authoritative'
           git push
+# trigger patch
