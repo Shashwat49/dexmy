@@ -1,0 +1,48 @@
+name: Patch shape live rendering v2
+on:
+  push:
+    branches: [shape-live-fix]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: Apply targeted fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          f=Path('frontend/src/pages/Classroom.jsx'); s=f.read_text()
+          pattern=r'''            const fresh = Array\.isArray\(stroke\.points\) \? stroke\.points : \[\];\n            if \(fresh\.length\) \{\n              const previous = live\.points\.length \? live\.points\[live\.points\.length - 1\] : null;\n              renderStroke\(\{ \.\.\.live, points: previous \? \[previous, \.\.\.fresh\] : fresh \}\);\n              live\.points\.push\(\.\.\.fresh\);\n            \}\n            if \(p\.final\) liveRef\.current\.delete\(stroke\.id\);'''
+          replacement='''            const fresh = Array.isArray(stroke.points) ? stroke.points : [];
+            if (fresh.length) {
+              if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) {
+                live.points = fresh.slice(-2);
+                redraw();
+                setTimeout(() => {
+                  if (!committedRef.current.has(stroke.id) && slideRef.current === Number(p.page_number)) renderStroke(live);
+                }, 0);
+              } else {
+                const previous = live.points.length ? live.points[live.points.length - 1] : null;
+                renderStroke({ ...live, points: previous ? [previous, ...fresh] : fresh });
+                live.points.push(...fresh);
+              }
+            }
+            if (p.final) liveRef.current.delete(stroke.id);'''
+          s2,n=re.subn(pattern,replacement,s,count=1)
+          if n != 1: raise SystemExit(f'live render target not found: {n}')
+          f.write_text(s2)
+          PY
+      - name: Commit and remove workflows
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/patch-shape-live.yml .github/workflows/patch-shape-live-v2.yml
+          git add frontend/src/pages/Classroom.jsx
+          git commit -m "fix: render live shapes without tracing"
+          git push --force origin HEAD:shape-live-fix
