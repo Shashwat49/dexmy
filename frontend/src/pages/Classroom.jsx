@@ -83,7 +83,7 @@ export default function Classroom() {
   useEffect(() => { if (!isTeacher) return; const id = setInterval(() => { if (drawRef.current?.points?.length) publishStrokeCheckpoint(); }, 250); reliableStrokeTimerRef.current = id; return () => clearInterval(id); }, [isTeacher, publishStrokeCheckpoint]);
   const point = (event) => { const r = canvasRef.current.getBoundingClientRect(); return { x: clamp((event.clientX - r.left) * W / r.width, 0, W), y: clamp((event.clientY - r.top) * H / r.height, 0, H) }; };
   const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (tool === "select" || !DRAW_TOOLS.has(tool)) return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p] }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
-  const onPointerMove = (event) => { const d = drawRef.current; if (!d) return; d.points.push(point(event)); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); } };
+  const onPointerMove = (event) => { const d = drawRef.current; if (!d) return; d.points.push(point(event)); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
   const onPointerUp = (event) => { const d = drawRef.current; drawRef.current = null; canvasRef.current?.releasePointerCapture?.(event.pointerId); if (!d) return; if (["text", "sticky"].includes(d.tool)) { const text = window.prompt(d.tool === "sticky" ? "Sticky note text" : "Text"); if (!text) { redraw(); return; } d.text = text; if (d.tool === "text") d.points = [d.points[0]]; } const pageNumber = slideRef.current; if (!["pen", "highlighter", "eraser"].includes(d.tool)) { if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0); queueLive(d, d.points, true); flushLive(true); } else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); drawBaseRef.current = null; publishCommit(d, pageNumber); send({ type: "whiteboard_event", payload: { kind: "stroke", stroke: d, page_number: pageNumber } }); saveSnapshot(); };
   const changeSlide = (target) => { if (!isTeacher) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(next, strokesByPageRef.current.get(next) || []); publishControl({ kind: "page", page_number: next }); };
   const addSlide = () => { if (!isTeacher) return; const current = slideRef.current; saveSnapshotNow(current); const next = slidesRef.current.length + 1; strokesByPageRef.current.set(next, []); const updated = [...slidesRef.current, { page_number: next, image_url: null }]; slidesRef.current = updated; setSlides(updated); slideRef.current = next; setSlide(next); slideControlActiveRef.current = true; publishControl({ kind: "slides", pages: updated, page_number: next }); };
@@ -352,12 +352,20 @@ export default function Classroom() {
               liveRef.current.set(stroke.id, live);
             }
             const fresh = Array.isArray(stroke.points) ? stroke.points : [];
-            if (fresh.length) {
-              const previous = live.points.length ? live.points[live.points.length - 1] : null;
-              renderStroke({ ...live, points: previous ? [previous, ...fresh] : fresh });
-              live.points.push(...fresh);
-            }
-            if (p.final) liveRef.current.delete(stroke.id);
+  if (fresh.length) {
+    if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) {
+      live.points = fresh.slice(-2);
+      redraw();
+      setTimeout(() => {
+        if (!committedRef.current.has(stroke.id) && slideRef.current === Number(p.page_number)) renderStroke(live);
+      }, 0);
+    } else {
+      const previous = live.points.length ? live.points[live.points.length - 1] : null;
+      renderStroke({ ...live, points: previous ? [previous, ...fresh] : fresh });
+      live.points.push(...fresh);
+    }
+  }
+  if (p.final) liveRef.current.delete(stroke.id);
             return;
           }
           if (msg.type === "whiteboard_checkpoint" && topic === COMMIT_TOPIC) {
