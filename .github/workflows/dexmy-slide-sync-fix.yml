@@ -77,3 +77,5 @@ jobs:
           git add frontend/src/pages/Classroom.jsx
           git commit -m 'fix: make teacher slide sync authoritative' || exit 0
           git push
+
+      # Triggered intentionally by this workflow-file update; the final cleanup removes this helper.
