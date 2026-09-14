@@ -1,0 +1,23 @@
+name: Apply classroom slide sync fix
+on:
+  push:
+    paths:
+      - '.github/workflows/dexmy-slide-sync-fix.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Classroom.jsx
+        run: python .github/dexmy_slide_patch.py
+      - name: Commit patched file
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/pages/Classroom.jsx
+          git diff --cached --check
+          git diff --cached -- frontend/src/pages/Classroom.jsx
+          git commit -m 'fix: make teacher slide changes authoritative'
+          git push
