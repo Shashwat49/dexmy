@@ -1,0 +1,79 @@
+name: Apply classroom slide sync fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/dexmy-slide-sync-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Classroom.jsx
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('frontend/src/pages/Classroom.jsx')
+          text = path.read_text(encoding='utf-8')
+          original = text
+
+          old = '  const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false), imageCacheRef = useRef(new Map()), reliableStrokeTimerRef = useRef(null);\n'
+          new = old + '  const slideControlActiveRef = useRef(false);\n'
+          assert old in text, 'refs anchor not found'
+          text = text.replace(old, new, 1)
+
+          old = '  const saveSnapshot = useCallback(() => { clearTimeout(snapshotTimerRef.current); snapshotTimerRef.current = setTimeout(async () => { const imageBase64 = canvasRef.current?.toDataURL("image/png"); send({ type: "save_snapshot", page_number: slideRef.current, canvas_json: { strokes: currentStrokes().map((s) => ({ ...s })) }, image_base64: imageBase64 }); }, 500); }, [currentStrokes, send]);\n'
+          new = old + '  const saveSnapshotNow = useCallback((pageNumber) => { clearTimeout(snapshotTimerRef.current); const imageBase64 = canvasRef.current?.toDataURL("image/png"); const strokes = (strokesByPageRef.current.get(pageNumber) || []).map((s) => ({ ...s })); send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes }, image_base64: imageBase64 }); }, [send]);\n'
+          assert old in text, 'saveSnapshot anchor not found'
+          text = text.replace(old, new, 1)
+
+          old = '  const changeSlide = (target) => { if (!isTeacher) return; const next = clamp(target, 1, slidesRef.current.length); if (next === slideRef.current) return; saveSnapshot(); slideRef.current = next; setSlide(next); strokesByPageRef.current.set(next, strokesByPageRef.current.get(next) || []); const payload = { kind: "page", page_number: next }; publishControl(payload); send({ type: "whiteboard_event", payload }); };\n'
+          new = '  const changeSlide = (target) => { if (!isTeacher) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(next, strokesByPageRef.current.get(next) || []); publishControl({ kind: "page", page_number: next }); };\n'
+          assert old in text, 'changeSlide anchor not found'
+          text = text.replace(old, new, 1)
+
+          old = '  const addSlide = () => { if (!isTeacher) return; saveSnapshot(); const next = slidesRef.current.length + 1; strokesByPageRef.current.set(next, []); const updated = [...slidesRef.current, { page_number: next, image_url: null }]; slidesRef.current = updated; setSlides(updated); slideRef.current = next; setSlide(next); const payload = { kind: "slides", pages: updated, page_number: next }; publishControl(payload); send({ type: "whiteboard_event", payload }); setTimeout(() => send({ type: "save_snapshot", page_number: next, canvas_json: { strokes: [] } }), 50); };\n'
+          new = '  const addSlide = () => { if (!isTeacher) return; const current = slideRef.current; saveSnapshotNow(current); const next = slidesRef.current.length + 1; strokesByPageRef.current.set(next, []); const updated = [...slidesRef.current, { page_number: next, image_url: null }]; slidesRef.current = updated; setSlides(updated); slideRef.current = next; setSlide(next); slideControlActiveRef.current = true; publishControl({ kind: "slides", pages: updated, page_number: next }); setTimeout(() => send({ type: "save_snapshot", page_number: next, canvas_json: { strokes: [] } }), 50); };\n'
+          assert old in text, 'addSlide anchor not found'
+          text = text.replace(old, new, 1)
+
+          old = '  const uploadPdf = async (file) => { if (!isTeacher || !file) return; setPdfLoading(true); try { const form = new FormData(); form.append("file", file); const { data } = await api.post(`/classroom/sessions/${sessionId}/slides`, form, { headers: { "Content-Type": "multipart/form-data" } }); const next = data.pages || []; slidesRef.current = next; setSlides(next); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(next.map((p) => [p.page_number, []])); const payload = { kind: "pdf", pages: next }; publishControl(payload); send({ type: "whiteboard_event", payload }); } catch (e) { setNotice(e?.response?.data?.detail || "Could not upload PDF"); } finally { setPdfLoading(false); } };\n'
+          if old in text:
+            new = '  const uploadPdf = async (file) => { if (!isTeacher || !file) return; setPdfLoading(true); try { const form = new FormData(); form.append("file", file); const { data } = await api.post(`/classroom/sessions/${sessionId}/slides`, form, { headers: { "Content-Type": "multipart/form-data" } }); const next = data.pages || []; slidesRef.current = next; setSlides(next); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(next.map((p) => [p.page_number, []])); slideControlActiveRef.current = true; publishControl({ kind: "pdf", pages: next }); } catch (e) { setNotice(e?.response?.data?.detail || "Could not upload PDF"); } finally { setPdfLoading(false); } };\n'
+            text = text.replace(old, new, 1)
+          else:
+            raise SystemExit('uploadPdf anchor not found')
+
+          old = '      if (msg.type === "whiteboard_state") {\n'
+          new = '      if (msg.type === "whiteboard_state") {\n        if (slideControlActiveRef.current) return;\n'
+          assert old in text, 'whiteboard_state anchor not found'
+          text = text.replace(old, new, 1)
+
+          old = '        if (p.kind === "page") {\n'
+          new = '        if (p.kind === "page" || p.kind === "slides" || p.kind === "pdf") return;\n        if (p.kind === "page") {\n'
+          assert old in text, 'websocket page anchor not found'
+          text = text.replace(old, new, 1)
+
+          old = '        if (msg.type === "classroom_control" && topic === CONTROL_TOPIC) {\n          const p = msg.payload || {};\n'
+          new = '        if (msg.type === "classroom_control" && topic === CONTROL_TOPIC) {\n          slideControlActiveRef.current = true;\n          const p = msg.payload || {};\n'
+          assert old in text, 'LiveKit control anchor not found'
+          text = text.replace(old, new, 1)
+
+          text = text.replace('    setTimeout(redraw, 0);\n', '', 3)
+
+          if text == original:
+            raise SystemExit('No changes made')
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit patched file
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/pages/Classroom.jsx
+          git commit -m 'fix: make teacher slide sync authoritative' || exit 0
+          git push
