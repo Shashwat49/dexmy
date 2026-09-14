@@ -17,10 +17,10 @@ jobs:
           p=Path('frontend/src/pages/Classroom.jsx')
           t=p.read_text()
           t=t.replace('renderStroke(d); } };','renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };',1)
-          t=t.replace('const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; if (pending?.id === stroke.id) { pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);','const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; const isShape = ["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool); if (pending?.id === stroke.id) { if (isShape) pending.points = points.slice(-2); else pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);')
-          t=t.replace('if (!d || !participant || room.state !== "connected" || !d.points?.length) return; const packet = { type: "whiteboard_checkpoint",','if (!d || !participant || room.state !== "connected" || !d.points?.length || !["pen", "highlighter", "eraser"].includes(d.tool)) return; const packet = { type: "whiteboard_checkpoint",')
+          t=t.replace('const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; if (pending?.id === stroke.id) { pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);','const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; const isShape = ["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool); if (pending?.id === stroke.id) { if (isShape) pending.points = points.slice(-2); else pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);',1)
+          t=t.replace('if (!d || !participant || room.state !== "connected" || !d.points?.length) return; const packet = { type: "whiteboard_checkpoint",','if (!d || !participant || room.state !== "connected" || !d.points?.length || !["pen", "highlighter", "eraser"].includes(d.tool)) return; const packet = { type: "whiteboard_checkpoint",',1)
           marker='if (p.page_number !== slideRef.current) {'
-          s=t.index(marker); a=t.index('              const fresh = Array.isArray(stroke.points) ? stroke.points : [];',s); b=t.index('              if (p.final) liveRef.current.delete(stroke.id);',a)
+          s=t.index(marker); a=t.index('              const fresh = Array.isArray(stroke.points) ? stroke.points : []',s); b=t.index('              if (p.final) liveRef.current.delete(stroke.id);',a)
           t=t[:a]+'''              const fresh = Array.isArray(stroke.points) ? stroke.points : [];
               if (fresh.length) {
                 if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) live.points = fresh.slice(-2);
@@ -28,7 +28,7 @@ jobs:
               }
 '''+t[b:]
           s=t.index('            let live = liveRef.current.get(stroke.id);', t.index('if (msg.type === "whiteboard_live"'))
-          a=t.index('            const fresh = Array.isArray(stroke.points) ? stroke.points : [];',s); b=t.index('            if (p.final) liveRef.current.delete(stroke.id);',a)
+          a=t.index('            const fresh = Array.isArray(stroke.points) ? stroke.points : []',s); b=t.index('            if (p.final) liveRef.current.delete(stroke.id);',a)
           t=t[:a]+'''            const fresh = Array.isArray(stroke.points) ? stroke.points : [];
             if (fresh.length) {
               if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) {
@@ -41,9 +41,10 @@ jobs:
               }
             }
 '''+t[b:]
-          needle='            if (!stroke?.id) return;\n            committedRef.current.add(stroke.id);'
-          if needle not in t: raise SystemExit('commit block not found')
-          t=t.replace(needle,'            if (!stroke?.id) return;\n            if (pendingLiveRef.current?.id === stroke.id) pendingLiveRef.current = null;\n            committedRef.current.add(stroke.id);',1)
+          needle='            if (!stroke?.id) return;'
+          pos=t.index(needle, t.index('if (msg.type === "whiteboard_commit"'))
+          insert_end=pos+len(needle)
+          t=t[:insert_end]+'\n            if (pendingLiveRef.current?.id === stroke.id) pendingLiveRef.current = null;'+t[insert_end:]
           p.write_text(t)
           PY
           rm .github/workflows/whiteboard-shape-fix.yml
