@@ -352,12 +352,20 @@ export default function Classroom() {
               liveRef.current.set(stroke.id, live);
             }
             const fresh = Array.isArray(stroke.points) ? stroke.points : [];
-            if (fresh.length) {
-              const previous = live.points.length ? live.points[live.points.length - 1] : null;
-              renderStroke({ ...live, points: previous ? [previous, ...fresh] : fresh });
-              live.points.push(...fresh);
-            }
-            if (p.final) liveRef.current.delete(stroke.id);
+  if (fresh.length) {
+    if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) {
+      live.points = fresh.slice(-2);
+      redraw();
+      setTimeout(() => {
+        if (!committedRef.current.has(stroke.id) && slideRef.current === Number(p.page_number)) renderStroke(live);
+      }, 0);
+    } else {
+      const previous = live.points.length ? live.points[live.points.length - 1] : null;
+      renderStroke({ ...live, points: previous ? [previous, ...fresh] : fresh });
+      live.points.push(...fresh);
+    }
+  }
+  if (p.final) liveRef.current.delete(stroke.id);
             return;
           }
           if (msg.type === "whiteboard_checkpoint" && topic === COMMIT_TOPIC) {
