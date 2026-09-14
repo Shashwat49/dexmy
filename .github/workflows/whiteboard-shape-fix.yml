@@ -1,0 +1,37 @@
+name: Whiteboard shape fix
+on:
+  push:
+    branches: [fix/whiteboard-shape-preview-final]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch core shape state
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/src/pages/Classroom.jsx')
+          s=p.read_text()
+          old='  const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; if (pending?.id === stroke.id) { pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);'
+          new='  const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; const isShape = ["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool); if (pending?.id === stroke.id) { if (isShape) pending.points = points.slice(-2); else pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);'
+          s=s.replace(old,new,1)
+          old='  const publishStrokeCheckpoint = useCallback(() => { const d = drawRef.current; const room = roomRef.current; const participant = room?.localParticipant; if (!d || !participant || room.state !== "connected" || !d.points?.length) return; const packet = { type: "whiteboard_checkpoint", stroke: { ...d, points: d.points.slice() }, page_number: slideRef.current }; participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: true, topic: COMMIT_TOPIC }).catch(() => {}); }, []);'
+          new='  const publishStrokeCheckpoint = useCallback(() => { const d = drawRef.current; const room = roomRef.current; const participant = room?.localParticipant; if (!d || !participant || room.state !== "connected" || !d.points?.length || !["pen", "highlighter", "eraser"].includes(d.tool)) return; const packet = { type: "whiteboard_checkpoint", stroke: { ...d, points: d.points.slice() }, page_number: slideRef.current }; participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: true, topic: COMMIT_TOPIC }).catch(() => {}); }, []);'
+          s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin fix/whiteboard-shape-preview-final
+          git rebase origin/fix/whiteboard-shape-preview-final
+          rm -f .github/workflows/whiteboard-shape-fix.yml
+          git add frontend/src/pages/Classroom.jsx .github/workflows/whiteboard-shape-fix.yml
+          git commit -m 'fix: stop live shape tracing at the source' || exit 0
+          git push --force-with-lease
