@@ -1,0 +1,64 @@
+name: Apply targeted whiteboard fixes
+
+on:
+  push:
+    branches: [whiteboard-fixes-20260915]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply targeted fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          frontend = Path('frontend/src/pages/Classroom.jsx')
+          s = frontend.read_text()
+
+          old = '''          strokesByPageRef.current = new Map(p.map((x) => [x.page_number, []]));\n          strokesByPageRef.current.set(msg.page_number || 1, msg.canvas_json?.strokes || []);'''
+          new = '''          strokesByPageRef.current = new Map(p.map((x) => [x.page_number, Array.isArray(x.strokes) ? x.strokes : []]));\n          strokesByPageRef.current.set(msg.page_number || 1, msg.canvas_json?.strokes || strokesByPageRef.current.get(msg.page_number || 1) || []);'''
+          if old not in s:
+              raise SystemExit('whiteboard_state target not found')
+          s = s.replace(old, new, 1)
+
+          old = '''            const list = strokesByPageRef.current.get(pageNumber) || [];\n            if (!list.some((s) => s.id === p.stroke.id)) list.push(p.stroke);\n            strokesByPageRef.current.set(pageNumber, list);\n            committedRef.current.add(p.stroke.id);\n            liveRef.current.delete(p.stroke.id);\n            if (pageNumber === slideRef.current) renderStroke(p.stroke);'''
+          new = '''            const list = strokesByPageRef.current.get(pageNumber) || [];\n            const isNewStroke = !list.some((s) => s.id === p.stroke.id);\n            if (isNewStroke) list.push(p.stroke);\n            strokesByPageRef.current.set(pageNumber, list);\n            committedRef.current.add(p.stroke.id);\n            liveRef.current.delete(p.stroke.id);\n            if (isNewStroke && pageNumber === slideRef.current) renderStroke(p.stroke);'''
+          if old not in s:
+              raise SystemExit('websocket stroke target not found')
+          s = s.replace(old, new, 1)
+
+          old = '''            const list = strokesByPageRef.current.get(pageNumber) || [];\n            if (!list.some((s) => s.id === stroke.id)) list.push(stroke);\n            strokesByPageRef.current.set(pageNumber, list);\n            if (pageNumber === slideRef.current) renderStroke(stroke);'''
+          new = '''            const list = strokesByPageRef.current.get(pageNumber) || [];\n            const isNewStroke = !list.some((s) => s.id === stroke.id);\n            if (isNewStroke) list.push(stroke);\n            strokesByPageRef.current.set(pageNumber, list);\n            if (isNewStroke && pageNumber === slideRef.current) renderStroke(stroke);'''
+          if old not in s:
+              raise SystemExit('livekit commit target not found')
+          s = s.replace(old, new, 1)
+
+          frontend.write_text(s)
+
+          backend = Path('backend/app/websockets/classroom_ws.py')
+          s = backend.read_text()
+          old = '''    pages = [\n        {"page_number": n, "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None}\n        for n, s in sorted(latest_by_page.items())\n    ]'''
+          new = '''    pages = [\n        {\n            "page_number": n,\n            "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None,\n            "strokes": (s.snapshot_data or {}).get("strokes", []),\n        }\n        for n, s in sorted(latest_by_page.items())\n    ]'''
+          if old not in s:
+              raise SystemExit('backend pages target not found')
+          backend.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Commit fixes and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/apply-whiteboard-fixes.yml
+          git add frontend/src/pages/Classroom.jsx backend/app/websockets/classroom_ws.py
+          git commit -m "fix: preserve whiteboard strokes and prevent duplicate shapes"
+          git push origin whiteboard-fixes-20260915
