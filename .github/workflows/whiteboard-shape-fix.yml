@@ -10,5 +10,87 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Test runner
-        run: echo "whiteboard patch runner is active"
+      - name: Apply shape preview fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('frontend/src/pages/Classroom.jsx')
+          text = path.read_text(encoding='utf-8')
+          original = text
+
+          old = '  const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; if (pending?.id === stroke.id) { pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);'
+          new = '  const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; const isShape = ["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool); if (pending?.id === stroke.id) { if (isShape) pending.points = points.slice(-2); else pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, final }; }, []);'
+          assert old in text, 'queueLive target not found'
+          text = text.replace(old, new, 1)
+
+          old = '  const publishStrokeCheckpoint = useCallback(() => { const d = drawRef.current; const room = roomRef.current; const participant = room?.localParticipant; if (!d || !participant || room.state !== "connected" || !d.points?.length) return; const packet = { type: "whiteboard_checkpoint", stroke: { ...d, points: d.points.slice() }, page_number: slideRef.current }; participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: true, topic: COMMIT_TOPIC }).catch(() => {}); }, []);'
+          new = '  const publishStrokeCheckpoint = useCallback(() => { const d = drawRef.current; const room = roomRef.current; const participant = room?.localParticipant; if (!d || !participant || room.state !== "connected" || !d.points?.length || !["pen", "highlighter", "eraser"].includes(d.tool)) return; const packet = { type: "whiteboard_checkpoint", stroke: { ...d, points: d.points.slice() }, page_number: slideRef.current }; participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: true, topic: COMMIT_TOPIC }).catch(() => {}); }, []);'
+          assert old in text, 'checkpoint target not found'
+          text = text.replace(old, new, 1)
+
+          old = '''            const fresh = Array.isArray(stroke.points) ? stroke.points : [];
+            if (fresh.length) {
+              if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) {
+                live.points = fresh.slice(-2);
+                redraw();
+                setTimeout(() => {
+                  if (!committedRef.current.has(stroke.id) && slideRef.current === Number(p.page_number)) renderStroke(live);
+                }, 0);
+              } else {
+                const previous = live.points.length ? live.points[live.points.length - 1] : null;
+                renderStroke({ ...live, points: previous ? [previous, ...fresh] : fresh });
+                live.points.push(...fresh);
+              }
+            }
+            if (p.final) liveRef.current.delete(stroke.id);'''
+          new = '''            const fresh = Array.isArray(stroke.points) ? stroke.points : [];
+            if (fresh.length) {
+              if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) {
+                live.points = fresh.slice(-2);
+                redraw();
+                setTimeout(() => {
+                  if (!committedRef.current.has(stroke.id) && slideRef.current === Number(p.page_number)) renderStroke(live);
+                }, 0);
+              } else {
+                const previous = live.points.length ? live.points[live.points.length - 1] : null;
+                renderStroke({ ...live, points: previous ? [previous, ...fresh] : fresh });
+                live.points.push(...fresh);
+              }
+            }
+            if (p.final) liveRef.current.delete(stroke.id);'''
+          assert old in text, 'student live target not found'
+          text = text.replace(old, new, 1)
+
+          old = '''              const fresh = Array.isArray(stroke.points) ? stroke.points : [];
+              if (fresh.length) live.points.push(...fresh);
+              if (p.final) liveRef.current.delete(stroke.id);'''
+          new = '''              const fresh = Array.isArray(stroke.points) ? stroke.points : [];
+              if (fresh.length) {
+                if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) live.points = fresh.slice(-2);
+                else live.points.push(...fresh);
+              }
+              if (p.final) liveRef.current.delete(stroke.id);'''
+          assert old in text, 'off-page live target not found'
+          text = text.replace(old, new, 1)
+
+          old = '''            if (!stroke?.id) return;
+            committedRef.current.add(stroke.id);'''
+          new = '''            if (!stroke?.id) return;
+            if (pendingLiveRef.current?.id === stroke.id) pendingLiveRef.current = null;
+            committedRef.current.add(stroke.id);'''
+          assert old in text, 'commit cleanup target not found'
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          print('Applied:', text != original)
+
+      - name: Commit final patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/whiteboard-shape-fix.yml TEMP_WHITEBOARD_FIX_TRIGGER.txt TEMP_WHITEBOARD_FIX_TRIGGER_2.txt
+          git add frontend/src/pages/Classroom.jsx .github/workflows/whiteboard-shape-fix.yml TEMP_WHITEBOARD_FIX_TRIGGER.txt TEMP_WHITEBOARD_FIX_TRIGGER_2.txt
+          git commit -m 'fix: eliminate live shape tracing' || exit 0
+          git push
