@@ -126,11 +126,7 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
     if not latest_by_page:
         return
     pages = [
-        {
-            "page_number": n,
-            "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None,
-            "strokes": (s.snapshot_data or {}).get("strokes", []),
-        }
+        {"page_number": n, "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None}
         for n, s in sorted(latest_by_page.items())
     ]
     current_page = max(latest_by_page)
