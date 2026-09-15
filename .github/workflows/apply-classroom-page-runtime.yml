@@ -1,0 +1,79 @@
+name: Apply classroom page runtime
+on:
+  push:
+    branches: [feature/classroom-page-ids-v2]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply runtime changes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          def edit(path, fn):
+            p=Path(path); s=p.read_text(); n=fn(s); assert n!=s, path; p.write_text(n)
+
+          # websocket: stable page ordering + page-id snapshots
+          def ws(s):
+            s=s.replace('from app.models.classroom_content import WhiteboardSnapshot','from app.models.classroom_content import ClassroomPage, WhiteboardSnapshot')
+            a=s.index('async def _send_latest_whiteboard('); b=s.index('\n\n@router.websocket',a)
+            fn='''async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, db) -> None:\n    pages_db = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()\n    if not pages_db:\n        page = ClassroomPage(session_id=session_id, position=1, page_type="whiteboard")\n        db.add(page); db.commit(); db.refresh(page); pages_db=[page]\n    pages=[]\n    for position,page in enumerate(pages_db,1):\n        snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()\n        key=snap.image_url if snap and snap.image_url else page.image_url\n        pages.append({"page_id":str(page.id),"page_number":position,"page_type":page.page_type,"image_url":get_presigned_url(key,expires_in=3600) if key else None,"strokes":(snap.snapshot_data or {}).get("strokes",[]) if snap else []})\n    cur=pages[-1]\n    await websocket.send_json({"type":"whiteboard_state","page_number":cur["page_number"],"page_id":cur["page_id"],"canvas_json":{"strokes":cur["strokes"]},"image_url":cur["image_url"],"pages":pages})\n'''
+            s=s[:a]+fn+s[b:]
+            old='''        page_number = max(1, int(data.get("page_number", 1)))\n        existing = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id, WhiteboardSnapshot.page_number == page_number).order_by(desc(WhiteboardSnapshot.created_at)).first()\n        image_url = existing.image_url if existing else None\n        if data.get("image_base64"):\n            image_url = save_base64_file(data["image_base64"], f"wb_{session_id}_p{page_number}", "png")\n        db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data=data.get("canvas_json") or {}, image_url=image_url, page_number=page_number))\n        db.commit()\n        await websocket.send_json({"type": "snapshot_saved", "page_number": page_number})'''
+            new='''        page_number=max(1,int(data.get("page_number",1)))\n        try: page_id=uuid.UUID(str(data.get("page_id"))) if data.get("page_id") else None\n        except (ValueError,TypeError): page_id=None\n        page=db.get(ClassroomPage,page_id) if page_id else None\n        if page is None or page.session_id != session_id: page=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id,ClassroomPage.position==page_number).first()\n        if page is None:\n            page=ClassroomPage(session_id=session_id,position=page_number,page_type="whiteboard"); db.add(page); db.flush()\n        existing=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()\n        image_url=existing.image_url if existing else page.image_url\n        if data.get("image_base64"): image_url=save_base64_file(data["image_base64"],f"wb_{session_id}_p{page.id}","png")\n        page.image_url=image_url\n        db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=data.get("canvas_json") or {},image_url=image_url,page_number=page_number,page_id=page.id))\n        db.commit()\n        await websocket.send_json({"type":"snapshot_saved","page_number":page_number,"page_id":str(page.id)})'''
+            assert old in s; return s.replace(old,new)
+          edit('backend/app/websockets/classroom_ws.py',ws)
+
+          # lifecycle: compile notes in page position order
+          def life(s):
+            s=s.replace('from app.models.classroom_content import ClassNotes, WhiteboardSnapshot','from app.models.classroom_content import ClassNotes, WhiteboardSnapshot, ClassroomPage')
+            a=s.index('        image_keys = []'); b=s.index('\n\n        if not image_keys:',a)
+            block='''        image_keys=[]\n        for _ in range(5):\n            pages=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id).order_by(ClassroomPage.position.asc()).all()\n            image_keys=[]\n            for page in pages:\n                snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(WhiteboardSnapshot.created_at.desc()).first()\n                key=snap.image_url if snap and snap.image_url else page.image_url\n                if key: image_keys.append(key)\n            if image_keys: break\n            time.sleep(0.5)'''
+            return s[:a]+block+s[b:]
+          edit('backend/app/services/session_lifecycle.py',life)
+
+          # frontend: page identity, insertion-after-current, and identity-keyed strokes
+          def fe(s):
+            s=s.replace('const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);','const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);\nconst makeWhiteboardPage = (page_number = 1) => ({ page_id: newId(), page_number, page_type: "whiteboard", image_url: null });\nconst normalizePages = (pages) => (pages?.length ? pages : [makeWhiteboardPage(1)]).map((p,i) => ({ ...p, page_id: p.page_id || newId(), page_number: i+1, page_type: p.page_type || (p.image_url ? "pdf" : "whiteboard") }));')
+            s=s.replace('const slidesRef = useRef([{ page_number: 1, image_url: null }]), strokesByPageRef = useRef(new Map([[1, []]]), ), slideRef = useRef(1);','const slidesRef = useRef([makeWhiteboardPage(1)]), strokesByPageRef = useRef(new Map()), slideRef = useRef(1);')
+            s=s.replace('const [slides, setSlides] = useState([{ page_number: 1, image_url: null }]), [slide, setSlide] = useState(1),','const [slides, setSlides] = useState(() => [makeWhiteboardPage(1)]), [slide, setSlide] = useState(1),')
+            s=s.replace('const currentStrokes = useCallback(() => strokesByPageRef.current.get(slideRef.current) || [], []);','const currentPageId = useCallback((n = slideRef.current) => slidesRef.current[n - 1]?.page_id || null, []);\n  const strokesFor = useCallback((n = slideRef.current) => strokesByPageRef.current.get(currentPageId(n)) || [], [currentPageId]);\n  const currentStrokes = useCallback(() => strokesFor(), [strokesFor]);')
+            s=s.replace('if (s.page_number === pageAtStart) renderStroke(s);','if (s.page_id === currentPageId(pageAtStart) || (s.page_id == null && s.page_number === pageAtStart)) renderStroke(s);')
+            s=s.replace('}, [renderStroke, drawOverlay]);','}, [renderStroke, drawOverlay, currentPageId]);')
+            s=s.replace('canvas_json: { strokes: (strokesByPageRef.current.get(pageNumber) || []).map((s) => ({ ...s })) }, image_base64: imageBase64 });','canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, image_base64: imageBase64, page_id: currentPageId(pageNumber) });')
+            s=s.replace('}, [send]);\n  const saveSnapshotNow','}, [send, strokesFor, currentPageId]);\n  const saveSnapshotNow',1)
+            s=s.replace('}, [send]);\n  const publishLive','}, [send, strokesFor, currentPageId]);\n  const publishLive',1)
+            s=s.replace('page_number: pageNumber, final }','page_number: pageNumber, page_id: currentPageId(pageNumber), final }')
+            s=s.replace('const packet = { type: "whiteboard_commit", stroke, page_number: pageNumber };','const packet = { type: "whiteboard_commit", stroke, page_number: pageNumber, page_id: currentPageId(pageNumber) };')
+            s=s.replace('page_number: slideRef.current }; participant.publishData','page_number: slideRef.current, page_id: currentPageId() }; participant.publishData')
+            s=s.replace('page_number: slideRef.current, final };','page_number: slideRef.current, page_id: currentPageId(), final };')
+            s=s.replace('publishControl({ kind: "page", page_number: next });','publishControl({ kind: "page", page_number: next, page_id: currentPageId(next) });')
+            s=s.replace('strokesByPageRef.current.set(next, strokesByPageRef.current.get(next) || []);','strokesByPageRef.current.set(currentPageId(next), strokesByPageRef.current.get(currentPageId(next)) || []);')
+            s=s.replace('const next = slidesRef.current.length + 1; strokesByPageRef.current.set(next, []); const updated = [...slidesRef.current, { page_number: next, image_url: null }];','const next = slidesRef.current.length + 1; const newPage = makeWhiteboardPage(next); strokesByPageRef.current.set(newPage.page_id, []); const updated = [...slidesRef.current, newPage];')
+            s=s.replace('const pageNumber = slideRef.current; if (!["pen", "highlighter", "eraser"].includes(d.tool))','const pageNumber = slideRef.current; const pageId = currentPageId(pageNumber); if (!["pen", "highlighter", "eraser"].includes(d.tool))')
+            s=s.replace('payload: { kind: "stroke", stroke: d, page_number: pageNumber }','payload: { kind: "stroke", stroke: d, page_number: pageNumber, page_id: pageId }')
+            old='const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`, form); const imported = data.map((item, i) => ({ page_number: i + 1, image_url: item.file_url })); const next = imported.length ? imported : [{ page_number: 1, image_url: null }]; slidesRef.current = next; setSlides(next); slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(next.map((p) => [p.page_number, []])); const payload = { kind: "pdf", pages: next }; slideControlActiveRef.current = true; publishControl(payload); setNotice(`${imported.length} PDF page${imported.length === 1 ? "" : "s"} loaded.`);'
+            new='const afterPageId = currentPageId(); const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf?after_page_id=${encodeURIComponent(afterPageId || "")}`, form); const next = normalizePages(data.pages); const firstInserted = next.findIndex((p) => data.inserted_page_ids?.includes(p.page_id)); const insertedPage = firstInserted >= 0 ? firstInserted + 1 : slideRef.current; slidesRef.current = next; setSlides(next); strokesByPageRef.current = new Map(next.map((p) => [p.page_id, strokesByPageRef.current.get(p.page_id) || []])); slideRef.current = insertedPage; setSlide(insertedPage); slideControlActiveRef.current = true; publishControl({ kind: "slides", pages: next, page_number: insertedPage, page_id: next[insertedPage - 1]?.page_id }); setNotice(`${data.inserted_count} PDF page${data.inserted_count === 1 ? "" : "s"} inserted after the current page.`);'
+            assert old in s; s=s.replace(old,new)
+            s=s.replace('strokesByPageRef.current = new Map(p.map((x) => [x.page_number, []]));','strokesByPageRef.current = new Map(normalizePages(p).map((x) => [x.page_id, []]));')
+            s=s.replace('strokesByPageRef.current = new Map(p.map((x) => [x.page_number, Array.isArray(x.strokes) ? x.strokes : []]));','strokesByPageRef.current = new Map(normalizePages(p).map((x) => [x.page_id, Array.isArray(x.strokes) ? x.strokes : []]));')
+            s=s.replace('const next = p.pages?.length ? p.pages : [{ page_number: 1, image_url: null }];','const next = normalizePages(p.pages);')
+            s=s.replace('strokesByPageRef.current = new Map(next.map((x) => [x.page_number, strokesByPageRef.current.get(x.page_number) || []]));','strokesByPageRef.current = new Map(next.map((x) => [x.page_id, strokesByPageRef.current.get(x.page_id) || []]));')
+            s=s.replace('const next = p.pages || [{ page_number: 1, image_url: null }];','const next = normalizePages(p.pages);')
+            s=s.replace('const pageNumber = Number(p.page_number) || 1;\n            const list = strokesByPageRef.current.get(pageNumber) || [];','const pageNumber = Number(p.page_number) || 1; const pageId = p.page_id || currentPageId(pageNumber);\n            const list = strokesByPageRef.current.get(pageId) || [];')
+            s=s.replace('strokesByPageRef.current.set(pageNumber, list);','strokesByPageRef.current.set(pageId, list);')
+            s=s.replace('const pageNumber = Number(msg.page_number) || 1;\n            if (!stroke?.id','const pageNumber = Number(msg.page_number) || 1; const pageId = msg.page_id || currentPageId(pageNumber);\n            if (!stroke?.id')
+            s=s.replace('liveRef.current.set(stroke.id, { ...stroke, points: stroke.points.slice(), page_number: pageNumber });','liveRef.current.set(stroke.id, { ...stroke, points: stroke.points.slice(), page_number: pageNumber, page_id: pageId });')
+            s=s.replace('strokesByPageRef.current.set(slideRef.current, []);','strokesByPageRef.current.set(currentPageId(), []);')
+            return s
+          edit('frontend/src/pages/Classroom.jsx',fe)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add backend frontend
+          git commit -m 'feat: wire stable classroom page identity runtime' || true
+          git push origin feature/classroom-page-ids-v2
