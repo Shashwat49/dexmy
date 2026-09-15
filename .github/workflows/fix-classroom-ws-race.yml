@@ -1,0 +1,50 @@
+name: Fix classroom websocket page initialization
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply websocket race fix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('backend/app/websockets/classroom_ws.py')
+          text = path.read_text()
+
+          old_import = 'from sqlalchemy import desc, func\n'
+          new_import = old_import + 'from sqlalchemy.exc import IntegrityError\n'
+          if 'from sqlalchemy.exc import IntegrityError' not in text:
+              text = text.replace(old_import, new_import, 1)
+
+          old = '''async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, db) -> None:\n    pages_db = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()\n    if not pages_db:\n        page = ClassroomPage(session_id=session_id, position=1, page_type="whiteboard")\n        db.add(page); db.commit(); db.refresh(page); pages_db=[page]\n    pages=[]\n    for position,page in enumerate(pages_db,1):\n        snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()\n        key=page.image_url if page.page_type == "pdf" else None\n        pages.append({"page_id":str(page.id),"page_number":position,"page_type":page.page_type,"image_url":get_presigned_url(key,expires_in=3600) if key else None,"strokes":(snap.snapshot_data or {}).get("strokes",[]) if snap else []})\n    cur=pages[-1]\n    await websocket.send_json({"type":"whiteboard_state","page_number":cur["page_number"],"page_id":cur["page_id"],"canvas_json":{"strokes":cur["strokes"]},"image_url":cur["image_url"],"pages":pages})\n'''
+
+          new = '''async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, db) -> None:\n    pages_db = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()\n    if not pages_db:\n        page = ClassroomPage(session_id=session_id, position=1, page_type="whiteboard")\n        db.add(page)\n        try:\n            db.commit()\n            db.refresh(page)\n            pages_db = [page]\n        except IntegrityError:\n            # Teacher and student can initialize the same classroom concurrently.\n            # The unique(session_id, position) constraint makes one insert win;\n            # recover the already-created page instead of killing the WebSocket.\n            db.rollback()\n            pages_db = db.query(ClassroomPage).filter(\n                ClassroomPage.session_id == session_id\n            ).order_by(ClassroomPage.position.asc()).all()\n            if not pages_db:\n                return\n    pages=[]\n    for position,page in enumerate(pages_db,1):\n        snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()\n        key=page.image_url if page.page_type == "pdf" else None\n        pages.append({"page_id":str(page.id),"page_number":position,"page_type":page.page_type,"image_url":get_presigned_url(key,expires_in=3600) if key else None,"strokes":(snap.snapshot_data or {}).get("strokes",[]) if snap else []})\n    cur=pages[-1]\n    await websocket.send_json({"type":"whiteboard_state","page_number":cur["page_number"],"page_id":cur["page_id"],"canvas_json":{"strokes":cur["strokes"]},"image_url":cur["image_url"],"pages":pages})\n'''
+
+          if old not in text:
+              raise SystemExit('Expected classroom websocket function was not found; refusing to modify the file.')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+
+      - name: Commit fix and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/app/websockets/classroom_ws.py
+          git commit -m "fix: prevent classroom websocket initialization race"
+          git push
+          git rm .github/workflows/fix-classroom-ws-race.yml
+          git commit -m "chore: remove temporary classroom fix workflow"
+          git push
