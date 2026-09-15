@@ -122,7 +122,7 @@ async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(.
         except (ValueError, TypeError): pass
 
     stored = [(i, save_bytes_file(img, f"annotate_{session_id}_p{i}", "png")) for i, img in enumerate(pages_raw, 1)]
-    for page in existing_pages:
+    for page in reversed(existing_pages):
         if page.position > after_position: page.position += len(stored)
 
     inserted = []

@@ -126,7 +126,7 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
     pages=[]
     for position,page in enumerate(pages_db,1):
         snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
-        key=snap.image_url if snap and snap.image_url else page.image_url
+        key=page.image_url if page.page_type == "pdf" else None
         pages.append({"page_id":str(page.id),"page_number":position,"page_type":page.page_type,"image_url":get_presigned_url(key,expires_in=3600) if key else None,"strokes":(snap.snapshot_data or {}).get("strokes",[]) if snap else []})
     cur=pages[-1]
     await websocket.send_json({"type":"whiteboard_state","page_number":cur["page_number"],"page_id":cur["page_id"],"canvas_json":{"strokes":cur["strokes"]},"image_url":cur["image_url"],"pages":pages})

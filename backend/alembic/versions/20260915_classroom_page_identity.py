@@ -22,7 +22,7 @@ def upgrade():
     for row in rows:
         pid = uuid.uuid4()
         latest = conn.execute(sa.text("SELECT image_url FROM whiteboard_snapshots WHERE session_id=:s AND page_number=:p ORDER BY created_at DESC LIMIT 1"), {"s": row["session_id"], "p": row["page_number"]}).scalar()
-        conn.execute(sa.text("INSERT INTO classroom_pages(id,session_id,position,page_type,image_url) VALUES(:id,:s,:p,:t,:u)"), {"id": pid, "s": row["session_id"], "p": row["page_number"], "t": "pdf" if latest else "whiteboard", "u": latest})
+        conn.execute(sa.text("INSERT INTO classroom_pages(id,session_id,position,page_type,image_url) VALUES(:id,:s,:p,:t,:u)"), {"id": pid, "s": row["session_id"], "p": row["page_number"], "t": "pdf" if isinstance(latest, str) and "annotate_" in latest else "whiteboard", "u": latest if isinstance(latest, str) and "annotate_" in latest else None})
         conn.execute(sa.text("UPDATE whiteboard_snapshots SET page_id=:id WHERE session_id=:s AND page_number=:p"), {"id": pid, "s": row["session_id"], "p": row["page_number"]})
     op.alter_column("whiteboard_snapshots", "page_id", nullable=False)
 
