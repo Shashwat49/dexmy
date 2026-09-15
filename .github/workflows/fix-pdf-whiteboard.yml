@@ -32,12 +32,15 @@ jobs:
               raise SystemExit("Expected whiteboard JSX block not found")
           s = s.replace(old_jsx, new_jsx, 1)
           p.write_text(s)
-          for name in [".github/workflows/fix-pdf-whiteboard.yml", "dummy-temp-file.txt", "dummy-temp-file2.txt", "dummy-temp-file3.txt", "dummy-temp-file4.txt"]:
-              Path(name).unlink(missing_ok=True)
+          for pattern in [".github/workflows/fix-pdf-whiteboard.yml", "dummy-temp-file", "dummy-temp-file2.txt", "dummy-temp-file3.txt", "dummy-temp-file4.txt"]:
+              if pattern == "dummy-temp-file":
+                  for f in Path(".").glob("dummy-temp-file*.txt"): f.unlink(missing_ok=True)
+              else:
+                  Path(pattern).unlink(missing_ok=True)
       - name: Commit fix
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/src/pages/Classroom.jsx .github/workflows/fix-pdf-whiteboard.yml dummy-temp-file.txt dummy-temp-file2.txt dummy-temp-file3.txt dummy-temp-file4.txt
-          git commit -m "fix: render uploaded pdf pages in whiteboard" || exit 0
+          git add -A
+          git commit -m "fix: render uploaded pdf pages in whiteboard"
           git push
