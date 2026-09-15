@@ -1,0 +1,37 @@
+name: Patch screen-share whiteboard fix
+
+on:
+  push:
+    branches: [fix/whiteboard-after-screen-share]
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/whiteboard-after-screen-share
+          fetch-depth: 0
+      - name: Patch Classroom.jsx
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('frontend/src/pages/Classroom.jsx')
+          s = p.read_text()
+          old = '  useEffect(() => { redraw(); }, [slide, slides, grid, redraw]);\n'
+          new = '''  useEffect(() => { redraw(); }, [slide, slides, grid, redraw]);\n  useEffect(() => {\n    const id = requestAnimationFrame(() => { redraw(); });\n    return () => cancelAnimationFrame(id);\n  }, [screen, redraw]);\n'''
+          if old not in s:
+              raise SystemExit('target effect not found')
+          if '}, [screen, redraw]);' in s:
+              raise SystemExit('screen redraw fix already present')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git rm .github/workflows/patch-screen-share-whiteboard.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/src/pages/Classroom.jsx
+          git commit -m 'fix: restore whiteboard after screen share'
+          git push origin fix/whiteboard-after-screen-share
