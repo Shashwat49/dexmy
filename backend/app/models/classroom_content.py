@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func, UniqueConstraint, UniqueConstraint, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, func, UniqueConstraint, UniqueConstraint, UniqueConstraint, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +21,18 @@ class WhiteboardSnapshot(Base):
     page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("classroom_pages.id", ondelete="CASCADE"), nullable=True, index=True)
     page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("classroom_pages.id", ondelete="CASCADE"), nullable=True, index=True)
     page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("classroom_pages.id", ondelete="CASCADE"), nullable=True, index=True)
+    page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("classroom_pages.id", ondelete="CASCADE"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ClassroomPage(Base):
+    __tablename__ = "classroom_pages"
+    __table_args__ = (UniqueConstraint("session_id", "position", name="uq_classroom_page_position"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("class_sessions.id", ondelete="CASCADE"), index=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    page_type: Mapped[str] = mapped_column(String(20), nullable=False, default="whiteboard")
+    image_url: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -227,6 +227,17 @@ CREATE TABLE classroom_pages (
 );
 CREATE INDEX idx_classroom_pages_session ON classroom_pages(session_id);
 
+CREATE TABLE classroom_pages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    page_type VARCHAR(20) NOT NULL DEFAULT 'whiteboard',
+    image_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session_id, position)
+);
+CREATE INDEX idx_classroom_pages_session ON classroom_pages(session_id);
+
 CREATE TABLE whiteboard_snapshots (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id      UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
