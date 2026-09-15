@@ -144,6 +144,7 @@ export default function Classroom() {
           }
         }
         if (msg.type === "pdf_pages_ready") {
+          if (slideControlActiveRef.current) return;
           const p = normalizePages(msg.pages);
           slidesRef.current = p;
           setSlides(p);
