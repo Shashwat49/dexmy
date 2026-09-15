@@ -44,7 +44,7 @@ export default function Hero() {
           to="/login"
           className="btn-demo-pulse bg-brand-gold text-[#2C1E04] text-base font-bold px-8 py-4 rounded-lg hover:bg-[#FFC94D] transition-colors"
         >
-          Book a Free Slot
+          Book a Free Demo
         </Link>
       </div>
     </section>
