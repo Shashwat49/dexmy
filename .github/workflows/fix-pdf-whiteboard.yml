@@ -1,0 +1,41 @@
+name: Fix PDF whiteboard rendering
+
+on:
+  push:
+    branches:
+      - fix/pdf-whiteboard-visible
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch PDF rendering
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path("frontend/src/pages/Classroom.jsx")
+          s = p.read_text()
+          old = '''  const redraw = useCallback(async () => { const canvas = canvasRef.current; if (!canvas) return; const pageAtStart = slideRef.current; const ctx = canvas.getContext("2d"); ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); const bg = slidesRef.current[pageAtStart - 1]?.image_url; if (bg) { let img = imageCacheRef.current.get(bg); if (!img) { img = new Image(); img.crossOrigin = "anonymous"; imageCacheRef.current.set(bg, img); img.src = bg; try { if (!img.complete) await new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; }); } catch {} } if (pageAtStart !== slideRef.current) return; if (img.complete && img.naturalWidth) { const scale = Math.min(W / img.width, H / img.height), w = img.width * scale, h = img.height * scale; ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h); } } if (pageAtStart !== slideRef.current) return;'''
+          new = '''  const redraw = useCallback(async () => { const canvas = canvasRef.current; if (!canvas) return; const pageAtStart = slideRef.current; const ctx = canvas.getContext("2d"); const bg = slidesRef.current[pageAtStart - 1]?.image_url; ctx.clearRect(0, 0, W, H); if (!bg) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); } if (pageAtStart !== slideRef.current) return;'''
+          if old not in s:
+              raise SystemExit("Expected redraw block not found")
+          s = s.replace(old, new, 1)
+          old_jsx = '''<div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl classroom-whiteboard-frame"><canvas ref={canvasRef} width={W} height={H} className={`absolute inset-0 w-full h-full touch-none ${!canAnnotate ? "cursor-default" : "cursor-crosshair"}`}'''
+          new_jsx = '''<div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl classroom-whiteboard-frame">{slides[slide - 1]?.image_url && <img src={slides[slide - 1].image_url} alt="PDF page" className="absolute inset-0 w-full h-full object-contain pointer-events-none" /> }<canvas ref={canvasRef} width={W} height={H} className={`absolute inset-0 w-full h-full touch-none ${!canAnnotate ? "cursor-default" : "cursor-crosshair"}`}'''
+          if old_jsx not in s:
+              raise SystemExit("Expected whiteboard JSX block not found")
+          s = s.replace(old_jsx, new_jsx, 1)
+          p.write_text(s)
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/pages/Classroom.jsx
+          git commit -m "fix: render uploaded pdf pages in whiteboard" || exit 0
+          git push
