@@ -1,0 +1,190 @@
+name: Apply classroom page model
+
+on:
+  push:
+    branches: [feature/classroom-page-ids]
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: "!contains(github.event.head_commit.message, '[page-model-applied]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply stable page identity and append semantics
+        env:
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Backend: stable page_id lives in snapshot_data, so no schema migration is required.
+          p = Path('backend/app/api/v1/endpoints/classroom.py')
+          s = p.read_text()
+          s = s.replace('from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile', 'from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile, Form')
+          s = s.replace('import uuid\nfrom app.models.classroom_content', 'import uuid\nimport json\nfrom app.models.classroom_content')
+          s = s.replace('class FileUploadResponse(BaseModel):\n    file_url: str\n    file_name: str', 'class FileUploadResponse(BaseModel):\n    file_url: str\n    file_name: str\n    page_number: int | None = None\n    page_id: str | None = None')
+          start = s.index('@router.post("/sessions/{session_id}/whiteboard-pdf"')
+          end = s.index('\n@router.get("/sessions/{session_id}"', start)
+          new_endpoint = '''@router.post("/sessions/{session_id}/whiteboard-pdf", response_model=list[FileUploadResponse])
+          async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(...), existing_pages_json: str = Form("[]"), current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+              cs = db.get(ClassSession, session_id)
+              if cs is None:
+                  raise HTTPException(status_code=404, detail="Session not found")
+              booking = db.get(Booking, cs.booking_id)
+              if current_user.id != booking.teacher_id:
+                  raise HTTPException(status_code=403, detail="Only the teacher can upload annotation PDFs")
+              if not file.filename.lower().endswith(".pdf"):
+                  raise HTTPException(status_code=400, detail="File must be a PDF")
+              contents = await file.read()
+              if len(contents) > 30 * 1024 * 1024:
+                  raise HTTPException(status_code=413, detail="PDF too large (30MB max)")
+              try:
+                  pages_raw = render_pdf_to_images(contents)
+              except Exception:
+                  raise HTTPException(status_code=400, detail="Could not read PDF")
+              if len(pages_raw) > 50:
+                  raise HTTPException(status_code=400, detail="PDF too long (50 pages max)")
+              try:
+                  requested_pages = json.loads(existing_pages_json or "[]")
+                  if not isinstance(requested_pages, list):
+                      requested_pages = []
+              except (TypeError, ValueError):
+                  requested_pages = []
+
+              # Persist the client-side page sequence first. This also covers a newly-created
+              # blank whiteboard page that has not received its first snapshot yet.
+              latest = {}
+              snapshots = (db.query(WhiteboardSnapshot)
+                  .filter(WhiteboardSnapshot.session_id == session_id)
+                  .order_by(WhiteboardSnapshot.page_number.asc(), WhiteboardSnapshot.created_at.desc())
+                  .all())
+              for snapshot in snapshots:
+                  latest.setdefault(snapshot.page_number, snapshot)
+              for page in requested_pages:
+                  try:
+                      number = int(page.get("page_number"))
+                  except (AttributeError, TypeError, ValueError):
+                      continue
+                  if number < 1 or number in latest:
+                      continue
+                  page_id = str(page.get("page_id") or uuid.uuid4())
+                  snapshot = WhiteboardSnapshot(session_id=session_id, snapshot_data={"strokes": [], "page_id": page_id}, image_url=None, page_number=number)
+                  db.add(snapshot)
+                  latest[number] = snapshot
+              db.flush()
+
+              max_page = max(latest.keys(), default=0)
+              pages = []
+              stored_pages = []
+              for offset, img in enumerate(pages_raw, 1):
+                  page_number = max_page + offset
+                  page_id = str(uuid.uuid4())
+                  key = save_bytes_file(img, f"annotate_{session_id}_p{page_number}", "png")
+                  stored_pages.append((page_number, page_id, key))
+                  pages.append(FileUploadResponse(file_url=get_presigned_url(key, expires_in=86400), file_name=f"page_{page_number}.png", page_number=page_number, page_id=page_id))
+              for page_number, page_id, key in stored_pages:
+                  db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data={"strokes": [], "page_id": page_id}, image_url=key, page_number=page_number))
+              db.commit()
+              payload = {"type": "pdf_pages_ready", "pages": [{"page_number": n, "page_id": pid, "image_url": get_presigned_url(key, expires_in=86400)} for n, pid, key in stored_pages]}
+              room = manager.get_room(session_id)
+              for ws in (room.teacher_ws, room.student_ws):
+                  if ws:
+                      try:
+                          await ws.send_json(payload)
+                      except Exception:
+                          pass
+              return pages
+          '''
+          s = s[:start] + new_endpoint + s[end:]
+          p.write_text(s)
+
+          # Backend websocket persistence/restore: expose and preserve page_id.
+          p = Path('backend/app/websockets/classroom_ws.py')
+          s = p.read_text()
+          s = s.replace('''    pages = [
+        {
+            "page_number": n,
+            "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None,
+            "strokes": (s.snapshot_data or {}).get("strokes", []),
+        }
+        for n, s in sorted(latest_by_page.items())
+    ]''', '''    pages = []
+    for n, s in sorted(latest_by_page.items()):
+        data = s.snapshot_data or {}
+        page_id = data.get("page_id")
+        if not page_id:
+            page_id = str(uuid.uuid4())
+            data = {**data, "page_id": page_id}
+            s.snapshot_data = data
+        pages.append({
+            "page_number": n,
+            "page_id": page_id,
+            "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None,
+            "strokes": data.get("strokes", []),
+        })
+    db.commit()''')
+          s = s.replace('''        "canvas_json": snapshot.snapshot_data or {},
+        "image_url": get_presigned_url(snapshot.image_url, expires_in=3600) if snapshot.image_url else None,''', '''        "canvas_json": snapshot.snapshot_data or {},
+        "page_id": (snapshot.snapshot_data or {}).get("page_id"),
+        "image_url": get_presigned_url(snapshot.image_url, expires_in=3600) if snapshot.image_url else None,''')
+          s = s.replace('''        existing = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id, WhiteboardSnapshot.page_number == page_number).order_by(desc(WhiteboardSnapshot.created_at)).first()
+        image_url = existing.image_url if existing else None
+        if data.get("image_base64"):
+            image_url = save_base64_file(data["image_base64"], f"wb_{session_id}_p{page_number}", "png")
+        db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data=data.get("canvas_json") or {}, image_url=image_url, page_number=page_number))''', '''        existing = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id, WhiteboardSnapshot.page_number == page_number).order_by(desc(WhiteboardSnapshot.created_at)).first()
+        image_url = existing.image_url if existing else None
+        if data.get("image_base64"):
+            image_url = save_base64_file(data["image_base64"], f"wb_{session_id}_p{page_number}", "png")
+        canvas_json = dict(data.get("canvas_json") or {})
+        page_id = data.get("page_id") or canvas_json.get("page_id") or ((existing.snapshot_data or {}).get("page_id") if existing else None) or str(uuid.uuid4())
+        canvas_json["page_id"] = page_id
+        db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data=canvas_json, image_url=image_url, page_number=page_number))''')
+          p.write_text(s)
+
+          # Frontend: page objects carry stable IDs; PDF pages append to the existing sequence;
+          # controls/reconnects retain IDs. Page numbers remain the current display position.
+          p = Path('frontend/src/pages/Classroom.jsx')
+          s = p.read_text()
+          s = s.replace('const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);', 'const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);\nconst makePage = (page_number = 1, image_url = null, page_id = null) => ({ page_number, page_id: page_id || newId(), image_url });\nconst normalizePages = (pages) => (pages?.length ? pages.map((p, i) => ({ ...p, page_number: i + 1, page_id: p.page_id || newId(), image_url: p.image_url || null })) : [makePage()]);')
+          s = s.replace('const slidesRef = useRef([{ page_number: 1, image_url: null }]), strokesByPageRef = useRef(new Map([[1, []]]), ), slideRef = useRef(1);', 'const slidesRef = useRef([makePage()]), strokesByPageRef = useRef(new Map([[1, []]]), ), slideRef = useRef(1);')
+          s = s.replace('const [slides, setSlides] = useState([{ page_number: 1, image_url: null }]),', 'const [slides, setSlides] = useState([makePage()]),')
+          s = s.replace('const saveSnapshot = useCallback(() => {', 'const saveSnapshot = useCallback(() => {')
+          s = s.replace('send({ type: "save_snapshot", page_number: pageNumber, canvas_json:', 'send({ type: "save_snapshot", page_number: pageNumber, page_id: slidesRef.current[pageNumber - 1]?.page_id, canvas_json:')
+          s = s.replace('send({ type: "save_snapshot", page_number: pageNumber, canvas_json:', 'send({ type: "save_snapshot", page_number: pageNumber, page_id: slidesRef.current[pageNumber - 1]?.page_id, canvas_json:')
+          # Ensure all server/control page lists are normalized before use.
+          s = s.replace('const imported = data.map((item, i) => ({ page_number: i + 1, image_url: item.file_url }));\n  const next = imported.length ? imported : [{ page_number: 1, image_url: null }];\n  slidesRef.current = next;\n  setSlides(next);', 'const imported = data.map((item) => ({ page_number: item.page_number, page_id: item.page_id, image_url: item.file_url }));\n  const existingPages = normalizePages(slidesRef.current);\n  const next = normalizePages([...existingPages, ...imported]);\n  slidesRef.current = next;\n  setSlides(next);')
+          s = s.replace('slideRef.current = 1; setSlide(1); strokesByPageRef.current = new Map(next.map((p) => [p.page_number, []])); const payload = { kind: "pdf", pages: next };', 'const firstImported = imported[0]?.page_number || 1; slideRef.current = firstImported; setSlide(firstImported); strokesByPageRef.current = new Map(next.map((p) => [p.page_number, strokesByPageRef.current.get(p.page_number) || []])); const payload = { kind: "slides", pages: next, page_number: firstImported };')
+          # Add existing sequence to upload request.
+          s = s.replace('form.append("file", file); const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`, form);', 'form.append("file", file); form.append("existing_pages_json", JSON.stringify(normalizePages(slidesRef.current))); const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf`, form);')
+          # New blank slide gets an ID.
+          s = s.replace('const updated = [...slidesRef.current, { page_number: next, image_url: null }];', 'const updated = [...slidesRef.current, makePage(next)];')
+          # Server state/control fallback pages and maps.
+          s = s.replace('const p = msg.pages || [{ page_number: 1, image_url: null }];', 'const p = normalizePages(msg.pages);')
+          s = s.replace('const p = msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }];', 'const p = normalizePages(msg.pages?.length ? msg.pages : [makePage(msg.page_number || 1, msg.image_url, msg.page_id)]);')
+          s = s.replace('const next = p.pages?.length ? p.pages : [{ page_number: 1, image_url: null }];', 'const next = normalizePages(p.pages);')
+          s = s.replace('const next = p.pages || [{ page_number: 1, image_url: null }];', 'const next = normalizePages(p.pages);')
+          # Live/commit payloads carry stable identity alongside page position.
+          s = s.replace('page_number: pageNumber, final }', 'page_number: pageNumber, page_id: slidesRef.current[pageNumber - 1]?.page_id, final }')
+          s = s.replace('const packet = { type: "whiteboard_commit", stroke, page_number: pageNumber };', 'const packet = { type: "whiteboard_commit", stroke, page_number: pageNumber, page_id: slidesRef.current[pageNumber - 1]?.page_id };')
+          s = s.replace('page_number: slideRef.current }; participant.publishData', 'page_number: slideRef.current, page_id: slidesRef.current[slideRef.current - 1]?.page_id }; participant.publishData')
+          s = s.replace('payload: { kind: "stroke", stroke: d, page_number: pageNumber }', 'payload: { kind: "stroke", stroke: d, page_number: pageNumber, page_id: slidesRef.current[pageNumber - 1]?.page_id }')
+          p.write_text(s)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend frontend
+          git commit -m "feat: add stable classroom page identity and append PDFs [page-model-applied]"
+          git push origin "$BRANCH"
+      - name: Remove one-time workflow
+        if: success()
+        run: |
+          git rm .github/workflows/apply-page-model.yml
+          git commit -m "chore: remove one-time page model workflow [page-model-applied]"
+          git push origin "$BRANCH"
