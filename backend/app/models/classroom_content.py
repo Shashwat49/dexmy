@@ -18,7 +18,7 @@ class WhiteboardSnapshot(Base):
     snapshot_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
     image_url: Mapped[str | None] = mapped_column(String)
     page_number: Mapped[int] = mapped_column(Integer, default=1)
-    page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("classroom_pages.id", ondelete="CASCADE"), nullable=True, index=True)
+    page_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("classroom_pages.id", ondelete="CASCADE"), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
