@@ -11,6 +11,7 @@ const navItems = [
     { path: "/dashboard/student", label: "My classes", icon: <CalendarIcon /> },
     { path: "/dashboard/student/book", label: "Book a class", icon: <UsersIcon /> },
     { path: "/dashboard/student/notes", label: "My notes", icon: <BookIcon /> },
+    { path: "/tests", label: "Tests & Assessments", icon: <BookIcon /> },
   ]},
   { label: "Account", items: [{ path: "/dashboard/student/account", label: "My account", icon: <GearIcon /> }] },
 ];
