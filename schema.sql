@@ -194,11 +194,56 @@ CREATE INDEX idx_permission_events_session ON permission_events(session_id);
 -- ---------- WHITEBOARD ----------
 -- Periodic snapshots (for crash recovery / late-join sync) — the final
 -- snapshot at session end is what gets compiled into the notes PDF.
+CREATE TABLE classroom_pages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    page_type VARCHAR(20) NOT NULL DEFAULT 'whiteboard',
+    image_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session_id, position)
+);
+CREATE INDEX idx_classroom_pages_session ON classroom_pages(session_id);
+
+CREATE TABLE classroom_pages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    page_type VARCHAR(20) NOT NULL DEFAULT 'whiteboard',
+    image_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session_id, position)
+);
+CREATE INDEX idx_classroom_pages_session ON classroom_pages(session_id);
+
+CREATE TABLE classroom_pages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    page_type VARCHAR(20) NOT NULL DEFAULT 'whiteboard',
+    image_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session_id, position)
+);
+CREATE INDEX idx_classroom_pages_session ON classroom_pages(session_id);
+
+CREATE TABLE classroom_pages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    page_type VARCHAR(20) NOT NULL DEFAULT 'whiteboard',
+    image_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session_id, position)
+);
+CREATE INDEX idx_classroom_pages_session ON classroom_pages(session_id);
+
 CREATE TABLE whiteboard_snapshots (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id      UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,
     snapshot_data   JSONB NOT NULL, -- Fabric.js canvas JSON
     page_number     INTEGER NOT NULL DEFAULT 1,
+    page_id         UUID REFERENCES classroom_pages(id) ON DELETE CASCADE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
