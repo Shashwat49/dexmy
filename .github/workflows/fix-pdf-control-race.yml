@@ -1,0 +1,25 @@
+name: Fix PDF control race
+on:
+  push:
+    branches: [feature/classroom-page-ids-v2]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/src/pages/Classroom.jsx'); s=p.read_text()
+          old='''        if (msg.type === "pdf_pages_ready") {\n          const p = normalizePages(msg.pages);'''
+          new='''        if (msg.type === "pdf_pages_ready") {\n          if (slideControlActiveRef.current) return;\n          const p = normalizePages(msg.pages);'''
+          assert old in s
+          p.write_text(s.replace(old,new))
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add frontend/src/pages/Classroom.jsx
+          git commit -m 'fix: prevent PDF websocket event from overriding teacher control' || true
+          git push origin feature/classroom-page-ids-v2
