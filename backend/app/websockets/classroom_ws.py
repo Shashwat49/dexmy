@@ -13,7 +13,7 @@ from app.core.security import decode_access_token
 from app.db.session import SessionLocal
 from app.models.booking import Booking
 from app.models.classroom import ClassSession, PermissionEvent, PermissionType, SessionStatus
-from app.models.classroom_content import WhiteboardSnapshot
+from app.models.classroom_content import ClassroomPage, WhiteboardSnapshot
 from app.models.user import User
 from app.services.session_lifecycle import end_class_session
 from app.services.storage_service import save_base64_file, get_presigned_url
@@ -119,29 +119,17 @@ def _restore_student_permissions(session_id: uuid.UUID, student_id: uuid.UUID, d
 
 
 async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, db) -> None:
-    snapshots = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id).order_by(WhiteboardSnapshot.page_number.asc(), WhiteboardSnapshot.created_at.desc()).all()
-    latest_by_page = {}
-    for snapshot in snapshots:
-        latest_by_page.setdefault(snapshot.page_number, snapshot)
-    if not latest_by_page:
-        return
-    pages = [
-        {
-            "page_number": n,
-            "image_url": get_presigned_url(s.image_url, expires_in=3600) if s.image_url else None,
-            "strokes": (s.snapshot_data or {}).get("strokes", []),
-        }
-        for n, s in sorted(latest_by_page.items())
-    ]
-    current_page = max(latest_by_page)
-    snapshot = latest_by_page[current_page]
-    await websocket.send_json({
-        "type": "whiteboard_state",
-        "page_number": current_page,
-        "canvas_json": snapshot.snapshot_data or {},
-        "image_url": get_presigned_url(snapshot.image_url, expires_in=3600) if snapshot.image_url else None,
-        "pages": pages,
-    })
+    pages_db = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()
+    if not pages_db:
+        page = ClassroomPage(session_id=session_id, position=1, page_type="whiteboard")
+        db.add(page); db.commit(); db.refresh(page); pages_db=[page]
+    pages=[]
+    for position,page in enumerate(pages_db,1):
+        snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
+        key=snap.image_url if snap and snap.image_url else page.image_url
+        pages.append({"page_id":str(page.id),"page_number":position,"page_type":page.page_type,"image_url":get_presigned_url(key,expires_in=3600) if key else None,"strokes":(snap.snapshot_data or {}).get("strokes",[]) if snap else []})
+    cur=pages[-1]
+    await websocket.send_json({"type":"whiteboard_state","page_number":cur["page_number"],"page_id":cur["page_id"],"canvas_json":{"strokes":cur["strokes"]},"image_url":cur["image_url"],"pages":pages})
 
 
 @router.websocket("/ws/classroom/{session_id}")
@@ -315,14 +303,20 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
             return
-        page_number = max(1, int(data.get("page_number", 1)))
-        existing = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id, WhiteboardSnapshot.page_number == page_number).order_by(desc(WhiteboardSnapshot.created_at)).first()
-        image_url = existing.image_url if existing else None
-        if data.get("image_base64"):
-            image_url = save_base64_file(data["image_base64"], f"wb_{session_id}_p{page_number}", "png")
-        db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data=data.get("canvas_json") or {}, image_url=image_url, page_number=page_number))
+        page_number=max(1,int(data.get("page_number",1)))
+        try: page_id=uuid.UUID(str(data.get("page_id"))) if data.get("page_id") else None
+        except (ValueError,TypeError): page_id=None
+        page=db.get(ClassroomPage,page_id) if page_id else None
+        if page is None or page.session_id != session_id: page=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id,ClassroomPage.position==page_number).first()
+        if page is None:
+            page=ClassroomPage(session_id=session_id,position=page_number,page_type="whiteboard"); db.add(page); db.flush()
+        existing=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
+        image_url=existing.image_url if existing else page.image_url
+        if data.get("image_base64"): image_url=save_base64_file(data["image_base64"],f"wb_{session_id}_p{page.id}","png")
+        page.image_url=image_url
+        db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=data.get("canvas_json") or {},image_url=image_url,page_number=page_number,page_id=page.id))
         db.commit()
-        await websocket.send_json({"type": "snapshot_saved", "page_number": page_number})
+        await websocket.send_json({"type":"snapshot_saved","page_number":page_number,"page_id":str(page.id)})
     elif msg_type == "remove_pdf" and is_teacher:
         snapshots = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id).all()
         for snapshot in snapshots:

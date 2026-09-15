@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.booking import Booking, BookingStatus
 from app.models.classroom import ClassSession, SessionStatus
-from app.models.classroom_content import ClassNotes, WhiteboardSnapshot
+from app.models.classroom_content import ClassNotes, WhiteboardSnapshot, ClassroomPage
 from app.services.notes_service import compile_notes_pdf
 from app.services.storage_service import download_bytes, save_bytes_file
 
@@ -24,20 +24,15 @@ def _generate_notes(session_id: uuid.UUID) -> None:
         if db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first():
             return
 
-        image_keys = []
+        image_keys=[]
         for _ in range(5):
-            snapshots = (
-                db.query(WhiteboardSnapshot)
-                .filter(WhiteboardSnapshot.session_id == session_id)
-                .order_by(WhiteboardSnapshot.page_number, WhiteboardSnapshot.created_at.desc())
-                .all()
-            )
-            latest_by_page = {}
-            for snap in snapshots:
-                latest_by_page.setdefault(snap.page_number, snap)
-            image_keys = [latest_by_page[p].image_url for p in sorted(latest_by_page) if latest_by_page[p].image_url]
-            if image_keys:
-                break
+            pages=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id).order_by(ClassroomPage.position.asc()).all()
+            image_keys=[]
+            for page in pages:
+                snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(WhiteboardSnapshot.created_at.desc()).first()
+                key=snap.image_url if snap and snap.image_url else page.image_url
+                if key: image_keys.append(key)
+            if image_keys: break
             time.sleep(0.5)
 
         if not image_keys:
