@@ -1,0 +1,29 @@
+name: Apply classroom page identity model
+on:
+  push:
+    branches: [feature/classroom-page-ids-v2]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply page model changes
+        env:
+          BRANCH: feature/classroom-page-ids-v2
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import uuid
+          def edit(path, fn):
+              p=Path(path); s=p.read_text(); n=fn(s); assert n!=s, f'No change made to {path}'; p.write_text(n)
+          edit('backend/app/models/classroom_content.py', lambda s: s.replace('from sqlalchemy import DateTime, ForeignKey, Integer, String, func','from sqlalchemy import DateTime, ForeignKey, Integer, String, func, UniqueConstraint').replace('    page_number: Mapped[int] = mapped_column(Integer, default=1)\n','    page_number: Mapped[int] = mapped_column(Integer, default=1)\n    page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("classroom_pages.id", ondelete="CASCADE"), nullable=True, index=True)\n').replace('\n\nclass ClassNotes(Base):','''\n\nclass ClassroomPage(Base):\n    __tablename__ = "classroom_pages"\n    __table_args__ = (UniqueConstraint("session_id", "position", name="uq_classroom_page_position"),)\n    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)\n    session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("class_sessions.id", ondelete="CASCADE"), index=True)\n    position: Mapped[int] = mapped_column(Integer, nullable=False)\n    page_type: Mapped[str] = mapped_column(String(20), nullable=False, default="whiteboard")\n    image_url: Mapped[str | None] = mapped_column(String)\n    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())\n\n\nclass ClassNotes(Base):'''))
+          edit('schema.sql', lambda s: s.replace('CREATE TABLE whiteboard_snapshots (','''CREATE TABLE classroom_pages (\n    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    session_id UUID NOT NULL REFERENCES class_sessions(id) ON DELETE CASCADE,\n    position INTEGER NOT NULL,\n    page_type VARCHAR(20) NOT NULL DEFAULT 'whiteboard',\n    image_url TEXT,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),\n    UNIQUE (session_id, position)\n);\nCREATE INDEX idx_classroom_pages_session ON classroom_pages(session_id);\n\nCREATE TABLE whiteboard_snapshots (''').replace('    page_number     INTEGER NOT NULL DEFAULT 1,\n    created_at','    page_number     INTEGER NOT NULL DEFAULT 1,\n    page_id         UUID REFERENCES classroom_pages(id) ON DELETE CASCADE,\n    created_at'))
+          Path('backend/alembic/versions/20260915_classroom_page_identity.py').write_text('''"""Add stable classroom page identities and ordering.\nRevision ID: 20260915_classroom_page_identity\nRevises: 20260909_student_account_details\n"""\nfrom alembic import op\nimport sqlalchemy as sa\nfrom sqlalchemy.dialects import postgresql\nrevision = "20260915_classroom_page_identity"\ndown_revision = "20260909_student_account_details"\nbranch_labels = None\ndepends_on = None\ndef upgrade():\n    op.create_table("classroom_pages", sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True), sa.Column("session_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("class_sessions.id", ondelete="CASCADE"), nullable=False), sa.Column("position", sa.Integer(), nullable=False), sa.Column("page_type", sa.String(length=20), nullable=False, server_default="whiteboard"), sa.Column("image_url", sa.String(), nullable=True), sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()), sa.UniqueConstraint("session_id", "position", name="uq_classroom_page_position"))\n    op.create_index("idx_classroom_pages_session", "classroom_pages", ["session_id"])\n    op.add_column("whiteboard_snapshots", sa.Column("page_id", postgresql.UUID(as_uuid=True), nullable=True))\n    op.create_foreign_key("fk_whiteboard_snapshot_page", "whiteboard_snapshots", "classroom_pages", ["page_id"], ["id"], ondelete="CASCADE")\n    conn=op.get_bind()\n    rows=conn.execute(sa.text("SELECT DISTINCT session_id,page_number FROM whiteboard_snapshots ORDER BY session_id,page_number")).mappings().all()\n    for row in rows:\n        pid=uuid.uuid4()\n        latest=conn.execute(sa.text("SELECT image_url FROM whiteboard_snapshots WHERE session_id=:s AND page_number=:p ORDER BY created_at DESC LIMIT 1"), {"s":row["session_id"],"p":row["page_number"]}).scalar()\n        conn.execute(sa.text("INSERT INTO classroom_pages(id,session_id,position,page_type,image_url) VALUES(:id,:s,:p,:t,:u)"), {"id":pid,"s":row["session_id"],"p":row["page_number"],"t":"pdf" if latest else "whiteboard","u":latest})\n        conn.execute(sa.text("UPDATE whiteboard_snapshots SET page_id=:id WHERE session_id=:s AND page_number=:p"), {"id":pid,"s":row["session_id"],"p":row["page_number"]})\n    op.alter_column("whiteboard_snapshots","page_id",nullable=False)\ndef downgrade():\n    op.drop_constraint("fk_whiteboard_snapshot_page","whiteboard_snapshots",type_="foreignkey")\n    op.drop_column("whiteboard_snapshots","page_id")\n    op.drop_index("idx_classroom_pages_session",table_name="classroom_pages")\n    op.drop_table("classroom_pages")\n''')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend frontend schema.sql
+          git commit -m "feat: add stable classroom page identities and PDF insertion" || true
+          git push origin "$BRANCH"
