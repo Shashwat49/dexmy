@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
 from sqlalchemy import desc, func
+from sqlalchemy.exc import IntegrityError
 from livekit import api
 
 from app.core.config import settings
@@ -122,7 +123,18 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
     pages_db = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()
     if not pages_db:
         page = ClassroomPage(session_id=session_id, position=1, page_type="whiteboard")
-        db.add(page); db.commit(); db.refresh(page); pages_db=[page]
+        db.add(page)
+        try:
+            db.commit()
+            db.refresh(page)
+            pages_db = [page]
+        except IntegrityError:
+            # Teacher and student can initialize the same classroom concurrently.
+            # Recover the page created by the other connection instead of dropping the socket.
+            db.rollback()
+            pages_db = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()
+            if not pages_db:
+                return
     pages=[]
     for position,page in enumerate(pages_db,1):
         snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
