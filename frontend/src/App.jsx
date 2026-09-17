@@ -4,6 +4,7 @@ import Landing from "./pages/Landing";
 import ProgramPage from "./pages/ProgramPage";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import PortalLogin from "./pages/PortalLogin";
 import Privacy from "./pages/Privacy";
 import Terms from "./pages/Terms";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -96,8 +97,15 @@ export default function App() {
         <Route path="/gcse-tutoring" element={<ProgramPage slug="gcse" />} />
         <Route path="/cbse-tutoring" element={<ProgramPage slug="cbse" />} />
         <Route path="/icse-tutoring" element={<ProgramPage slug="icse" />} />
+
+        {/* Normal user authentication */}
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+
+        {/* Separate restricted authentication portals for internal roles */}
+        <Route path="/admin/signin" element={<PortalLogin portal="admin" />} />
+        <Route path="/test-creator/signin" element={<PortalLogin portal="testCreator" />} />
+
         <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
         <Route path="/classroom/:sessionId" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
         <Route path="/classroom" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
