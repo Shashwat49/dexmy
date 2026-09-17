@@ -27,7 +27,7 @@ export default function DashboardLayout({ navItems = [], children }) {
   const isAdmin = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"].includes(user?.role);
   const isShopper = user?.role === "student" || user?.role === "parent";
   const effectiveNav = isAdmin ? ADMIN_NAV : navItems.map((section) => ({ ...section, items: [...section.items] }));
-  if (isShopper && !effectiveNav.some((section) => section.label === "Explore Packages")) effectiveNav.push({ label: "Explore Packages", items: [{ path: "/packages", label: "Packages", icon: "records" }] });
+  if (isShopper && !effectiveNav.some((section) => section.label === "Explore Packages")) effectiveNav.push({ label: "Explore Packages", items: [{ path: user?.role === "student" ? "/dashboard/student/packages" : "/packages", label: "Packages", icon: "records" }] });
   const initials = user?.full_name ? user.full_name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase() : "?";
 
   const nav = () => <>
