@@ -6,12 +6,12 @@ import { CalendarIcon, UsersIcon, BookIcon, GearIcon } from "../../components/da
 import * as bookingsApi from "../../api/bookings";
 import { getMyClassRecords } from "../../api/classRecords";
 
-const navItems = [
+export const navItems = [
   { label: "Learn", items: [
     { path: "/dashboard/student", label: "My classes", icon: <CalendarIcon /> },
     { path: "/dashboard/student/book", label: "Book a class", icon: <UsersIcon /> },
     { path: "/dashboard/student/notes", label: "My notes", icon: <BookIcon /> },
-    { path: "/tests", label: "Tests & Assessments", icon: <BookIcon /> },
+    { path: "/dashboard/student/tests", label: "Tests & Assessments", icon: <BookIcon /> },
   ]},
   { label: "Account", items: [{ path: "/dashboard/student/account", label: "My account", icon: <GearIcon /> }] },
 ];
