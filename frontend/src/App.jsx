@@ -74,6 +74,10 @@ function StudentDashboardPage({ children }) {
   return <ProtectedRoute roles={["student"]}><DashboardLayout navItems={studentNavItems}>{children}</DashboardLayout></ProtectedRoute>;
 }
 
+function ParentDashboardPage({ children }) {
+  return <ProtectedRoute roles={["parent"]}><DashboardLayout navItems={[]}>{children}</DashboardLayout></ProtectedRoute>;
+}
+
 export default function App() {
   return (
     <Suspense fallback={<PageLoading />}>
@@ -108,6 +112,7 @@ export default function App() {
         <Route path="/dashboard/student/account" element={<ProtectedRoute roles={["student"]}><MyAccount /></ProtectedRoute>} />
         <Route path="/dashboard/student/packages" element={<StudentDashboardPage><Packages /></StudentDashboardPage>} />
         <Route path="/dashboard/parent" element={<ProtectedRoute roles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/parent/packages" element={<ParentDashboardPage><Packages /></ParentDashboardPage>} />
         <Route path="/dashboard/parent/courses/:courseId" element={<ProtectedRoute roles={["parent"]}><CourseDetails /></ProtectedRoute>} />
         <Route path="/dashboard/admin" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminDashboard /></ProtectedRoute>} />
         <Route path="/dashboard/admin/students" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminStudents /></ProtectedRoute>} />
