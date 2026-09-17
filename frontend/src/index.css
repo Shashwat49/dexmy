@@ -183,3 +183,74 @@ table {
 .bg-white {
   background-color: #F2ECDD !important;
 }
+
+/* ---- Dexmy Test-taking theme ----
+   StudentTests.jsx has its own assessment UI and intentionally uses
+   hard-coded white surfaces. Scope these overrides to that distinctive
+   full-screen assessment root so the rest of the application is unchanged.
+*/
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] {
+  background-color: #0F1D17 !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] > header {
+  background-color: #152922 !important;
+  border-color: rgba(242, 236, 221, 0.12) !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] > header [class~="text-[#111827]"] {
+  color: #F2ECDD !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] > main {
+  background-color: #0F1D17 !important;
+  color: #F2ECDD !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] > main > aside,
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] > main > section {
+  background-color: #152922 !important;
+  border-color: rgba(242, 236, 221, 0.12) !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] > main > section {
+  background-color: #0F1D17 !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] > main > section > div[class~="shrink-0"] {
+  border-color: rgba(242, 236, 221, 0.12) !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] [class~="text-[#111827]"] {
+  color: #F2ECDD !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] [class~="text-[#374151]"] {
+  color: #D7DED9 !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] [class~="text-[#6b7280]"] {
+  color: #9BAFA0 !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] [class~="bg-white"] {
+  background-color: #152922 !important;
+  border-color: rgba(242, 236, 221, 0.14) !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] [class~="bg-[#f9fafb]"] {
+  background-color: #1B3229 !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] [class~="border-[#e5e7eb]"] {
+  border-color: rgba(242, 236, 221, 0.14) !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] [class~="bg-[#f3f4f6]"] {
+  background-color: #223B31 !important;
+}
+
+#root div[class~="h-screen"][class~="bg-white"][class~="flex"][class~="flex-col"][class~="overflow-hidden"] [class~="bg-[#eef0f3]"] {
+  background-color: #223B31 !important;
+}
