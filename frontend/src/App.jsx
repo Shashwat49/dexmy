@@ -10,10 +10,11 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardRedirect from "./pages/dashboard/DashboardRedirect";
 import TeacherProfileGuard from "./components/TeacherProfileGuard";
 import TeacherDashboard from "./pages/dashboard/TeacherDashboard";
-import StudentDashboard from "./pages/dashboard/StudentDashboard";
+import StudentDashboard, { navItems as studentNavItems } from "./pages/dashboard/StudentDashboard";
 import ParentDashboard from "./pages/dashboard/ParentDashboard";
 import AdminDashboard from "./pages/dashboard/AdminDashboard";
 import TeacherDashboardLayout from "./components/TeacherDashboardLayout";
+import DashboardLayout from "./components/dashboard/DashboardLayout";
 
 // Keep heavy/rarely-used dashboard pages out of the initial JavaScript bundle.
 // This is especially important for Classroom, which pulls in LiveKit/Three.js.
@@ -69,6 +70,10 @@ function PageLoading() {
   );
 }
 
+function StudentDashboardPage({ children }) {
+  return <ProtectedRoute roles={["student"]}><DashboardLayout navItems={studentNavItems}>{children}</DashboardLayout></ProtectedRoute>;
+}
+
 export default function App() {
   return (
     <Suspense fallback={<PageLoading />}>
@@ -101,6 +106,7 @@ export default function App() {
         <Route path="/dashboard/student/book" element={<ProtectedRoute roles={["student"]}><BookClass /></ProtectedRoute>} />
         <Route path="/dashboard/student/notes" element={<ProtectedRoute roles={["student"]}><MyNotes /></ProtectedRoute>} />
         <Route path="/dashboard/student/account" element={<ProtectedRoute roles={["student"]}><MyAccount /></ProtectedRoute>} />
+        <Route path="/dashboard/student/packages" element={<StudentDashboardPage><Packages /></StudentDashboardPage>} />
         <Route path="/dashboard/parent" element={<ProtectedRoute roles={["parent"]}><ParentDashboard /></ProtectedRoute>} />
         <Route path="/dashboard/parent/courses/:courseId" element={<ProtectedRoute roles={["parent"]}><CourseDetails /></ProtectedRoute>} />
         <Route path="/dashboard/admin" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminDashboard /></ProtectedRoute>} />
@@ -133,7 +139,7 @@ export default function App() {
 
         {/* Task 3: Student Tests Routes */}
         <Route path="/tests" element={<ProtectedRoute><StudentTests /></ProtectedRoute>} />
-        <Route path="/dashboard/student/tests" element={<ProtectedRoute><StudentTests /></ProtectedRoute>} />
+        <Route path="/dashboard/student/tests" element={<StudentDashboardPage><StudentTests /></StudentDashboardPage>} />
       </Routes>
     </Suspense>
   );
