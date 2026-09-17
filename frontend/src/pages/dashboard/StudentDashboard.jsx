@@ -54,8 +54,8 @@ export default function StudentDashboard() {
   const nextClass = upcoming[0];
   const pkg = classData.package;
   const studentEmail = String(classData.student_email || "").toLowerCase();
-  const isSubjectBalanceStudent = ["ayansh.abhilash@gmail.com", "wargod3508@gmail.com", "cgirish34@gmail.com"].includes(studentEmail);
-  const subjectClassLimit = studentEmail === "cgirish34@gmail.com" ? 25 : 50;
+  const isSubjectBalanceStudent = ["ayansh.abhilash@gmail.com", "wargod3508@gmail.com", "sskUsagm@gmail.com"].includes(studentEmail);
+  const subjectClassLimit = studentEmail === "sskUsagm@gmail.com" ? 25 : 50;
   const completedSubjectClasses = (subject) => classData.classes.filter((r) => String(r.subject || "").trim().toLowerCase() === subject && r.status === "completed").length;
   const englishCompleted = completedSubjectClasses("english");
   const mathematicsCompleted = completedSubjectClasses("mathematics");
