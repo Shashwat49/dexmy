@@ -8,6 +8,24 @@ const ADMIN_NAV = [
   { label: "Administration", items: [{ path: "/dashboard/admin/audit-logs", label: "Audit Logs" }, { path: "/dashboard/admin/users", label: "Admin Users" }] },
 ];
 
+// Canonical student navigation. Keeping this in the shared layout means every
+// student dashboard page always gets the same sidebar options. Add future
+// student tabs here once and they will appear on every student dashboard page.
+const STUDENT_NAV = [
+  { label: "Learn", items: [
+    { path: "/dashboard/student", label: "My classes", icon: "calendar" },
+    { path: "/dashboard/student/book", label: "Book a class", icon: "calendar" },
+    { path: "/dashboard/student/notes", label: "My notes", icon: "records" },
+    { path: "/dashboard/student/tests", label: "Tests & Assessments", icon: "records" },
+  ] },
+  { label: "Account", items: [
+    { path: "/dashboard/student/account", label: "My account", icon: "profile" },
+  ] },
+  { label: "Explore Packages", items: [
+    { path: "/dashboard/student/packages", label: "Packages", icon: "records" },
+  ] },
+];
+
 function NavIcon({ type }) {
   const common = { width: 17, height: 17, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
   if (type === "calendar") return <svg {...common}><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M16 2v4M8 2v4M3 9h18"/><path d="M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01"/></svg>;
@@ -25,9 +43,8 @@ export default function DashboardLayout({ navItems = [], children }) {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"].includes(user?.role);
-  const isShopper = user?.role === "student" || user?.role === "parent";
-  const effectiveNav = isAdmin ? ADMIN_NAV : navItems.map((section) => ({ ...section, items: [...section.items] }));
-  if (isShopper && !effectiveNav.some((section) => section.label === "Explore Packages")) effectiveNav.push({ label: "Explore Packages", items: [{ path: user?.role === "student" ? "/dashboard/student/packages" : "/dashboard/parent/packages", label: "Packages", icon: "records" }] });
+  const isStudent = user?.role === "student";
+  const effectiveNav = isAdmin ? ADMIN_NAV : isStudent ? STUDENT_NAV : navItems.map((section) => ({ ...section, items: [...section.items] }));
   const initials = user?.full_name ? user.full_name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase() : "?";
 
   const nav = () => <>
