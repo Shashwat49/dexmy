@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../../components/dashboard/DashboardLayout";
 import { getMyStudentProfile, updateMyStudentProfile } from "../../api/students";
-import { CalendarIcon, GearIcon } from "../../components/dashboard/icons";
+import { CalendarIcon, GearIcon, BookIcon } from "../../components/dashboard/icons";
 
 const NAV = [
   { label: "Learn", items: [
     { path: "/dashboard/student", label: "My classes", icon: <CalendarIcon /> },
     { path: "/dashboard/student/book", label: "Book a class", icon: <CalendarIcon /> },
     { path: "/dashboard/student/notes", label: "My notes", icon: <CalendarIcon /> },
+    { path: "/dashboard/student/tests", label: "Tests & Assessments", icon: <BookIcon /> },
   ] },
   { label: "Account", items: [{ path: "/dashboard/student/account", label: "My account", icon: <GearIcon /> }] },
 ];
