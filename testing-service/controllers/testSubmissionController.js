@@ -65,9 +65,38 @@ export const submitTest = async (req, res) => {
       const selectedAnswer = submittedAnswer && submittedAnswer.selectedAnswer !== null && submittedAnswer.selectedAnswer !== undefined
           ? Number(submittedAnswer.selectedAnswer) : null;
 
+      // Keep the full question context in the result payload so the result page
+      // can render the actual question, options, and correct answer. Previously
+      // only questionId was returned, which caused "Question not available".
+      let questionOptions = question.options;
+      if (typeof questionOptions === "string") {
+        try {
+          questionOptions = JSON.parse(questionOptions);
+        } catch {
+          questionOptions = [];
+        }
+      }
+      if (!Array.isArray(questionOptions)) questionOptions = [];
+
+      const questionDetails = {
+        id: question.id || question._id,
+        _id: question._id || question.id,
+        questionText: question.question_text || question.questionText || question.question || "",
+        question: question.question_text || question.questionText || question.question || "",
+        options: questionOptions,
+        correctAnswer: Number(question.correct_answer ?? question.correctAnswer ?? 0),
+        media: question.question_image || question.questionImage || null,
+      };
+
       if (selectedAnswer === null || Number.isNaN(selectedAnswer)) {
         notAnswered++;
-        processedAnswers.push({ questionId: qId, selectedAnswer: null, isCorrect: false, marksObtained: 0 });
+        processedAnswers.push({
+          questionId: qId,
+          selectedAnswer: null,
+          isCorrect: false,
+          marksObtained: 0,
+          question: questionDetails,
+        });
         continue;
       }
 
@@ -78,12 +107,24 @@ export const submitTest = async (req, res) => {
         correct++;
         const marks = Number(question.marks ?? test.marks_per_question ?? 1);
         obtainedMarks += marks;
-        processedAnswers.push({ questionId: qId, selectedAnswer, isCorrect: true, marksObtained: marks });
+        processedAnswers.push({
+          questionId: qId,
+          selectedAnswer,
+          isCorrect: true,
+          marksObtained: marks,
+          question: questionDetails,
+        });
       } else {
         incorrect++;
         const negativeMarks = Number(question.negative_marks ?? test.negative_marks ?? 0);
         obtainedMarks -= negativeMarks;
-        processedAnswers.push({ questionId: qId, selectedAnswer, isCorrect: false, marksObtained: -negativeMarks });
+        processedAnswers.push({
+          questionId: qId,
+          selectedAnswer,
+          isCorrect: false,
+          marksObtained: -negativeMarks,
+          question: questionDetails,
+        });
       }
     }
 
