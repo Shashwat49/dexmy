@@ -56,8 +56,7 @@ def test_assign_unqualified_teacher_fails(client, seed_data, auth_headers, db_se
         scheduled_at=slot_time,
         status="confirmed",
         teacher_assignment_status="pending",
-        duration_minutes=55,
-        booking_ends_at=slot_time + timedelta(minutes=55)
+        duration_minutes=55
     )
     db_session.add(booking)
     db_session.commit()
