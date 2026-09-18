@@ -1,7 +1,6 @@
 import enum
 import uuid
 from datetime import datetime
-
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -50,9 +49,20 @@ class Booking(Base):
         UUID(as_uuid=True), ForeignKey("student_packages.id", ondelete="RESTRICT"), index=True, nullable=True
     )
 
-    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    scheduled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
 
     duration_minutes: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
+
+    booking_ends_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+)
+
+    status: Mapped[BookingStatus] = mapped_column(
+        Enum(BookingStatus, name="booking_status"), default=BookingStatus.pending, nullable=False
+)
+
+
 
     status: Mapped[BookingStatus] = mapped_column(
         Enum(BookingStatus, name="booking_status"), default=BookingStatus.pending, nullable=False

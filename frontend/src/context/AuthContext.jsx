@@ -10,17 +10,7 @@ import * as authApi from "../api/auth";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    const stored = localStorage.getItem("dexmy_user");
-
-    try {
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      localStorage.removeItem("dexmy_user");
-      return null;
-    }
-  });
-
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // ----------------------------------------------------------
@@ -28,48 +18,32 @@ export function AuthProvider({ children }) {
   // ----------------------------------------------------------
 
   useEffect(() => {
+    let cancelled = false;
+
     async function restoreSession() {
-      const token = localStorage.getItem("dexmy_token");
-
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
       try {
         const currentUser = await authApi.getMe();
 
-        setUser(currentUser);
-        localStorage.setItem(
-          "dexmy_user",
-          JSON.stringify(currentUser)
-        );
+        if (!cancelled) {
+          setUser(currentUser);
+        }
       } catch {
-        localStorage.removeItem("dexmy_token");
-        localStorage.removeItem("dexmy_user");
-        setUser(null);
+        if (!cancelled) {
+          setUser(null);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     restoreSession();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  // ----------------------------------------------------------
-  // Keep local user copy synchronized
-  // ----------------------------------------------------------
-
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem(
-        "dexmy_user",
-        JSON.stringify(user)
-      );
-    } else {
-      localStorage.removeItem("dexmy_user");
-    }
-  }, [user]);
 
   // ----------------------------------------------------------
   // Login
@@ -79,19 +53,15 @@ export function AuthProvider({ children }) {
     setLoading(true);
 
     try {
-      const data = await authApi.login({
+      // Backend sets HttpOnly access/refresh cookies.
+      const currentUser = await authApi.login({
         email,
         password,
       });
 
-      localStorage.setItem(
-        "dexmy_token",
-        data.access_token
-      );
+      setUser(currentUser);
 
-      setUser(data.user);
-
-      return data.user;
+      return currentUser;
     } finally {
       setLoading(false);
     }
@@ -105,16 +75,12 @@ export function AuthProvider({ children }) {
     setLoading(true);
 
     try {
-      const data = await authApi.signup(payload);
+      // Backend sets HttpOnly access/refresh cookies.
+      const currentUser = await authApi.signup(payload);
 
-      localStorage.setItem(
-        "dexmy_token",
-        data.access_token
-      );
+      setUser(currentUser);
 
-      setUser(data.user);
-
-      return data.user;
+      return currentUser;
     } finally {
       setLoading(false);
     }
@@ -124,11 +90,15 @@ export function AuthProvider({ children }) {
   // Logout
   // ----------------------------------------------------------
 
-  function logout() {
-    localStorage.removeItem("dexmy_token");
-    localStorage.removeItem("dexmy_user");
-
-    setUser(null);
+  async function logout() {
+    try {
+      await authApi.logout();
+    } catch {
+      // Even if the server-side logout request fails,
+      // clear the frontend authentication state.
+    } finally {
+      setUser(null);
+    }
   }
 
   return (

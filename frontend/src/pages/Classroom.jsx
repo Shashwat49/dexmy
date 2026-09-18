@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Room, RoomEvent, Track } from "livekit-client";
 import api from "../api/client";
+import * as authApi from "../api/auth";
 import { useAuth } from "../context/AuthContext";
 import "./Classroom.css";
 
@@ -108,8 +109,7 @@ export default function Classroom() {
 
     const connectWebSocket = () => {
       if (disposedRef.current) return;
-      const token = localStorage.getItem("dexmy_token");
-      const nextSocket = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token || "")}`);
+      const nextSocket = new WebSocket(wsUrl);
       socket = nextSocket;
       wsRef.current = nextSocket;
 
@@ -220,11 +220,25 @@ export default function Classroom() {
         }
       };
 
-      nextSocket.onclose = (event) => {
+      nextSocket.onclose = async (event) => {
         if (disposedRef.current) return;
-        if (![4401, 4403, 4404, 4409].includes(event.code)) {
-          reconnectTimer = setTimeout(connectWebSocket, 2500);
+
+        if (event.code === 4401) {
+          try {
+            await authApi.refresh();
+            if (!disposedRef.current) {
+              reconnectTimer = setTimeout(connectWebSocket, 250);
+            }
+          } catch {
+            if (!disposedRef.current) {
+              setStatus("Your session has expired. Please log in again.");
+            }
+          }
+          return;
         }
+
+        if ([4403, 4404, 4409].includes(event.code)) return;
+        reconnectTimer = setTimeout(connectWebSocket, 2500);
       };
     };
 
