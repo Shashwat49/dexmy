@@ -22,7 +22,7 @@ class AdminStudentPackageRead(BaseModel):
 
 
 class AdminCreditAdjustment(BaseModel):
-    delta: int = Field(ne=0, ge=-1000, le=1000)
+    delta: int = Field(json_schema_extra={"ne": 0}, ge=-1000, le=1000)
     reason: str = Field(min_length=3, max_length=50)
 
 

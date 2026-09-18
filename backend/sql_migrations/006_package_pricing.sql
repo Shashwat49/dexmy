@@ -17,8 +17,19 @@ WHERE is_custom = false
 -- Custom packages use the same per-class rate as the 25-class package.
 -- class_count is set to 25 because the current package model requires a minimum
 -- of 25 classes; the custom flag identifies the plan as flexible in the UI.
-INSERT INTO package_plans (name, description, class_count, price, currency, is_custom, is_active)
-SELECT 'Customize Your Package',
+INSERT INTO package_plans (
+    id,
+    name,
+    description,
+    class_count,
+    price,
+    currency,
+    is_custom,
+    is_active
+)
+
+SELECT gen_random_uuid(),
+       'Customize Your Package',
        'Build a package around your required number of classes.',
        25,
        CASE WHEN v.currency = 'INR' THEN 2000.00 ELSE 20.00 END,

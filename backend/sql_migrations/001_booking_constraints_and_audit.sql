@@ -1,6 +1,11 @@
 -- 1. Create btree_gist extension (needed for EXCLUDE constraints on timestamp ranges)
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
+-- 1.1 Add teacher assignment status to bookings
+ALTER TABLE bookings
+ADD COLUMN IF NOT EXISTS teacher_assignment_status VARCHAR(20)
+NOT NULL DEFAULT 'pending';
+
 -- 2. Add idempotency_key to bookings
 ALTER TABLE bookings
 ADD COLUMN IF NOT EXISTS idempotency_key UUID;
@@ -39,39 +44,56 @@ END $$;
 
 -- 5. Fix duration_minutes default
 ALTER TABLE bookings ALTER COLUMN duration_minutes SET DEFAULT 55;
+-- 5.1 Materialize booking end time for immutable exclusion constraints
+ALTER TABLE bookings
+ADD COLUMN IF NOT EXISTS booking_ends_at TIMESTAMPTZ;
+
+UPDATE bookings
+SET booking_ends_at = scheduled_at
+    + (duration_minutes * INTERVAL '1 minute')
+WHERE booking_ends_at IS NULL;
+
+ALTER TABLE bookings
+ALTER COLUMN booking_ends_at SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS ix_bookings_booking_ends_at
+ON bookings (booking_ends_at);
 
 -- 6. Student Exclusion Constraint
-DO $$ 
+DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 
-        FROM pg_constraint 
+        SELECT 1
+        FROM pg_constraint
         WHERE conname = 'no_student_double_booking'
     ) THEN
         ALTER TABLE bookings
         ADD CONSTRAINT no_student_double_booking
         EXCLUDE USING GIST (
             student_id WITH =,
-            tstzrange(scheduled_at, scheduled_at + (duration_minutes * interval '1 minute')) WITH &&
+            tstzrange(scheduled_at, booking_ends_at) WITH &&
         )
         WHERE (status NOT IN ('cancelled', 'completed', 'no_show'));
     END IF;
 END $$;
 
 -- 7. Teacher Exclusion Constraint
-DO $$ 
+DO $$
 BEGIN
     IF NOT EXISTS (
-        SELECT 1 
-        FROM pg_constraint 
+        SELECT 1
+        FROM pg_constraint
         WHERE conname = 'no_teacher_double_booking'
     ) THEN
         ALTER TABLE bookings
         ADD CONSTRAINT no_teacher_double_booking
         EXCLUDE USING GIST (
             teacher_id WITH =,
-            tstzrange(scheduled_at, scheduled_at + (duration_minutes * interval '1 minute')) WITH &&
+            tstzrange(scheduled_at, booking_ends_at) WITH &&
         )
-        WHERE (teacher_id IS NOT NULL AND status NOT IN ('cancelled', 'completed', 'no_show'));
+        WHERE (
+            teacher_id IS NOT NULL
+            AND status NOT IN ('cancelled', 'completed', 'no_show')
+        );
     END IF;
 END $$;
