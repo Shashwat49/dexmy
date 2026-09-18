@@ -13,7 +13,7 @@ from app.models.teacher import Subject, TeacherProfile, TeacherSubject
 from app.models.user import User, UserRole
 from app.schemas.admin import AdminMeRead, AdminUserCreate, AdminUserRead, AdminUserUpdate, AuditLogRead
 from app.schemas.booking import PendingTeacherAssignmentRead, TeacherAssignmentRead, TeacherAssignmentRequest
-from app.schemas.user import UserRead
+from app.schemas.user import UserRead, UserRoleUpdate
 from app.services.audit_service import record_admin_action
 from app.services.booking_service import _ASSIGNMENT_LOCK, assign_teacher_atomic
 from app.services.scheduling_service import can_assign_teacher
@@ -274,6 +274,26 @@ def activate_user(
     return user
 
 
+@router.patch("/users/{user_id}/role", response_model=UserRead)
+def update_user_role(
+    user_id: uuid.UUID,
+    payload: UserRoleUpdate,
+    request: Request,
+    current_user: User = Depends(require_permission("student.update")),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    old_role = user.role
+    user.role = payload.role
+    record_admin_action(db, admin_user_id=current_user.id, action="user.update_role", resource_type="user", resource_id=user.id,
+                        old_values={"role": old_role.value}, new_values={"role": payload.role.value},
+                        ip_address=request.client.host if request.client else None, user_agent=request.headers.get("user-agent"))
+    db.commit(); db.refresh(user)
+    return user
+
+
 # ============================================================
 # TEACHER MANAGEMENT
 # ============================================================
@@ -308,11 +328,7 @@ def list_pending_teacher_assignments(
     rows = db.execute(
         select(Booking, User.full_name.label("student_name"), Subject.name.label("subject_name"))
         .join(User, User.id == Booking.student_id).join(Subject, Subject.id == Booking.subject_id)
-        .where(
-            Booking.status == BookingStatus.confirmed,
-            Booking.teacher_id.is_(None),
-            Booking.teacher_assignment_status != "discarded",
-        )
+        .where(Booking.status == BookingStatus.confirmed, Booking.teacher_id.is_(None))
         .order_by(Booking.scheduled_at.asc())
     ).all()
     return [PendingTeacherAssignmentRead(
@@ -392,57 +408,4 @@ def assign_teacher(
         subject_id=booking.subject_id, subject_name=subject.name if subject else "Unknown", teacher_id=booking.teacher_id,
         teacher_name=teacher.full_name if teacher else "Unknown", scheduled_at=booking.scheduled_at,
         duration_minutes=booking.duration_minutes, teacher_assignment_status=booking.teacher_assignment_status,
-    )
-
-
-# ============================================================
-# DISCARD TEACHER ASSIGNMENT REQUEST
-# ============================================================
-
-@router.post("/bookings/{booking_id}/discard-teacher-assignment", response_model=TeacherAssignmentRead)
-def discard_teacher_assignment(
-    booking_id: uuid.UUID,
-    request: Request,
-    current_user: User = Depends(require_permission("booking.assign_teacher")),
-    db: Session = Depends(get_db),
-):
-    booking = db.get(Booking, booking_id)
-    if booking is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-    if booking.teacher_id is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A teacher is already assigned to this booking.")
-    if booking.status != BookingStatus.confirmed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only confirmed bookings can have a teacher assignment request discarded.")
-    if booking.teacher_assignment_status == "discarded":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This teacher assignment request has already been discarded.")
-
-    old_status = booking.teacher_assignment_status
-    booking.teacher_assignment_status = "discarded"
-    record_admin_action(
-        db,
-        admin_user_id=current_user.id,
-        action="booking.discard_teacher_assignment",
-        resource_type="booking",
-        resource_id=booking.id,
-        old_values={"teacher_assignment_status": old_status, "teacher_id": None},
-        new_values={"teacher_assignment_status": "discarded", "teacher_id": None},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-    )
-    db.commit()
-    db.refresh(booking)
-
-    student = db.get(User, booking.student_id)
-    subject = db.get(Subject, booking.subject_id)
-    return TeacherAssignmentRead(
-        booking_id=booking.id,
-        student_id=booking.student_id,
-        student_name=student.full_name if student else "Unknown",
-        subject_id=booking.subject_id,
-        subject_name=subject.name if subject else "Unknown",
-        teacher_id=None,
-        teacher_name="Unassigned",
-        scheduled_at=booking.scheduled_at,
-        duration_minutes=booking.duration_minutes,
-        teacher_assignment_status=booking.teacher_assignment_status,
     )
