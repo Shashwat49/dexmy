@@ -15,7 +15,7 @@ from app.schemas.admin import AdminMeRead, AdminUserCreate, AdminUserRead, Admin
 from app.schemas.booking import PendingTeacherAssignmentRead, TeacherAssignmentRead, TeacherAssignmentRequest
 from app.schemas.user import UserRead, UserRoleUpdate
 from app.services.audit_service import record_admin_action
-from app.services.booking_service import _ASSIGNMENT_LOCK, assign_teacher_atomic
+from app.services.booking_service import assign_teacher_atomic
 from app.services.scheduling_service import can_assign_teacher
 
 router = APIRouter()
@@ -379,28 +379,18 @@ def assign_teacher(
     current_user: User = Depends(require_permission("booking.assign_teacher")),
     db: Session = Depends(get_db),
 ):
-    with _ASSIGNMENT_LOCK:
-        booking = db.get(Booking, booking_id)
-        if booking is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-        try:
-            booking = assign_teacher_atomic(db=db, booking=booking, teacher_id=payload.teacher_id, admin_id=current_user.id)
-        except ValueError as exc:
-            message = str(exc)
-            if (
-                "Teacher does not teach this subject" in message
-                or "Teacher profile not found" in message
-                or "Teacher is not verified" in message
-                or "Teacher is inactive" in message
-                or "Selected user is not a teacher" in message
-            ):
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=message)
+    booking = db.get(Booking, booking_id)
+    if booking is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
+    try:
+        booking = assign_teacher_atomic(db=db, booking=booking, teacher_id=payload.teacher_id, admin_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
 
-        record_admin_action(db, admin_user_id=current_user.id, action="booking.assign_teacher", resource_type="booking", resource_id=booking.id,
-                            new_values={"teacher_id": str(booking.teacher_id)},
-                            ip_address=request.client.host if request.client else None, user_agent=request.headers.get("user-agent"))
-        db.commit(); db.refresh(booking)
+    record_admin_action(db, admin_user_id=current_user.id, action="booking.assign_teacher", resource_type="booking", resource_id=booking.id,
+                        new_values={"teacher_id": str(booking.teacher_id)},
+                        ip_address=request.client.host if request.client else None, user_agent=request.headers.get("user-agent"))
+    db.commit(); db.refresh(booking)
 
     student = db.get(User, booking.student_id); teacher = db.get(User, booking.teacher_id); subject = db.get(Subject, booking.subject_id)
     return TeacherAssignmentRead(

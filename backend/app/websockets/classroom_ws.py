@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError
 from sqlalchemy import desc, func
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +16,6 @@ from app.models.booking import Booking
 from app.models.classroom import ClassSession, PermissionEvent, PermissionType, SessionStatus
 from app.models.classroom_content import ClassroomPage, WhiteboardSnapshot
 from app.models.user import User
-from app.models.session import UserSession
 from app.services.session_lifecycle import end_class_session
 from app.services.storage_service import save_base64_file, get_presigned_url
 from app.websockets.connection_manager import manager
@@ -34,46 +33,14 @@ async def _heartbeat(websocket: WebSocket) -> None:
         return
 
 
-def _authenticate(websocket: WebSocket, db) -> User | None:
-    token = websocket.cookies.get(settings.ACCESS_COOKIE_NAME)
-
-    if not token:
-        return None
-
+def _authenticate(token: str, db) -> User | None:
     try:
         payload = decode_access_token(token)
-
         user_id = uuid.UUID(payload["sub"])
-        session_id = uuid.UUID(payload["sid"])
     except (JWTError, KeyError, ValueError, TypeError):
         return None
-
-    session = (
-        db.query(UserSession)
-        .filter(
-            UserSession.id == session_id,
-            UserSession.user_id == user_id,
-            UserSession.revoked_at.is_(None),
-            UserSession.expires_at > datetime.now(timezone.utc),
-        )
-        .first()
-    )
-
-    if session is None:
-        return None
-
     return db.get(User, user_id)
 
-
-def _is_allowed_websocket_origin(websocket: WebSocket) -> bool:
-    origin = websocket.headers.get("origin")
-
-    if not origin:
-        return False
-
-
-
-    return origin in settings.ALLOWED_ORIGINS
 
 def _default_student_permissions() -> set[str]:
     return {"mic", "camera"}
@@ -178,16 +145,11 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
 
 
 @router.websocket("/ws/classroom/{session_id}")
-async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID):
+async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: str = Query(...)):
     db = SessionLocal()
     heartbeat_task = None
     try:
-
-        if not _is_allowed_websocket_origin(websocket):
-            await websocket.close(code=4403)
-            return
-
-        user = _authenticate(websocket, db)
+        user = _authenticate(token, db)
         if user is None:
             await websocket.close(code=4401)
             return

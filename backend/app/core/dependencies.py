@@ -1,18 +1,17 @@
 import uuid
-from datetime import datetime, timezone
 
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models.admin import AdminPermission, AdminRolePermission
-from app.models.session import UserSession
 from app.models.user import User, UserRole
 
+bearer_scheme = HTTPBearer()
 
 ADMIN_ROLES = {
     UserRole.super_admin,
@@ -25,82 +24,31 @@ ADMIN_ROLES = {
 
 
 def get_current_user(
-    access_token: str | None = Cookie(
-        default=None,
-        alias=settings.ACCESS_COOKIE_NAME,
-    ),
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    """
-    Authenticate the request using the HttpOnly access cookie.
-
-    The frontend cannot read this cookie. The server validates both:
-    1. the short-lived access JWT
-    2. the server-side session referenced by the JWT
-    """
-
-    if not access_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-        )
-
     try:
-        payload = decode_access_token(access_token)
-
+        payload = decode_access_token(credentials.credentials)
         user_id = uuid.UUID(payload["sub"])
-        session_id = uuid.UUID(payload["sid"])
-
-    except (JWTError, KeyError, ValueError, TypeError):
+    except (JWTError, KeyError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired authentication",
-        )
-
-    session = db.scalar(
-        select(UserSession).where(
-            UserSession.id == session_id,
-            UserSession.user_id == user_id,
-        )
-    )
-
-    if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid session",
-        )
-
-    now = datetime.now(timezone.utc)
-
-    if session.revoked_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has been revoked",
-        )
-
-    if session.expires_at <= now:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has expired",
+            detail="Invalid or expired token",
         )
 
     user = db.get(User, user_id)
-
     if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
         )
-
     return user
 
 
 def require_role(*allowed_roles: UserRole):
-    def _dependency(
-        current_user: User = Depends(get_current_user),
-    ) -> User:
-        # Super admins retain access to legacy role-protected admin
-        # endpoints while those endpoints are migrated to permissions.
+    def _dependency(current_user: User = Depends(get_current_user)) -> User:
+        # Super admins retain access to legacy role-protected admin endpoints
+        # while those endpoints are migrated to fine-grained permissions.
         if current_user.role == UserRole.super_admin:
             return current_user
 
@@ -123,7 +71,6 @@ def get_current_admin(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",
         )
-
     return current_user
 
 
