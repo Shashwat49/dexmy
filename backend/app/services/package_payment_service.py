@@ -56,10 +56,18 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
     if payment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
 
-    if payment.status == PaymentStatus.paid and payment.package_id is not None:
-        package = db.get(StudentPackage, payment.package_id)
-        if package is not None:
-            return package
+    if payment.status == PaymentStatus.paid:
+        if payment.package_id is not None:
+            package = db.get(StudentPackage, payment.package_id)
+            if package is not None:
+                return package
+        # Fall back to looking up by payment_id in case package_id was not set correctly
+        existing_package = db.execute(select(StudentPackage).where(StudentPackage.payment_id == payment.id)).scalar_one_or_none()
+        if existing_package is not None:
+            payment.package_id = existing_package.id
+            db.flush()
+            return existing_package
+        # If paid but no package found, it means a partial failure happened previously. We proceed to create it.
 
     if payment.package_plan_id is None or payment.student_id is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment is missing package purchase metadata")
@@ -87,7 +95,20 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
         status="active",
     )
     db.add(package)
-    db.flush()
+    
+    from sqlalchemy.exc import IntegrityError
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError:
+        # If another concurrent transaction inserted the StudentPackage with this payment_id,
+        # the savepoint rolls back only the conflicting insert without aborting the outer transaction.
+        existing_package = db.execute(select(StudentPackage).where(StudentPackage.payment_id == payment.id)).scalar_one_or_none()
+        if existing_package is not None:
+            payment.package_id = existing_package.id
+            db.flush()
+            return existing_package
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Concurrent package activation detected. Please retry or wait.")
 
     db.add(PackageCreditLedger(
         student_package_id=package.id,
