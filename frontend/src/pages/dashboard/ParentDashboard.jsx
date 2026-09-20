@@ -179,6 +179,20 @@ export default function ParentDashboard() {
                         </div>
                       </div>
                       <p className="text-xs text-chalk-muted mt-1 truncate">{child.email}</p>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-lg bg-panel px-2 py-2 border border-chalk-faint">
+                          <p className="text-[10px] text-chalk-muted uppercase tracking-wide">Total</p>
+                          <p className="text-sm font-semibold mt-0.5">{child.total_classes ?? 0}</p>
+                        </div>
+                        <div className="rounded-lg bg-panel px-2 py-2 border border-chalk-faint">
+                          <p className="text-[10px] text-chalk-muted uppercase tracking-wide">Completed</p>
+                          <p className="text-sm font-semibold mt-0.5">{child.classes_completed ?? 0}</p>
+                        </div>
+                        <div className="rounded-lg bg-panel px-2 py-2 border border-chalk-faint">
+                          <p className="text-[10px] text-chalk-muted uppercase tracking-wide">Remaining</p>
+                          <p className="text-sm font-semibold mt-0.5">{child.classes_remaining ?? 0}</p>
+                        </div>
+                      </div>
                     </button>
                   ))}
                 </div>
