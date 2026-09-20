@@ -107,3 +107,6 @@ class LinkedStudentRead(BaseModel):
     id: uuid.UUID
     full_name: str
     email: str
+    total_classes: int = 0
+    classes_completed: int = 0
+    classes_remaining: int = 0
