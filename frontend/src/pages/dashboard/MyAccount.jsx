@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../../components/dashboard/DashboardLayout";
 import { getMyStudentProfile, updateMyStudentProfile } from "../../api/students";
+import { getPackagePaymentHistory } from "../../api/packagePayments";
 import { CalendarIcon, GearIcon, BookIcon } from "../../components/dashboard/icons";
 
 const NAV = [
@@ -13,7 +14,7 @@ const NAV = [
   { label: "Account", items: [{ path: "/dashboard/student/account", label: "My account", icon: <GearIcon /> }] },
 ];
 
-const TABS = ["Personal Details", "Educational Details", "Parent Details"];
+const TABS = ["Personal Details", "Educational Details", "Parent Details", "Payment History"];
 const INPUT = "w-full rounded-xl border border-chalk-faint bg-panel-2 px-3.5 py-3 text-sm text-chalk outline-none transition focus:border-brand-gold disabled:cursor-default disabled:opacity-90";
 
 const initialForm = {
@@ -66,13 +67,13 @@ export default function MyAccount() {
   };
 
   return <DashboardLayout navItems={NAV}>
-    <div className="border-b border-chalk-faint px-8 py-5.5"><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm text-chalk-muted">Account</p><h1 className="mt-1 text-2xl font-semibold">My account</h1><p className="mt-1 text-sm text-chalk-muted">Keep your student information up to date.</p></div>{editing ? <div className="flex gap-2"><button onClick={cancelEdit} disabled={saving} className="rounded-xl border border-chalk-faint px-4 py-2.5 text-sm font-semibold text-chalk-muted hover:text-chalk">Cancel</button><button onClick={save} disabled={saving} className="rounded-xl bg-brand-red px-5 py-2.5 text-sm font-semibold disabled:opacity-60">{saving ? "Saving…" : "Save changes"}</button></div> : <button onClick={startEdit} className="rounded-xl bg-brand-red px-5 py-2.5 text-sm font-semibold">Edit details</button>}</div></div>
+    <div className="border-b border-chalk-faint px-8 py-5.5"><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm text-chalk-muted">Account</p><h1 className="mt-1 text-2xl font-semibold">My account</h1><p className="mt-1 text-sm text-chalk-muted">Keep your student information up to date.</p></div>{tab !== "Payment History" && (editing ? <div className="flex gap-2"><button onClick={cancelEdit} disabled={saving} className="rounded-xl border border-chalk-faint px-4 py-2.5 text-sm font-semibold text-chalk-muted hover:text-chalk">Cancel</button><button onClick={save} disabled={saving} className="rounded-xl bg-brand-red px-5 py-2.5 text-sm font-semibold disabled:opacity-60">{saving ? "Saving…" : "Save changes"}</button></div> : <button onClick={startEdit} className="rounded-xl bg-brand-red px-5 py-2.5 text-sm font-semibold">Edit details</button>)}</div></div>
     <div className="flex-1 overflow-auto px-8 py-7">
       {error && <div className="mb-5 rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">{error}</div>}
       {success && <div className="mb-5 rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-400">{success}</div>}
       {loading ? <div className="py-16 text-center text-sm text-chalk-muted">Loading your account…</div> : <>
         <section className="rounded-2xl border border-chalk-faint bg-panel p-6"><div className="flex flex-col gap-5 sm:flex-row sm:items-center"><div className="grid h-16 w-16 shrink-0 place-items-center rounded-full bg-brand-red/15 text-xl font-semibold text-brand-gold">{(profile.full_name || "S").trim().charAt(0).toUpperCase()}</div><div className="min-w-0"><h2 className="text-xl font-semibold">{profile.full_name || "Student"}</h2><div className="mt-1 flex flex-col gap-1 text-sm text-chalk-muted sm:flex-row sm:gap-4"><span>{profile.email || "No email"}</span><span>{profile.phone || "No mobile number added"}</span></div></div></div></section>
-        <section className="mt-7 rounded-2xl border border-chalk-faint bg-panel overflow-hidden"><div className="overflow-x-auto border-b border-chalk-faint"><div className="flex min-w-max px-2">{TABS.map((item) => <button key={item} onClick={() => setTab(item)} className={`px-5 py-4 text-sm font-semibold transition ${tab === item ? "border-b-2 border-brand-gold text-chalk" : "text-chalk-muted hover:text-chalk"}`}>{item}</button>)}</div></div><div className="p-6">{tab === "Personal Details" && <Personal profile={editing ? draft : profile} editing={editing} setField={setField} />}{tab === "Educational Details" && <Education profile={editing ? draft : profile} editing={editing} setField={setField} />}{tab === "Parent Details" && <Parent profile={editing ? draft : profile} editing={editing} setField={setField} />}</div></section>
+        <section className="mt-7 rounded-2xl border border-chalk-faint bg-panel overflow-hidden"><div className="overflow-x-auto border-b border-chalk-faint"><div className="flex min-w-max px-2">{TABS.map((item) => <button key={item} onClick={() => setTab(item)} className={`px-5 py-4 text-sm font-semibold transition ${tab === item ? "border-b-2 border-brand-gold text-chalk" : "text-chalk-muted hover:text-chalk"}`}>{item}</button>)}</div></div><div className="p-6">{tab === "Personal Details" && <Personal profile={editing ? draft : profile} editing={editing} setField={setField} />}{tab === "Educational Details" && <Education profile={editing ? draft : profile} editing={editing} setField={setField} />}{tab === "Parent Details" && <Parent profile={editing ? draft : profile} editing={editing} setField={setField} />}{tab === "Payment History" && <PaymentHistory />}</div></section>
       </>}
     </div>
   </DashboardLayout>;
@@ -83,3 +84,60 @@ function Education({ profile, editing, setField }) { return <div><SectionIntro t
 function Parent({ profile, editing, setField }) { return <div><SectionIntro title="Parent Details" text="Contact information for your parent or guardian."/><div className="grid gap-5 md:grid-cols-2"><Field label="Parent / guardian name" value={profile.parent_name} editing={editing} onChange={(v) => setField("parent_name", v)} /><Field label="Relationship" value={profile.parent_relationship} editing={editing} onChange={(v) => setField("parent_relationship", v)} /><Field label="Parent email" value={profile.parent_email} editing={editing} onChange={(v) => setField("parent_email", v)} /><Field label="Parent mobile number" value={profile.parent_phone} editing={editing} onChange={(v) => setField("parent_phone", v)} /><Field label="Occupation" value={profile.parent_occupation} editing={editing} onChange={(v) => setField("parent_occupation", v)} /></div></div>; }
 function SectionIntro({ title, text }) { return <div className="mb-6"><h2 className="text-lg font-semibold">{title}</h2><p className="mt-1 text-sm text-chalk-muted">{text}</p></div>; }
 function Field({ label, value, editing, onChange, type = "text" }) { return <label className="block"><span className="mb-2 block text-xs font-semibold text-chalk-muted">{label}</span>{editing ? <input type={type} value={value || ""} onChange={(e) => onChange?.(e.target.value)} className={INPUT} /> : <div className="min-h-[46px] rounded-xl border border-transparent bg-panel-2/60 px-3.5 py-3 text-sm text-chalk">{value || <span className="text-chalk-muted">Not provided</span>}</div>}</label>; }
+
+function PaymentHistory() {
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    getPackagePaymentHistory()
+      .then((data) => setPayments(Array.isArray(data) ? data : []))
+      .catch((e) => setError(e.response?.data?.detail || "Unable to load payment history."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <div className="py-8 text-center text-sm text-chalk-muted">Loading payment history…</div>;
+  if (error) return <div className="rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">{error}</div>;
+  if (payments.length === 0) return <div className="py-8 text-center text-sm text-chalk-muted">No package payment records found.</div>;
+
+  return (
+    <div>
+      <SectionIntro title="Payment History" text="Your past package purchases and payment transaction records." />
+      <div className="overflow-x-auto rounded-xl border border-chalk-faint bg-panel-2">
+        <table className="w-full min-w-[700px] text-left text-sm">
+          <thead className="border-b border-chalk-faint text-xs uppercase tracking-wide text-chalk-muted">
+            <tr>
+              <th className="px-5 py-4">Date</th>
+              <th className="px-5 py-4">Package</th>
+              <th className="px-5 py-4">Amount</th>
+              <th className="px-5 py-4">Provider</th>
+              <th className="px-5 py-4">Status</th>
+              <th className="px-5 py-4">Reference ID</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-chalk-faint">
+            {payments.map((p) => (
+              <tr key={p.id}>
+                <td className="px-5 py-4 text-chalk-muted">{p.created_at ? new Date(p.created_at).toLocaleDateString() : "—"}</td>
+                <td className="px-5 py-4 font-semibold">{p.package_name}</td>
+                <td className="px-5 py-4 font-mono">{p.currency} {p.amount}</td>
+                <td className="px-5 py-4 capitalize">{p.provider}</td>
+                <td className="px-5 py-4">
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                    p.status === "paid" ? "bg-green-500/10 text-green-400" :
+                    p.status === "failed" ? "bg-red-500/10 text-red-400" : "bg-yellow-500/10 text-yellow-400"
+                  }`}>
+                    {p.status}
+                  </span>
+                </td>
+                <td className="px-5 py-4 font-mono text-xs text-chalk-muted">{p.provider_payment_id || p.id}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
