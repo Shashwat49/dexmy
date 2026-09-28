@@ -117,3 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_test_sessions_student_test
 
 CREATE INDEX IF NOT EXISTS idx_test_sessions_expires_at
     ON test_sessions(expires_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_active_test_session_unique
+    ON test_sessions(test_id, student_id)
+    WHERE status = 'IN_PROGRESS';
