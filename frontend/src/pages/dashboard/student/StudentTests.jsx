@@ -462,8 +462,8 @@ function App() {
         alert(data.message || "Server rejected purchase verification.");
       }
     } catch (err) {
-      console.warn("Backend purchase call warning, setting locally:", err.message);
-      setPurchasedTestIds((prev) => new Set([...prev, tId]));
+      console.warn("Backend purchase call failed:", err.message);
+      alert("The test could not be unlocked because the server could not verify the purchase.");
     }
   };
 
