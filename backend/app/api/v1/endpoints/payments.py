@@ -76,7 +76,7 @@ def checkout(payload: CheckoutRequest, current_user: User = Depends(get_current_
         student_id=student_id, teacher_id=payload.teacher_id, subject_id=payload.subject_id,
         scheduled_at=payload.scheduled_at,
         booking_ends_at=booking_end,
-        booking_time_range=Range(range_start, range_end, "[)"),
+        booking_time_range=Range(range_start, range_end, bounds="[)"),
         duration_minutes=SLOT_DURATION_MINUTES,
         status=BookingStatus.pending, price=amount,
     )
