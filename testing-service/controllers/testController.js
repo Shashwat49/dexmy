@@ -791,7 +791,7 @@ export const getPublishedTests = async (req, res) => {
             [test.id]
           );
           test.questions = qRes.rows;
-          return formatTest(test);
+          return formatStudentTest(test);
         }));
       }
     } catch (dbErr) {
