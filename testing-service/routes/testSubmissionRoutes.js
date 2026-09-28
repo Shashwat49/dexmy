@@ -52,7 +52,7 @@ const router = express.Router();
  *       400:
  *         description: Invalid test submission data
  */
-router.post("/", authMiddleware, requireStudent, submitTest);
+router.post("/start", authMiddleware, requireStudent, startTestSession);\nrouter.get("/session/:id", authMiddleware, requireStudent, getTestSession);\nrouter.patch("/session/:id", authMiddleware, requireStudent, saveTestSession);\nrouter.post("/", authMiddleware, requireStudent, submitTest);
 
 /**
  * @swagger
