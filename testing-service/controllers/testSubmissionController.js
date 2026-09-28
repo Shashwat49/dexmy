@@ -213,17 +213,26 @@ export const submitTest = async (req, res) => {
 export const getSubmissionById = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Check in-memory demo submissions first
+    const requesterId = String(req.user?.id || "");
+    const privileged = ["admin", "super_admin", "test_creator"].includes(req.user?.role);
+
+    // Check in-memory demo submissions first.
     const demo = DEMO_SUBMISSIONS.find(s => s.submissionId === id || s.id === id);
     if (demo) {
+      if (!privileged && String(demo.studentId) !== requesterId) {
+        return res.status(403).json({ success: false, message: "Not authorized to view this submission" });
+      }
       return res.status(200).json({ success: true, submission: demo });
     }
 
     try {
       const submissionResult = await query(`SELECT * FROM test_submissions WHERE id = $1`, [id]);
       if (submissionResult.rows.length > 0) {
-        return res.status(200).json({ success: true, submission: submissionResult.rows[0] });
+        const submission = submissionResult.rows[0];
+        if (!privileged && String(submission.student_id) !== requesterId) {
+          return res.status(403).json({ success: false, message: "Not authorized to view this submission" });
+        }
+        return res.status(200).json({ success: true, submission });
       }
     } catch (dbErr) {
       console.warn("DB get submission warning:", dbErr.message);
@@ -238,7 +247,15 @@ export const getSubmissionById = async (req, res) => {
 
 export const getStudentSubmissions = async (req, res) => {
   try {
-    const studentId = req.params.studentId || req.user?.id;
+    const requestedStudentId = req.params.studentId;
+    const requesterId = String(req.user?.id || "");
+    const privileged = ["admin", "super_admin", "test_creator"].includes(req.user?.role);
+
+    if (requestedStudentId && !privileged && String(requestedStudentId) !== requesterId) {
+      return res.status(403).json({ success: false, message: "Not authorized to view these submissions" });
+    }
+
+    const studentId = requestedStudentId || req.user?.id;
     let submissions = [];
 
     try {
