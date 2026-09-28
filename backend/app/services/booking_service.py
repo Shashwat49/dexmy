@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.orm import Session
 
 from app.core.constants import (
@@ -518,6 +519,10 @@ def create_booking_atomic(
     # Create the booking.
     # --------------------------------------------------------
 
+    booking_end = scheduled_at + timedelta(minutes=CLASS_DURATION_MINUTES)
+    range_start = scheduled_at.astimezone(IST).replace(tzinfo=None)
+    range_end = booking_end.astimezone(IST).replace(tzinfo=None)
+
     booking = Booking(
         student_id=student_id,
 
@@ -528,6 +533,9 @@ def create_booking_atomic(
         subject_id=subject_id,
 
         scheduled_at=scheduled_at,
+
+        booking_ends_at=booking_end,
+        booking_time_range=Range(range_start, range_end, bounds="[)"),
 
         duration_minutes=CLASS_DURATION_MINUTES,
 
