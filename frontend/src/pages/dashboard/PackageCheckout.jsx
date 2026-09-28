@@ -40,7 +40,7 @@ export default function PackageCheckout() {
     (async () => {
       try {
         const packages = await getPackages();
-        if (!cancelled) setPkg(packages.find((x) => String(x.id) === id && x.is_active && String(x.currency).toUpperCase() === currency) || null);
+        if (!cancelled) setPkg(packages.find((x) => String(x.id) === id && String(x.currency).toUpperCase() === currency) || null);
         if (user?.role === "parent") {
           const linked = await getLinkedStudents();
           if (!cancelled) {
