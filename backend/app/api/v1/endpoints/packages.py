@@ -24,6 +24,7 @@ def list_public_packages(db: Session = Depends(get_db)):
             "price": p.price,
             "currency": p.currency,
             "is_custom": p.is_custom,
+            "is_active": p.is_active,
         }
         for p in packages
     ]
