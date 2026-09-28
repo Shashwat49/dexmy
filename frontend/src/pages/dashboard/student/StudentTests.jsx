@@ -232,6 +232,7 @@ function App() {
   const [submittedTime, setSubmittedTime] = useState(null);
   const [testResult, setTestResult] = useState(null);
   const [showDetailedResult, setShowDetailedResult] = useState(false);
+  const [activeSession, setActiveSession] = useState(null);
   // =====================================================
   // FETCH PUBLISHED TEST
   // =====================================================
@@ -266,6 +267,51 @@ function App() {
         if (data && data.tests && data.tests.length > 0) {
           setAllTests(data.tests);
           setPublishedTest(data.tests[0]);
+
+          const savedSession = JSON.parse(
+            localStorage.getItem("dexmy_active_test_session") || "null"
+          );
+
+          if (savedSession?.testId && savedSession?.sessionId) {
+            const resumableTest = data.tests.find(
+              (item) => String(item.id || item._id) === String(savedSession.testId)
+            );
+
+            if (resumableTest) {
+              try {
+                const sessionResponse = await fetch(
+                  "${TESTING_API_BASE}/test-submissions/session/" + savedSession.sessionId,
+                  {
+                    headers: {
+                      Authorization: "Bearer " + (
+                        localStorage.getItem("dexmy_token") ||
+                        localStorage.getItem("token") ||
+                        "student"
+                      ),
+                    },
+                  }
+                );
+                const sessionData = await sessionResponse.json();
+
+                if (
+                  sessionResponse.ok &&
+                  sessionData.success &&
+                  sessionData.session?.status === "IN_PROGRESS" &&
+                  new Date(sessionData.session.expiresAt).getTime() > Date.now()
+                ) {
+                  setPublishedTest(resumableTest);
+                  setActiveSession(sessionData.session);
+                  setCurrentView("test");
+                } else {
+                  localStorage.removeItem("dexmy_active_test_session");
+                }
+              } catch (resumeError) {
+                console.warn("Could not resume test session:", resumeError);
+              }
+            } else {
+              localStorage.removeItem("dexmy_active_test_session");
+            }
+          }
         } else {
           setTestError("No published tests available.");
         }
@@ -311,29 +357,91 @@ function App() {
     fetchHistory();
   }, []);
 
-  const handleStartTest = (test) => {
-    setPublishedTest(test);
-    setIsSubmitted(false);
-    setTestResult(null);
-    setCurrentQuestion(1);
-    setTemporaryAnswer(null);
+  const handleStartTest = async (test) => {
+    try {
+      const token =
+        localStorage.getItem("dexmy_token") ||
+        localStorage.getItem("token") ||
+        "student";
 
-    const questionsCount = test.questions?.length || 0;
-    if (questionsCount > 0) {
-      setQuestionStates(
-        Array.from({ length: questionsCount }, () => ({
-          visited: false,
-          savedAnswer: null,
-          review: false,
-        }))
+      const response = await fetch(
+        "${TESTING_API_BASE}/test-submissions/start",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + token,
+          },
+          body: JSON.stringify({
+            testId: test.id || test._id,
+          }),
+        }
       );
-    }
 
-    if (test.duration) {
-      setTimeLeft(Number(test.duration) * 60);
-    }
+      const data = await response.json();
+      if (!response.ok || !data.success || !data.session) {
+        throw new Error(data.message || "Unable to start this test");
+      }
 
-    setCurrentView("test");
+      setPublishedTest(test);
+      setActiveSession(data.session);
+      setIsSubmitted(false);
+      setTestResult(null);
+      setCurrentQuestion(1);
+
+      localStorage.setItem(
+        "dexmy_active_test_session",
+        JSON.stringify({
+          testId: test.id || test._id,
+          sessionId: data.session.id,
+        })
+      );
+
+      const savedAnswers = Array.isArray(data.session.answers)
+        ? data.session.answers
+        : [];
+
+      const questionsCount = test.questions?.length || 0;
+      if (questionsCount > 0) {
+        setQuestionStates(
+          Array.from({ length: questionsCount }, (_, index) => {
+            const questionId = String(
+              test.questions[index]?.id || test.questions[index]?._id
+            );
+            const saved = savedAnswers.find(
+              (answer) => String(answer.questionId) === questionId
+            );
+            return {
+              visited:
+                saved?.selectedAnswer !== null &&
+                saved?.selectedAnswer !== undefined,
+              savedAnswer:
+                saved?.selectedAnswer === undefined
+                  ? null
+                  : saved.selectedAnswer,
+              review: false,
+            };
+          })
+        );
+      } else {
+        setQuestionStates([]);
+      }
+
+      setTemporaryAnswer(
+        savedAnswers.find(
+          (answer) =>
+            String(answer.questionId) ===
+            String(test.questions?.[0]?.id || test.questions?.[0]?._id)
+        )?.selectedAnswer ?? null
+      );
+
+      const expiresAt = new Date(data.session.expiresAt).getTime();
+      setTimeLeft(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)));
+      setCurrentView("test");
+    } catch (error) {
+      console.error("START TEST ERROR:", error);
+      alert(error.message || "Unable to start this test");
+    }
   };
 
   const handleUnlockTest = async (test) => {
@@ -359,53 +467,70 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    if (publishedTest?.duration) {
-      setTimeLeft(Number(publishedTest.duration) * 60);
-    }
-  }, [publishedTest]);
-
   // =====================================================
-  // INITIALIZE QUESTION STATES
+  // INITIALIZE QUESTION STATES + SERVER TIMER
   // =====================================================
 
   useEffect(() => {
     if (!publishedTest) return;
 
-    const questionsCount =
-      publishedTest.questions?.length || 0;
+    const questionsCount = publishedTest.questions?.length || 0;
+    const sessionMatches =
+      activeSession &&
+      String(activeSession.testId) === String(publishedTest.id || publishedTest._id);
 
-    if (questionsCount === 0) {
+    if (sessionMatches) {
+      const savedAnswers = Array.isArray(activeSession.answers)
+        ? activeSession.answers
+        : [];
+
+      setQuestionStates(
+        Array.from({ length: questionsCount }, (_, index) => {
+          const questionId = String(
+            publishedTest.questions[index]?.id ||
+            publishedTest.questions[index]?._id
+          );
+          const saved = savedAnswers.find(
+            (answer) => String(answer.questionId) === questionId
+          );
+          return {
+            visited:
+              saved?.selectedAnswer !== null &&
+              saved?.selectedAnswer !== undefined,
+            savedAnswer:
+              saved?.selectedAnswer === undefined
+                ? null
+                : saved.selectedAnswer,
+            review: false,
+          };
+        })
+      );
+
+      setCurrentQuestion(1);
+      setTemporaryAnswer(
+        savedAnswers.find(
+          (answer) =>
+            String(answer.questionId) ===
+            String(publishedTest.questions?.[0]?.id || publishedTest.questions?.[0]?._id)
+        )?.selectedAnswer ?? null
+      );
+
+      const expiresAt = new Date(activeSession.expiresAt).getTime();
+      setTimeLeft(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)));
       return;
     }
 
     setQuestionStates(
-      Array.from(
-        { length: questionsCount },
-        () => ({
-          visited: false,
-          savedAnswer: null,
-          review: false,
-        })
-      )
+      Array.from({ length: questionsCount }, () => ({
+        visited: false,
+        savedAnswer: null,
+        review: false,
+      }))
     );
-
     setCurrentQuestion(1);
     setTemporaryAnswer(null);
-  }, [publishedTest]);
-
-  // =====================================================
-  // SET TIMER FROM TEST DURATION
-  // =====================================================
-
-  useEffect(() => {
-    if (!publishedTest) return;
-
-    const durationInMinutes =
-      Number(publishedTest.duration) || 120;
-
-    setTimeLeft(durationInMinutes * 60);
-  }, [publishedTest]);
+    setTimeLeft((Number(publishedTest.duration) || 120) * 60);
+  }, [publishedTest, activeSession]);
 
   // =====================================================
   // CURRENT QUESTION DATA
@@ -432,7 +557,7 @@ function App() {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          submitExam();
+          submitExam(true);
           return 0;
         }
 
@@ -787,8 +912,13 @@ function App() {
   // SUBMIT
   // =====================================================
 
-  const submitExam = () => {
+  const submitExam = (automatic = false) => {
     if (isSubmitted) return;
+
+    if (automatic) {
+      void confirmSubmitTest();
+      return;
+    }
 
     setShowSubmitConfirm(true);
   };
@@ -819,6 +949,7 @@ function App() {
           },
           body: JSON.stringify({
             testId,
+            sessionId: activeSession?.id,
             answers,
           }),
         }
@@ -839,6 +970,10 @@ function App() {
       setShowSubmitConfirm(false);
       setIsSubmitted(true);
       setSubmittedTime(timeLeft);
+      localStorage.removeItem("dexmy_active_test_session");
+      setActiveSession((previous) =>
+        previous ? { ...previous, status: "SUBMITTED" } : previous
+      );
 
       if (testId) {
         setCompletedSubmissions((prev) => ({
@@ -861,6 +996,108 @@ function App() {
       alert(error.message || "Failed to submit test");
     }
   };
+
+  // =====================================================
+  // PERSIST ANSWERS FOR REFRESH / RECONNECT / MULTI-TAB
+  // =====================================================
+
+  useEffect(() => {
+    if (!activeSession?.id || isSubmitted) return;
+
+    const answers = questionStates.map((item, index) => ({
+      questionId:
+        actualQuestions[index]?.id ||
+        actualQuestions[index]?._id,
+      selectedAnswer:
+        index === currentQuestion - 1
+          ? temporaryAnswer
+          : item.savedAnswer,
+    }));
+
+    try {
+      localStorage.setItem(
+        "dexmy_test_answers_" + activeSession.testId,
+        JSON.stringify(answers)
+      );
+    } catch (storageError) {
+      console.warn("Could not persist test answers locally:", storageError);
+    }
+
+    const timeout = setTimeout(async () => {
+      try {
+        const response = await fetch(
+          "${TESTING_API_BASE}/test-submissions/session/" + activeSession.id,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: "Bearer " + (
+                localStorage.getItem("dexmy_token") ||
+                localStorage.getItem("token") ||
+                "student"
+              ),
+            },
+            body: JSON.stringify({ answers }),
+          }
+        );
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          if (data.expired) {
+            console.warn("Test session expired while saving answers.");
+          }
+        }
+      } catch (saveError) {
+        console.warn("Could not sync test answers:", saveError);
+      }
+    }, 250);
+
+    return () => clearTimeout(timeout);
+  }, [activeSession, isSubmitted, questionStates, temporaryAnswer, currentQuestion, actualQuestions]);
+
+  useEffect(() => {
+    if (!activeSession?.testId || isSubmitted) return;
+
+    const key = "dexmy_test_answers_" + activeSession.testId;
+
+    const handleStorage = (event) => {
+      if (event.key !== key || !event.newValue) return;
+
+      try {
+        const answers = JSON.parse(event.newValue);
+        if (!Array.isArray(answers)) return;
+
+        setQuestionStates((previous) =>
+          previous.map((state, index) => {
+            const questionId = String(
+              actualQuestions[index]?.id ||
+              actualQuestions[index]?._id
+            );
+            const saved = answers.find(
+              (answer) => String(answer.questionId) === questionId
+            );
+            return saved
+              ? {
+                  ...state,
+                  savedAnswer:
+                    saved.selectedAnswer === undefined
+                      ? null
+                      : saved.selectedAnswer,
+                  visited:
+                    saved.selectedAnswer !== null &&
+                    saved.selectedAnswer !== undefined,
+                }
+              : state;
+          })
+        );
+      } catch (error) {
+        console.warn("Could not sync answers from another tab:", error);
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [activeSession, isSubmitted, actualQuestions]);
 
   // =====================================================
   // MEDIA RENDER
