@@ -31,7 +31,6 @@ export default function PackageCheckout() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
-  const [stripeCheckout, setStripeCheckout] = useState(null);
 
   const currency = (params.get("currency") || "INR").toUpperCase();
   const id = params.get("package");
@@ -148,7 +147,6 @@ export default function PackageCheckout() {
 
     stripeRef.current = stripe;
     elementsRef.current = elements;
-    setStripeCheckout({ paymentId: checkoutData.payment_id, clientSecret: checkoutData.stripe_client_secret });
     setStripeReady(true);
     setProcessing(false);
   };
@@ -166,8 +164,10 @@ export default function PackageCheckout() {
       setProcessing(false);
       return;
     }
-    if (paymentIntent?.status === "succeeded" || paymentIntent?.status === "processing") {
+    if (paymentIntent?.status === "succeeded") {
       setSuccess(true);
+    } else if (paymentIntent?.status === "processing") {
+      setError("Payment submitted. Stripe is still confirming the payment; your package will be activated after confirmation.");
     } else {
       setError("Stripe payment is not yet confirmed. Please check your payment status.");
     }
@@ -188,11 +188,8 @@ export default function PackageCheckout() {
     setProcessing(true);
     setError("");
     try {
-      if (currency === "USD") {
-        await beginStripe(studentId);
-      } else {
-        await beginRazorpay(studentId);
-      }
+      if (currency === "USD") await beginStripe(studentId);
+      else await beginRazorpay(studentId);
     } catch (err) {
       setError(err?.response?.data?.detail || err.message || "Failed to initiate checkout.");
       setProcessing(false);
@@ -227,7 +224,6 @@ export default function PackageCheckout() {
       <div className="max-w-xl mx-auto">
         <Link to="/packages" className="text-sm text-chalk-muted">← Packages</Link>
         <h1 className="mt-4 text-3xl font-semibold">Checkout</h1>
-
         {error && <div className="mt-6 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 text-sm">{error}</div>}
 
         {isParent && (
@@ -262,11 +258,7 @@ export default function PackageCheckout() {
               </button>
             </>
           ) : (
-            <button
-              onClick={handlePayment}
-              disabled={processing || (isParent && !selectedStudentId)}
-              className="mt-6 w-full rounded-xl bg-brand-red px-4 py-3 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            <button onClick={handlePayment} disabled={processing || (isParent && !selectedStudentId)} className="mt-6 w-full rounded-xl bg-brand-red px-4 py-3 font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
               {processing ? "Processing..." : user ? (isStripe ? "Continue to secure payment" : "Continue to payment") : "Login to continue"}
             </button>
           )}
