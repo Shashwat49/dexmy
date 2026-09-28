@@ -1,4 +1,5 @@
-import { query } from "../config/db.js";\nimport { DEFAULT_DEMO_TESTS, checkTestPurchased } from "./testController.js";
+import { query } from "../config/db.js";
+import { DEFAULT_DEMO_TESTS, checkTestPurchased } from "./testController.js";
 
 let schemaReadyPromise = null;
 
@@ -51,11 +52,25 @@ export const startTestSession = async (req, res) => {
       [testId]
     );
 
-    if (testResult.rows.length === 0) {
-      return res.status(404).json({ success: false, message: "Test not found" });
+    let test = testResult.rows[0] || null;
+    if (!test) {
+      const demo = DEFAULT_DEMO_TESTS.find(
+        (item) => String(item.id || item._id) === String(testId)
+      );
+      if (demo) {
+        test = {
+          id: demo.id || demo._id,
+          duration: demo.duration,
+          is_published: Boolean(demo.is_published ?? demo.isPublished),
+          is_paid: Boolean(demo.is_paid ?? demo.isPaid),
+          price: Number(demo.price) || 0,
+        };
+      }
     }
 
-    const test = testResult.rows[0];
+    if (!test) {
+      return res.status(404).json({ success: false, message: "Test not found" });
+    }
 
     if (!test.is_published) {
       return res.status(403).json({ success: false, message: "This test is not published" });
