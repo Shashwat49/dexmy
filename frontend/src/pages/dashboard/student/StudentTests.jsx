@@ -569,11 +569,6 @@ function App() {
   }, [isSubmitted, timeLeft]);
 
 
-  useEffect(() => {
-    if (timeLeft === 0 && !isSubmitted) {
-      submitExam();
-    }
-  }, [timeLeft, isSubmitted]);
   // =====================================================
   // FORMAT TIMER
   // =====================================================
