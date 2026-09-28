@@ -465,7 +465,11 @@ export const getTestById = async (req, res) => {
       }
     }
 
-    const responseTest = req.user?.role === "test_creator" || ["admin", "super_admin"].includes(req.user?.role)\n      ? formatted\n      : formatStudentTest(formatted);\n\n    return res.status(200).json({ success: true, test: responseTest });
+    const responseTest = req.user?.role === "test_creator" || ["admin", "super_admin"].includes(req.user?.role)
+      ? formatted
+      : formatStudentTest(formatted);
+
+    return res.status(200).json({ success: true, test: responseTest });
   } catch (error) {
     console.error("GET TEST ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch test", error: error.message });
