@@ -523,6 +523,8 @@ def create_booking_atomic(
     range_start = scheduled_at.astimezone(IST).replace(tzinfo=None)
     range_end = booking_end.astimezone(IST).replace(tzinfo=None)
 
+    booking_end = scheduled_at + timedelta(minutes=CLASS_DURATION_MINUTES)
+
     booking = Booking(
         student_id=student_id,
 
