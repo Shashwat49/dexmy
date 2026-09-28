@@ -5,7 +5,13 @@ import {
   submitTest,
   getSubmissionById,
   getStudentSubmissions,
-} from "../controllers/testSubmissionController.js";
+}
+
+import {
+  startTestSession,
+  getTestSession,
+  saveTestSession,
+} from "../controllers/testSessionController.js";
 
 const router = express.Router();
 
