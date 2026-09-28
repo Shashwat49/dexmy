@@ -84,10 +84,7 @@ async def receive_whatsapp_webhook(request: Request):
             detail="Invalid JSON payload",
         )
 
-    logger.info(
-        "WhatsApp webhook received: %s",
-        json.dumps(payload, ensure_ascii=False),
-    )
+    logger.info("WhatsApp webhook received successfully")
 
     # WhatsApp Cloud API webhook structure:
     #

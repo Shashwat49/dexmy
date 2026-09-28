@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from requests import session
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
 from app.models.booking import Booking
-from app.models.classroom import ClassSession, PermissionEvent, PermissionType
+from app.models.classroom import ClassSession, PermissionEvent, PermissionType, SessionStatus
 from app.models.user import User
 from app.models.teacher import Subject
 from app.schemas.classroom import JoinTokenRequest, JoinTokenResponse, ClassSessionRead, ClassNotesRead
@@ -34,7 +35,7 @@ def _student_publish_sources(session_id: uuid.UUID, student_id: uuid.UUID, db: S
     whether the student is allowed to use the feature from the application UI.
     Persisted explicit revocations are still honored for reconnects.
     """
-    sources = {"camera", "microphone", "screen_share"}
+    sources = {"camera", "microphone",}
     events = (
         db.query(PermissionEvent)
         .filter(PermissionEvent.session_id == session_id, PermissionEvent.target_user_id == student_id)
@@ -64,6 +65,11 @@ def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_c
     session = db.get(ClassSession, payload.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.status in (SessionStatus.ended, SessionStatus.cancelled):
+        raise HTTPException(
+        status_code=409,
+        detail="Classroom session is no longer active",)
     booking = db.get(Booking, session.booking_id)
     if booking is None:
         raise HTTPException(status_code=404, detail="Booking not found")

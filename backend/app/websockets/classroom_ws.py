@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from jose import JWTError
 from sqlalchemy import desc, func
 from livekit import api
@@ -31,14 +31,22 @@ async def _heartbeat(websocket: WebSocket) -> None:
     except (WebSocketDisconnect, RuntimeError, ConnectionError, asyncio.CancelledError):
         return
 
+def _authenticate(token: str | None, db) -> User | None:
+    if not token:
+        return None
 
-def _authenticate(token: str, db) -> User | None:
     try:
         payload = decode_access_token(token)
         user_id = uuid.UUID(payload["sub"])
     except (JWTError, KeyError, ValueError, TypeError):
         return None
-    return db.get(User, user_id)
+
+    user = db.get(User, user_id)
+
+    if user is None or not user.is_active:
+        return None
+
+    return user
 
 
 def _default_student_permissions() -> set[str]:
@@ -141,11 +149,17 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
 
 
 @router.websocket("/ws/classroom/{session_id}")
-async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: str = Query(...)):
+async def classroom_socket(
+        websocket: WebSocket,
+        session_id: uuid.UUID,):
     db = SessionLocal()
     heartbeat_task = None
     try:
-        user = _authenticate(token, db)
+
+        access_token = websocket.cookies.get(
+        settings.ACCESS_COOKIE_NAME)
+
+        user = _authenticate(access_token, db)
         if user is None:
             await websocket.close(code=4401)
             return

@@ -1,17 +1,16 @@
 import uuid
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from fastapi import Cookie, Depends, HTTPException, status
 from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
+from app.core.config import settings
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.models.admin import AdminPermission, AdminRolePermission
 from app.models.user import User, UserRole
 
-bearer_scheme = HTTPBearer()
 
 ADMIN_ROLES = {
     UserRole.super_admin,
@@ -22,13 +21,23 @@ ADMIN_ROLES = {
     UserRole.support_agent,
 }
 
-
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    access_cookie: str | None = Cookie(
+        default=None,
+        alias=settings.ACCESS_COOKIE_NAME,
+    ),
     db: Session = Depends(get_db),
 ) -> User:
+    token = access_cookie
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_access_token(token)
         user_id = uuid.UUID(payload["sub"])
     except (JWTError, KeyError, ValueError):
         raise HTTPException(
@@ -37,13 +46,14 @@ def get_current_user(
         )
 
     user = db.get(User, user_id)
+
     if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
         )
-    return user
 
+    return user
 
 def require_role(*allowed_roles: UserRole):
     def _dependency(current_user: User = Depends(get_current_user)) -> User:
