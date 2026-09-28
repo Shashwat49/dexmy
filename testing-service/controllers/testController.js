@@ -207,6 +207,28 @@ export const formatQuestion = (q) => {
   };
 };
 
+export const formatStudentQuestion = (q) => {
+  const formatted = formatQuestion(q);
+  if (!formatted) return formatted;
+  const {
+    correct_answer,
+    correctAnswer,
+    ...studentQuestion
+  } = formatted;
+  return studentQuestion;
+};
+
+export const formatStudentTest = (test) => {
+  const formatted = formatTest(test);
+  if (!formatted) return formatted;
+  return {
+    ...formatted,
+    questions: Array.isArray(formatted.questions)
+      ? formatted.questions.map(formatStudentQuestion)
+      : [],
+  };
+};
+
 // In-memory test purchases store (fallback / dev mode)
 export const TEST_PURCHASES = [
   {
@@ -443,7 +465,7 @@ export const getTestById = async (req, res) => {
       }
     }
 
-    return res.status(200).json({ success: true, test: formatted });
+    const responseTest = req.user?.role === "test_creator" || ["admin", "super_admin"].includes(req.user?.role)\n      ? formatted\n      : formatStudentTest(formatted);\n\n    return res.status(200).json({ success: true, test: responseTest });
   } catch (error) {
     console.error("GET TEST ERROR:", error);
     return res.status(500).json({ success: false, message: "Failed to fetch test", error: error.message });
@@ -640,9 +662,10 @@ export const toggleTestPublish = async (req, res) => {
     let test;
 
     try {
+      const requestedPublished = req.path.endsWith("/unpublish") ? false : true;
       const result = await query(
-        `UPDATE tests SET is_published = NOT is_published, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *`,
-        [testId]
+        `UPDATE tests SET is_published = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *`,
+        [requestedPublished, testId]
       );
       if (result.rows.length > 0) {
         test = result.rows[0];
@@ -654,8 +677,9 @@ export const toggleTestPublish = async (req, res) => {
     if (!test) {
       const demo = DEFAULT_DEMO_TESTS.find(t => t.id === testId);
       if (demo) {
-        demo.is_published = !demo.is_published;
-        demo.isPublished = demo.is_published;
+        const requestedPublished = req.path.endsWith("/unpublish") ? false : true;
+        demo.is_published = requestedPublished;
+        demo.isPublished = requestedPublished;
         test = demo;
       }
     }
@@ -775,7 +799,7 @@ export const getPublishedTests = async (req, res) => {
     }
 
     if (published.length === 0) {
-      published = DEFAULT_DEMO_TESTS.filter(t => t.is_published || t.isPublished).map(formatTest);
+      published = DEFAULT_DEMO_TESTS.filter(t => t.is_published || t.isPublished).map(formatStudentTest);
     }
 
     // Attach server-side purchase status for student (Task 3 Section 14)
