@@ -1,4 +1,4 @@
-import { query } from "../config/db.js";
+import { query } from "../config/db.js";\nimport { DEFAULT_DEMO_TESTS, checkTestPurchased } from "./testController.js";
 
 let schemaReadyPromise = null;
 
@@ -7,7 +7,7 @@ const ensureSessionSchema = async () => {
     schemaReadyPromise = query(`
       CREATE TABLE IF NOT EXISTS test_sessions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        test_id UUID REFERENCES tests(id) ON DELETE CASCADE,
+        test_id VARCHAR(255) NOT NULL,
         student_id UUID NOT NULL,
         started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
         expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -62,12 +62,11 @@ export const startTestSession = async (req, res) => {
     }
 
     if (test.is_paid) {
-      const purchase = await query(
-        `SELECT 1 FROM test_purchases WHERE test_id = $1 AND student_id = $2 LIMIT 1`,
-        [testId, studentId]
-      );
       const privileged = ["admin", "super_admin", "test_creator"].includes(req.user?.role);
-      if (!privileged && purchase.rows.length === 0) {
+      const hasPurchased = privileged
+        ? true
+        : await checkTestPurchased(testId, studentId);
+      if (!privileged && !hasPurchased) {
         return res.status(403).json({
           success: false,
           message: "Access denied: purchase required before starting this test",
