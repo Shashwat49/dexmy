@@ -93,6 +93,18 @@ export const startTestSession = async (req, res) => {
       }
     }
 
+    // Expired sessions must no longer occupy the single active-session slot.
+    // This prevents a stale IN_PROGRESS row from blocking a new session.
+    await query(
+      `UPDATE test_sessions
+       SET status = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
+       WHERE test_id = $1
+         AND student_id = $2
+         AND status = 'IN_PROGRESS'
+         AND expires_at <= CURRENT_TIMESTAMP`,
+      [testId, studentId]
+    );
+
     // Reuse the currently active session for this student/test. This keeps
     // multiple tabs consistent without imposing any attempt-count restriction.
     const active = await query(
@@ -196,7 +208,19 @@ export const getTestSession = async (req, res) => {
       return res.status(404).json({ success: false, message: "Test session not found" });
     }
 
-    const session = result.rows[0];
+    let session = result.rows[0];
+
+    if (session.status === 'IN_PROGRESS' && new Date(session.expires_at).getTime() <= Date.now()) {
+      const expiredResult = await query(
+        `UPDATE test_sessions
+         SET status = 'EXPIRED', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND student_id = $2
+         RETURNING id, test_id, started_at, expires_at, answers, status`,
+        [id, studentId]
+      );
+      if (expiredResult.rows.length > 0) session = expiredResult.rows[0];
+    }
+
     return res.status(200).json({
       success: true,
       session: {
