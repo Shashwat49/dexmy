@@ -797,9 +797,14 @@ function App() {
     if (isSubmitted) return;
 
     try {
+      // Include the currently selected answer even if the student submits
+      // directly without pressing "Save & Next" first.
       const answers = questionStates.map((item, index) => ({
         questionId: actualQuestions[index]?.id || actualQuestions[index]?._id,
-        selectedAnswer: item.savedAnswer,
+        selectedAnswer:
+          index === currentQuestion - 1
+            ? temporaryAnswer
+            : item.savedAnswer,
       }));
 
       const testId = publishedTest?.id || publishedTest?._id;
