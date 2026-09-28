@@ -5,7 +5,7 @@ import {
   submitTest,
   getSubmissionById,
   getStudentSubmissions,
-}
+} from "../controllers/testSubmissionController.js";
 
 import {
   startTestSession,
