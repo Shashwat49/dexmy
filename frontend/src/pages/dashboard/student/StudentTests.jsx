@@ -998,6 +998,7 @@ function App() {
 
   useEffect(() => {
     if (!activeSession?.id || isSubmitted) return;
+    if (questionStates.length !== actualQuestions.length) return;
 
     const answers = questionStates.map((item, index) => ({
       questionId:
