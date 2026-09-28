@@ -30,30 +30,15 @@ export const submitTest = async (req, res) => {
       console.warn("DB fetch warning in submitTest:", dbErr.message);
     }
 
-    // Fallback to sample questions if test/questions not found in DB
-    if (!test || questions.length === 0) {
-      test = {
-        id: testId,
-        _id: testId,
-        title: "General Knowledge Mock Test",
-        marks_per_question: 2,
-        negative_marks: 0.5,
-      };
-      // Synthetic questions matching the submitted questionIds or default 3 questions
-      questions = answers.map((ans, idx) => ({
-        id: ans.questionId || `q-${idx + 1}`,
-        _id: ans.questionId || `q-${idx + 1}`,
-        question_text: `Question ${idx + 1}`,
-        correct_answer: 0, // default option A
-        marks: 2,
-        negative_marks: 0.5,
-      }));
-      if (questions.length === 0) {
-        questions = [
-          { id: "q-1", _id: "q-1", question_text: "Capital of India", correct_answer: 0, marks: 2, negative_marks: 0.5 },
-          { id: "q-2", _id: "q-2", question_text: "Red Planet", correct_answer: 1, marks: 2, negative_marks: 0.5 },
-        ];
-      }
+    // A real test must be backed by a real test record and its assigned questions.
+    // Never manufacture questions during scoring: doing so can produce incorrect marks
+    // when a test exists but its question join/query is incomplete.
+    if (!test) {
+      return res.status(404).json({ success: false, message: "Test not found" });
+    }
+
+    if (questions.length === 0) {
+      return res.status(400).json({ success: false, message: "This test has no questions to score" });
     }
 
     let answered = 0, correct = 0, incorrect = 0, notAnswered = 0, obtainedMarks = 0;
@@ -62,8 +47,13 @@ export const submitTest = async (req, res) => {
     for (const question of questions) {
       const qId = String(question.id || question._id);
       const submittedAnswer = answers.find((ans) => String(ans.questionId) === qId);
-      const selectedAnswer = submittedAnswer && submittedAnswer.selectedAnswer !== null && submittedAnswer.selectedAnswer !== undefined
-          ? Number(submittedAnswer.selectedAnswer) : null;
+      const rawSelectedAnswer = submittedAnswer?.selectedAnswer;
+      const selectedAnswer =
+        rawSelectedAnswer === null ||
+        rawSelectedAnswer === undefined ||
+        rawSelectedAnswer === ""
+          ? null
+          : Number(rawSelectedAnswer);
 
       // Keep the full question context in the result payload so the result page
       // can render the actual question, options, and correct answer. Previously
@@ -100,12 +90,41 @@ export const submitTest = async (req, res) => {
         continue;
       }
 
+      if (!Number.isInteger(selectedAnswer)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid selected answer for question ${qId}`,
+        });
+      }
+
       answered++;
-      const correctAns = question.correct_answer !== undefined ? Number(question.correct_answer) : (Number(question.correctAnswer) || 0);
+      const rawCorrectAnswer =
+        question.correct_answer !== undefined
+          ? question.correct_answer
+          : question.correctAnswer;
+      const correctAns = Number(rawCorrectAnswer);
+
+      if (!Number.isInteger(correctAns)) {
+        return res.status(500).json({
+          success: false,
+          message: `Question ${qId} has an invalid correct answer configuration`,
+        });
+      }
+
+      const questionMarks = Number(question.marks);
+      const testMarks = Number(test.marks_per_question);
+      const marks = Number.isFinite(questionMarks) && questionMarks >= 0
+        ? questionMarks
+        : (Number.isFinite(testMarks) && testMarks >= 0 ? testMarks : 1);
+
+      const questionNegativeMarks = Number(question.negative_marks);
+      const testNegativeMarks = Number(test.negative_marks);
+      const negativeMarks = Number.isFinite(questionNegativeMarks) && questionNegativeMarks >= 0
+        ? questionNegativeMarks
+        : (Number.isFinite(testNegativeMarks) && testNegativeMarks >= 0 ? testNegativeMarks : 0);
 
       if (selectedAnswer === correctAns) {
         correct++;
-        const marks = Number(question.marks ?? test.marks_per_question ?? 1);
         obtainedMarks += marks;
         processedAnswers.push({
           questionId: qId,
@@ -116,7 +135,6 @@ export const submitTest = async (req, res) => {
         });
       } else {
         incorrect++;
-        const negativeMarks = Number(question.negative_marks ?? test.negative_marks ?? 0);
         obtainedMarks -= negativeMarks;
         processedAnswers.push({
           questionId: qId,
@@ -129,10 +147,18 @@ export const submitTest = async (req, res) => {
     }
 
     const totalQuestions = questions.length;
-    const marksPerQ = Number(test.marks_per_question ?? 1);
-    const totalMarks = totalQuestions * marksPerQ;
+    const totalMarks = questions.reduce((sum, question) => {
+      const questionMarks = Number(question.marks);
+      const testMarks = Number(test.marks_per_question);
+      const marks = Number.isFinite(questionMarks) && questionMarks >= 0
+        ? questionMarks
+        : (Number.isFinite(testMarks) && testMarks >= 0 ? testMarks : 1);
+      return sum + marks;
+    }, 0);
     const finalObtainedMarks = Number(obtainedMarks.toFixed(2));
-    const percentage = totalMarks > 0 ? Number(Math.max(0, (finalObtainedMarks / totalMarks) * 100).toFixed(2)) : 0;
+    const percentage = totalMarks > 0
+      ? Number(Math.min(100, Math.max(0, (finalObtainedMarks / totalMarks) * 100)).toFixed(2))
+      : 0;
 
     let submissionId = "sub-" + Date.now();
 
