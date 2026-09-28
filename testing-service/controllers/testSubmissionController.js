@@ -6,11 +6,49 @@ const DEMO_SUBMISSIONS = [];
 
 export const submitTest = async (req, res) => {
   try {
-    const { testId, answers } = req.body;
+    const { testId, answers, sessionId } = req.body;
     const studentId = req.user?.id || "00000000-0000-0000-0000-000000000001";
 
     if (!testId) return res.status(400).json({ success: false, message: "Test ID is required" });
     if (!Array.isArray(answers)) return res.status(400).json({ success: false, message: "Answers must be an array" });
+    if (!sessionId) {
+      return res.status(400).json({ success: false, message: "Active test session is required" });
+    }
+
+    let session;
+    try {
+      const sessionResult = await query(
+        `SELECT id, test_id, student_id, started_at, expires_at, answers, status
+         FROM test_sessions
+         WHERE id = $1 AND student_id = $2`,
+        [sessionId, studentId]
+      );
+
+      if (sessionResult.rows.length === 0) {
+        return res.status(404).json({ success: false, message: "Test session not found" });
+      }
+
+      session = sessionResult.rows[0];
+
+      if (String(session.test_id) !== String(testId)) {
+        return res.status(400).json({ success: false, message: "Test session does not belong to this test" });
+      }
+
+      const expiresAt = new Date(session.expires_at).getTime();
+      const now = Date.now();
+
+      // Small network grace period only for the automatic timeout submission.
+      if (!Number.isFinite(expiresAt) || now > expiresAt + 5000) {
+        return res.status(409).json({
+          success: false,
+          message: "Test time has expired",
+          expired: true,
+        });
+      }
+    } catch (sessionError) {
+      console.error("TEST SESSION VALIDATION ERROR:", sessionError);
+      return res.status(500).json({ success: false, message: "Failed to validate test session" });
+    }
 
     let test = null;
     let questions = [];
@@ -205,6 +243,20 @@ export const submitTest = async (req, res) => {
       answers: processedAnswers,
       createdAt: new Date().toISOString(),
     };
+
+    try {
+      await query(
+        `UPDATE test_sessions
+         SET answers = $1::jsonb, status = 'SUBMITTED', updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2 AND student_id = $3`,
+        [JSON.stringify(processedAnswers.map((answer) => ({
+          questionId: answer.questionId,
+          selectedAnswer: answer.selectedAnswer,
+        }))), sessionId, studentId]
+      );
+    } catch (sessionSaveError) {
+      console.warn("TEST SESSION FINAL SAVE WARNING:", sessionSaveError.message);
+    }
 
     DEMO_SUBMISSIONS.push(resultPayload);
 
