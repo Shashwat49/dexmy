@@ -393,7 +393,7 @@ export default function Classroom() {
             if (!stroke?.id) return;
             committedRef.current.add(stroke.id);
             liveRef.current.delete(stroke.id);
-            const list = strokesByPageRef.current.get(pageNumber) || [];
+            const list = strokesByPageRef.current.get(pageId) || [];
             const isNewStroke = !list.some((s) => s.id === stroke.id);
             if (isNewStroke) list.push(stroke);
             strokesByPageRef.current.set(pageId, list);
