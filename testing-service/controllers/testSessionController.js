@@ -21,6 +21,9 @@ const ensureSessionSchema = async () => {
         ON test_sessions(student_id, test_id);
       CREATE INDEX IF NOT EXISTS idx_test_sessions_expires_at
         ON test_sessions(expires_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_active_test_session_unique
+        ON test_sessions(test_id, student_id)
+        WHERE status = 'IN_PROGRESS';
     `).catch((error) => {
       schemaReadyPromise = null;
       throw error;
@@ -124,12 +127,34 @@ export const startTestSession = async (req, res) => {
       return res.status(400).json({ success: false, message: "Test has an invalid duration" });
     }
 
-    const sessionResult = await query(
-      `INSERT INTO test_sessions (test_id, student_id, started_at, expires_at)
-       VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + ($3 * INTERVAL '1 minute'))
-       RETURNING id, test_id, started_at, expires_at, answers, status`,
-      [testId, studentId, durationMinutes]
-    );
+    let sessionResult;
+    try {
+      sessionResult = await query(
+        `INSERT INTO test_sessions (test_id, student_id, started_at, expires_at)
+         VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + ($3 * INTERVAL '1 minute'))
+         RETURNING id, test_id, started_at, expires_at, answers, status`,
+        [testId, studentId, durationMinutes]
+      );
+    } catch (insertError) {
+      // A second tab can race the active-session lookup. If the unique active
+      // session constraint wins the race, return that existing session.
+      if (insertError?.code !== "23505") throw insertError;
+
+      const existing = await query(
+        `SELECT id, test_id, started_at, expires_at, answers, status
+         FROM test_sessions
+         WHERE test_id = $1
+           AND student_id = $2
+           AND status = 'IN_PROGRESS'
+           AND expires_at > CURRENT_TIMESTAMP
+         ORDER BY started_at DESC
+         LIMIT 1`,
+        [testId, studentId]
+      );
+
+      if (existing.rows.length === 0) throw insertError;
+      sessionResult = existing;
+    }
 
     const session = sessionResult.rows[0];
     return res.status(201).json({
