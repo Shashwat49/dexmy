@@ -280,7 +280,7 @@ function App() {
             if (resumableTest) {
               try {
                 const sessionResponse = await fetch(
-                  "${TESTING_API_BASE}/test-submissions/session/" + savedSession.sessionId,
+                  TESTING_API_BASE + "/test-submissions/session/" + savedSession.sessionId,
                   {
                     headers: {
                       Authorization: "Bearer " + (
@@ -365,7 +365,7 @@ function App() {
         "student";
 
       const response = await fetch(
-        "${TESTING_API_BASE}/test-submissions/start",
+        TESTING_API_BASE + "/test-submissions/start",
         {
           method: "POST",
           headers: {
@@ -1026,7 +1026,7 @@ function App() {
     const timeout = setTimeout(async () => {
       try {
         const response = await fetch(
-          "${TESTING_API_BASE}/test-submissions/session/" + activeSession.id,
+          TESTING_API_BASE + "/test-submissions/session/" + activeSession.id,
           {
             method: "PATCH",
             headers: {
