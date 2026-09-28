@@ -98,3 +98,22 @@ CREATE TABLE IF NOT EXISTS test_purchases (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(test_id, student_id)
 );
+
+
+CREATE TABLE IF NOT EXISTS test_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    test_id UUID REFERENCES tests(id) ON DELETE CASCADE,
+    student_id UUID NOT NULL,
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    answers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status VARCHAR(20) NOT NULL DEFAULT 'IN_PROGRESS',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_test_sessions_student_test
+    ON test_sessions(student_id, test_id);
+
+CREATE INDEX IF NOT EXISTS idx_test_sessions_expires_at
+    ON test_sessions(expires_at);
