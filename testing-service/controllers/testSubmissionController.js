@@ -1,5 +1,5 @@
 import { query } from "../config/db.js";
-import { getTestById } from "./testController.js";
+import { getTestById, DEFAULT_DEMO_TESTS } from "./testController.js";
 
 // In-memory submissions fallback for dev/demo testing
 const DEMO_SUBMISSIONS = [];
@@ -30,9 +30,19 @@ export const submitTest = async (req, res) => {
       console.warn("DB fetch warning in submitTest:", dbErr.message);
     }
 
-    // A real test must be backed by a real test record and its assigned questions.
-    // Never manufacture questions during scoring: doing so can produce incorrect marks
-    // when a test exists but its question join/query is incomplete.
+    // Preserve the built-in tests used by the existing test feature when the
+    // database is unavailable (or when the test is one of the built-in tests).
+    // This keeps existing tests working without fabricating new questions.
+    if (!test) {
+      const demoTest = DEFAULT_DEMO_TESTS.find(
+        (item) => String(item.id || item._id) === String(testId)
+      );
+      if (demoTest) {
+        test = demoTest;
+        questions = Array.isArray(demoTest.questions) ? demoTest.questions : [];
+      }
+    }
+
     if (!test) {
       return res.status(404).json({ success: false, message: "Test not found" });
     }
