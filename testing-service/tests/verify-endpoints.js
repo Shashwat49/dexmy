@@ -152,8 +152,21 @@ async function runTests() {
       }
 
       // 10. Student Test Submission
+      // Live submissions require a server-side test session.
+      const startSessionRes = await request("POST", "/api/test-submissions/start", {
+        testId: firstTest.id,
+      }, {
+        Authorization: "Bearer student",
+      });
+      assert(
+        (startSessionRes.status === 200 || startSessionRes.status === 201) && startSessionRes.body.session?.id,
+        `POST /api/test-submissions/start created/reused a test session`
+      );
+
+      const sessionId = startSessionRes.body.session?.id;
       const submissionPayload = {
         testId: firstTest.id,
+        sessionId,
         answers: [
           { questionId: firstTest.questions?.[0]?.id || "q-101", selectedAnswer: 0 },
           { questionId: firstTest.questions?.[1]?.id || "q-102", selectedAnswer: 1 },
