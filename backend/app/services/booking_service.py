@@ -154,9 +154,7 @@ def get_eligible_teacher_ids(
             TeacherSubject.subject_id
             == subject_id,
 
-            TeacherProfile.is_verified.is_(
-                True
-            ),
+            User.email.in_(VERIFIED_TEACHER_EMAILS),
 
             User.is_active.is_(True),
 
