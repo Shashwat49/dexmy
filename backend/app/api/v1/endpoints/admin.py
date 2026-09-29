@@ -17,7 +17,7 @@ from app.schemas.user import UserRead, UserRoleUpdate
 from app.services.audit_service import record_admin_action
 from app.services.booking_service import assign_teacher_atomic
 from app.services.scheduling_service import can_assign_teacher
-from app.services.teacher_verification import is_verified_teacher_email
+from app.services.teacher_verification import VERIFIED_TEACHER_EMAILS, is_verified_teacher_email
 
 router = APIRouter()
 
@@ -363,7 +363,7 @@ def list_eligible_teachers(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A teacher is already assigned to this booking.")
 
     teachers = db.query(User).join(TeacherProfile, TeacherProfile.user_id == User.id).join(TeacherSubject, TeacherSubject.teacher_id == TeacherProfile.user_id).filter(
-        User.role == UserRole.teacher, User.is_active.is_(True), func.lower(User.email).in_(["singharushi15135@gmail.com","harjeetkaur457@gmail.com","shivamsaraswat9456@gmail.com","tanmaykumar@mymail.com"]), TeacherSubject.subject_id == booking.subject_id
+        User.role == UserRole.teacher, User.is_active.is_(True), func.lower(User.email).in_(VERIFIED_TEACHER_EMAILS), TeacherSubject.subject_id == booking.subject_id
     ).distinct().all()
     eligible = []
     for teacher in teachers:
