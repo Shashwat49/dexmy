@@ -100,7 +100,7 @@ def get_teacher_subject_map(db: Session, teacher_ids: Iterable[object]) -> dict[
     rows = db.query(TeacherSubject.teacher_id, TeacherSubject.subject_id).join(
         TeacherProfile, TeacherProfile.user_id == TeacherSubject.teacher_id
     ).join(User, User.id == TeacherSubject.teacher_id).filter(
-        TeacherSubject.teacher_id.in_(teacher_ids), TeacherProfile.is_verified.is_(True),
+        TeacherSubject.teacher_id.in_(teacher_ids), func.lower(User.email).in_(VERIFIED_TEACHER_EMAILS),
         User.is_active.is_(True), User.role == UserRole.teacher
     ).all()
     result: dict[object, set[int]] = {}
