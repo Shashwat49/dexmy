@@ -8,6 +8,7 @@ from app.core.dependencies import get_current_admin, require_permission
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.admin import AdminAuditLog, AdminPermission, AdminRolePermission, AdminProfile
+from app.models.admin_notification import AdminNotification
 from app.models.booking import Booking, BookingStatus
 from app.models.teacher import Subject, TeacherProfile, TeacherSubject
 from app.models.user import User, UserRole
@@ -405,3 +406,59 @@ def assign_teacher(
         teacher_name=teacher.full_name if teacher else "Unknown", scheduled_at=booking.scheduled_at,
         duration_minutes=booking.duration_minutes, teacher_assignment_status=booking.teacher_assignment_status,
     )
+
+
+# ============================================================
+# ADMIN NOTIFICATIONS
+# ============================================================
+
+@router.get("/notifications")
+def list_admin_notifications(
+    limit: int = 20,
+    current_user: User = Depends(require_permission("student.read")),
+    db: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 100))
+    rows = db.execute(
+        select(AdminNotification)
+        .order_by(AdminNotification.created_at.desc())
+        .limit(limit)
+    ).scalars().all()
+    return [
+        {
+            "id": row.id,
+            "notification_type": row.notification_type,
+            "title": row.title,
+            "message": row.message,
+            "student_id": row.student_id,
+            "is_read": row.is_read,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
+
+
+@router.get("/notifications/unread-count")
+def get_admin_notification_unread_count(
+    current_user: User = Depends(require_permission("student.read")),
+    db: Session = Depends(get_db),
+):
+    count = db.execute(
+        select(func.count())
+        .select_from(AdminNotification)
+        .where(AdminNotification.is_read.is_(False))
+    ).scalar_one()
+    return {"count": count}
+
+
+@router.post("/notifications/read-all")
+def mark_admin_notifications_read(
+    current_user: User = Depends(require_permission("student.read")),
+    db: Session = Depends(get_db),
+):
+    db.query(AdminNotification).filter(AdminNotification.is_read.is_(False)).update(
+        {AdminNotification.is_read: True},
+        synchronize_session=False,
+    )
+    db.commit()
+    return {"ok": True}
