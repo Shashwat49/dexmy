@@ -52,8 +52,10 @@ function PageThumbnail({ page, strokes, number, active, canSelect, canDelete, on
     const ctx = canvas.getContext("2d");
     const width = canvas.width, height = canvas.height;
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, width, height);
+    if (!page.image_url) {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, width, height);
+    }
     let cancelled = false;
     const drawStrokes = () => {
       if (cancelled) return;
@@ -88,25 +90,13 @@ function PageThumbnail({ page, strokes, number, active, canSelect, canDelete, on
       });
       ctx.restore();
     };
-    if (page.image_url) {
-      const image = new Image();
-      image.onload = () => {
-        if (cancelled) return;
-        const scale = Math.min(width / image.width, height / image.height);
-        const drawWidth = image.width * scale, drawHeight = image.height * scale;
-        ctx.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
-        drawStrokes();
-      };
-      image.onerror = drawStrokes;
-      image.src = page.image_url;
-    } else {
-      drawStrokes();
-    }
+    drawStrokes();
     return () => { cancelled = true; };
   }, [page.image_url, strokes, version]);
   return <div className={`relative shrink-0 w-[144px] rounded-lg border overflow-hidden bg-white transition-colors ${active ? "border-red-500 ring-2 ring-red-500/40" : "border-white/15"}`}>
-    <button type="button" disabled={!canSelect} onClick={onSelect} title={`Go to page ${number}`} className="block w-full disabled:cursor-default">
-      <canvas ref={canvasRef} width={240} height={135} className="block w-full aspect-video object-contain" />
+    <button type="button" disabled={!canSelect} onClick={onSelect} title={`Go to page ${number}`} className="relative block w-full aspect-video bg-white disabled:cursor-default">
+      {page.image_url && <img src={page.image_url} alt={`Preview of page ${number}`} loading="lazy" draggable="false" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />}
+      <canvas ref={canvasRef} width={240} height={135} className="absolute inset-0 block w-full h-full pointer-events-none" />
     </button>
     <span className="absolute right-1 bottom-1 min-w-6 h-6 px-1 rounded-md bg-black/80 text-white text-[11px] font-semibold grid place-items-center">{number}</span>
     {canDelete && <button type="button" title={`Delete page ${number}`} aria-label={`Delete page ${number}`} onClick={(event) => { event.stopPropagation(); onDelete(); }} className="absolute right-1 top-1 w-6 h-6 rounded-md bg-red-600 text-white text-sm font-bold shadow hover:bg-red-500">×</button>}
