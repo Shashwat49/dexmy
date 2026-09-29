@@ -35,6 +35,8 @@ from app.models.free_class import (
     StudentFreeClassUse,
 )
 
+from app.services.teacher_verification import VERIFIED_TEACHER_EMAILS
+
 from app.services.scheduling_service import (
     get_slot_capacity as calculate_scheduling_capacity,
     can_accept_booking,
