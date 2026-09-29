@@ -116,6 +116,8 @@ export default function Classroom() {
   const [status, setStatus] = useState("Connecting…"), [notice, setNotice] = useState(""), [tool, setTool] = useState("pen"), [color, setColor] = useState("#111827"), [width, setWidth] = useState(3), [grid, setGrid] = useState(false);
   const [slides, setSlides] = useState(() => [makeWhiteboardPage(1)]), [slide, setSlide] = useState(1), [chat, setChat] = useState([]), [message, setMessage] = useState("");
   const [thumbnailVersion, setThumbnailVersion] = useState(0);
+  const activeBackground = slides[slide - 1]?.image_url || null;
+  const [backgroundSize, setBackgroundSize] = useState(null);
   const [mic, setMic] = useState(false), [camera, setCamera] = useState(false), [screen, setScreen] = useState(false), [studentId, setStudentId] = useState(null), [peerName, setPeerName] = useState("");
   const [permissions, setPermissions] = useState({ mic: true, camera: true, annotate: false, screen_share: false }), [pdfLoading, setPdfLoading] = useState(false), [ending, setEnding] = useState(false), [notesUrl, setNotesUrl] = useState(null), [timer, setTimer] = useState(null), [deadline, setDeadline] = useState(null);
   const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [backPrompt, setBackPrompt] = useState(false);
@@ -123,6 +125,30 @@ export default function Classroom() {
   const canAnnotate = isTeacher || permissions.annotate;
   useEffect(() => { slidesRef.current = slides; }, [slides]); useEffect(() => { slideRef.current = slide; }, [slide]);
   useEffect(() => { gridRef.current = grid; }, [grid]);
+  useEffect(() => {
+    if (!activeBackground) { setBackgroundSize(null); return; }
+    let cancelled = false;
+    let image = imageCacheRef.current.get(activeBackground);
+    if (!image) { image = new Image(); imageCacheRef.current.set(activeBackground, image); }
+    const updateSize = () => {
+      if (!cancelled && image.naturalWidth > 0 && image.naturalHeight > 0)
+        setBackgroundSize({ src: activeBackground, width: image.naturalWidth, height: image.naturalHeight });
+    };
+    const clearSize = () => { if (!cancelled) setBackgroundSize(null); };
+    image.addEventListener("load", updateSize);
+    image.addEventListener("error", clearSize);
+    if (image.complete) updateSize();
+    else if (!image.src) image.src = activeBackground;
+    return () => { cancelled = true; image.removeEventListener("load", updateSize); image.removeEventListener("error", clearSize); };
+  }, [activeBackground]);
+  const getSlideContentRect = useCallback(() => {
+    const currentPage = slidesRef.current[slideRef.current - 1];
+    const size = backgroundSize?.src === currentPage?.image_url ? backgroundSize : null;
+    if (!size?.width || !size?.height) return { x: 0, y: 0, width: W, height: H };
+    const scale = Math.min(W / size.width, H / size.height);
+    const width = size.width * scale, height = size.height * scale;
+    return { x: (W - width) / 2, y: (H - height) / 2, width, height };
+  }, [backgroundSize]);
   useEffect(() => { if (!deadline) return; const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))); tick(); const id = setInterval(tick, 1000); return () => clearInterval(id); }, [deadline]);
   useEffect(() => { let active = true; api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => { if (active) setClassTitle(data.subject_name || "Class"); }).catch(() => {}); return () => { active = false; }; }, [sessionId]);
   useEffect(() => { if (!sessionId) return; const state = { dexmyClassroom: true, sessionId }; window.history.pushState(state, "", window.location.href); const onPopState = () => { window.history.pushState(state, "", window.location.href); if (isTeacher) setBackPrompt(true); else setNotice("You cannot go back while a class is in progress."); }; window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, [sessionId, isTeacher]);
