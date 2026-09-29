@@ -12,16 +12,20 @@ from app.models.teacher_profile_change_request import TeacherProfileChangeReques
 from app.models.user import User, UserRole
 from app.schemas.admin_teacher import AdminTeacherDetail, AdminTeacherListItem, AdminTeacherStatusUpdate, AdminTeacherSubjectRead, AdminTeacherSubjectUpdate
 from app.services.audit_service import record_admin_action
+from app.services.teacher_verification import is_verified_teacher_email
 router=APIRouter()
 @router.get("",response_model=list[AdminTeacherListItem])
 def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id:int|None=None,current_user:User=Depends(require_permission("teacher.read")),db:Session=Depends(get_db)):
     completed=select(func.count(ExternalClassRecord.id)).where(ExternalClassRecord.teacher_id==User.id,ExternalClassRecord.status=="completed").correlate(User).scalar_subquery(); upcoming=select(func.count(Booking.id)).where(Booking.teacher_id==User.id,Booking.status==BookingStatus.confirmed,Booking.scheduled_at>=func.now()).correlate(User).scalar_subquery(); subject_count=select(func.count(TeacherSubject.subject_id)).where(TeacherSubject.teacher_id==User.id).correlate(User).scalar_subquery()
     query=select(User,TeacherProfile,subject_count,completed,upcoming).join(TeacherProfile,TeacherProfile.user_id==User.id).where(User.role==UserRole.teacher)
-    if verified is not None: query=query.where(TeacherProfile.is_verified.is_(verified))
+    if verified is not None:
+        verified_emails = tuple(__import__("app.services.teacher_verification", fromlist=["VERIFIED_TEACHER_EMAILS"]).VERIFIED_TEACHER_EMAILS)
+        email_filter = func.lower(User.email).in_(verified_emails)
+        query=query.where(email_filter if verified else ~email_filter)
     if active is not None: query=query.where(User.is_active.is_(active))
     if subject_id is not None: query=query.join(TeacherSubject,TeacherSubject.teacher_id==User.id).where(TeacherSubject.subject_id==subject_id)
     rows=db.execute(query.order_by(User.created_at.desc())).all()
-    return [AdminTeacherListItem(id=u.id,full_name=u.full_name,email=u.email,phone=u.phone,is_active=u.is_active,is_verified=p.is_verified,rating_avg=p.rating_avg,rating_count=p.rating_count,years_experience=p.years_experience,hourly_rate=p.hourly_rate,subject_count=int(s or 0),completed_classes=int(d or 0),upcoming_classes=int(x or 0)) for u,p,s,d,x in rows]
+    return [AdminTeacherListItem(id=u.id,full_name=u.full_name,email=u.email,phone=u.phone,is_active=u.is_active,is_verified=is_verified_teacher_email(u.email),rating_avg=p.rating_avg,rating_count=p.rating_count,years_experience=p.years_experience,hourly_rate=p.hourly_rate,subject_count=int(s or 0),completed_classes=int(d or 0),upcoming_classes=int(x or 0)) for u,p,s,d,x in rows]
 @router.get("/profile-change-requests",response_model=list[dict])
 def list_profile_change_requests(current_user:User=Depends(require_permission("teacher.read")),db:Session=Depends(get_db)):
     rows=db.execute(select(TeacherProfileChangeRequest,User).join(User,User.id==TeacherProfileChangeRequest.teacher_id).order_by(TeacherProfileChangeRequest.created_at.desc())).all()
@@ -46,7 +50,7 @@ def review_profile_change_request(request_id:uuid.UUID,payload:dict,request:Requ
             db.query(TeacherSubject).filter(TeacherSubject.teacher_id==item.teacher_id).delete(synchronize_session=False)
             for sid in ids: db.add(TeacherSubject(teacher_id=item.teacher_id,subject_id=sid))
         # The first approved profile application also completes teacher verification.
-        if not profile.is_verified: profile.is_verified=True
+        profile.is_verified = is_verified_teacher_email(db.get(User, item.teacher_id).email if db.get(User, item.teacher_id) else None)
     item.status=decision; item.reviewed_by=current_user.id; item.review_reason=str(reason).strip() if reason else None; item.reviewed_at=datetime.now(timezone.utc)
     record_admin_action(db,admin_user_id=current_user.id,action=f"teacher.profile_change.{decision}",resource_type="teacher_profile_change_request",resource_id=item.id,new_values={"status":decision,"review_reason":item.review_reason},ip_address=request.client.host if request.client else None,user_agent=request.headers.get("user-agent")); db.commit()
     return {"id":item.id,"status":item.status,"reviewed_at":item.reviewed_at}
@@ -55,7 +59,7 @@ def get_admin_teacher(teacher_id:uuid.UUID,current_user:User=Depends(require_per
     row=db.execute(select(User,TeacherProfile).join(TeacherProfile,TeacherProfile.user_id==User.id).where(User.id==teacher_id,User.role==UserRole.teacher)).one_or_none()
     if row is None: raise HTTPException(status_code=404,detail="Teacher not found")
     user,profile=row; subjects=db.execute(select(Subject.name).join(TeacherSubject,TeacherSubject.subject_id==Subject.id).where(TeacherSubject.teacher_id==teacher_id).order_by(Subject.name.asc())).scalars().all(); completed=db.execute(select(func.count(ExternalClassRecord.id)).where(ExternalClassRecord.teacher_id==teacher_id,ExternalClassRecord.status=="completed")).scalar_one(); upcoming=db.execute(select(func.count(Booking.id)).where(Booking.teacher_id==teacher_id,Booking.status==BookingStatus.confirmed,Booking.scheduled_at>=func.now())).scalar_one()
-    return AdminTeacherDetail(id=user.id,full_name=user.full_name,email=user.email,phone=user.phone,is_active=user.is_active,is_verified=profile.is_verified,rating_avg=profile.rating_avg,rating_count=profile.rating_count,years_experience=profile.years_experience,hourly_rate=profile.hourly_rate,subject_count=len(subjects),completed_classes=int(completed),upcoming_classes=int(upcoming),bio=profile.bio,qualifications=profile.qualifications,subjects=list(subjects),created_at=user.created_at)
+    return AdminTeacherDetail(id=user.id,full_name=user.full_name,email=user.email,phone=user.phone,is_active=user.is_active,is_verified=is_verified_teacher_email(user.email),rating_avg=profile.rating_avg,rating_count=profile.rating_count,years_experience=profile.years_experience,hourly_rate=profile.hourly_rate,subject_count=len(subjects),completed_classes=int(completed),upcoming_classes=int(upcoming),bio=profile.bio,qualifications=profile.qualifications,subjects=list(subjects),created_at=user.created_at)
 @router.patch("/{teacher_id}/status",response_model=AdminTeacherListItem)
 def update_teacher_status(teacher_id:uuid.UUID,payload:AdminTeacherStatusUpdate,request:Request,current_user:User=Depends(require_permission("teacher.suspend")),db:Session=Depends(get_db)):
     user=db.execute(select(User).where(User.id==teacher_id,User.role==UserRole.teacher)).scalar_one_or_none()
