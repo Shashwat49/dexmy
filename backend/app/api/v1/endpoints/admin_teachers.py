@@ -50,7 +50,8 @@ def review_profile_change_request(request_id:uuid.UUID,payload:dict,request:Requ
             db.query(TeacherSubject).filter(TeacherSubject.teacher_id==item.teacher_id).delete(synchronize_session=False)
             for sid in ids: db.add(TeacherSubject(teacher_id=item.teacher_id,subject_id=sid))
         # The first approved profile application also completes teacher verification.
-        profile.is_verified = is_verified_teacher_email(db.get(User, item.teacher_id).email if db.get(User, item.teacher_id) else None)
+        teacher = db.get(User, item.teacher_id)
+        profile.is_verified = is_verified_teacher_email(teacher.email if teacher else None)
     item.status=decision; item.reviewed_by=current_user.id; item.review_reason=str(reason).strip() if reason else None; item.reviewed_at=datetime.now(timezone.utc)
     record_admin_action(db,admin_user_id=current_user.id,action=f"teacher.profile_change.{decision}",resource_type="teacher_profile_change_request",resource_id=item.id,new_values={"status":decision,"review_reason":item.review_reason},ip_address=request.client.host if request.client else None,user_agent=request.headers.get("user-agent")); db.commit()
     return {"id":item.id,"status":item.status,"reviewed_at":item.reviewed_at}
