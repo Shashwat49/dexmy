@@ -44,6 +44,65 @@ const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Da
 const makeWhiteboardPage = (page_number = 1) => ({ page_id: newId(), page_number, page_type: "whiteboard", image_url: null });
 const normalizePages = (pages) => (pages?.length ? pages : [makeWhiteboardPage(1)]).map((p,i) => ({ ...p, page_id: p.page_id || newId(), page_number: i+1, page_type: p.page_type || (p.image_url ? "pdf" : "whiteboard") }));
 
+function PageThumbnail({ page, strokes, number, active, canSelect, canDelete, onSelect, onDelete, version }) {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width, height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+    if (!page.image_url) {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, width, height);
+    }
+    let cancelled = false;
+    const drawStrokes = () => {
+      if (cancelled) return;
+      ctx.save();
+      ctx.scale(width / W, height / H);
+      (strokes || []).forEach((stroke) => {
+        const points = stroke.points || [];
+        if (!points.length) return;
+        const first = points[0], last = points[points.length - 1];
+        ctx.save();
+        ctx.strokeStyle = stroke.tool === "eraser" ? "#fff" : (stroke.color || "#111827");
+        ctx.fillStyle = stroke.color || "#111827";
+        ctx.lineWidth = Math.max(2, (stroke.width || 3) * (stroke.tool === "highlighter" ? 4 : 1));
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        if (["pen", "highlighter", "eraser"].includes(stroke.tool)) {
+          ctx.beginPath();
+          points.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
+          ctx.stroke();
+        } else if (["line", "arrow"].includes(stroke.tool)) {
+          ctx.beginPath(); ctx.moveTo(first.x, first.y); ctx.lineTo(last.x, last.y); ctx.stroke();
+        } else if (stroke.tool === "rect") {
+          ctx.strokeRect(first.x, first.y, last.x - first.x, last.y - first.y);
+        } else if (stroke.tool === "circle") {
+          ctx.beginPath(); ctx.arc(first.x, first.y, Math.hypot(last.x - first.x, last.y - first.y), 0, Math.PI * 2); ctx.stroke();
+        } else if (stroke.tool === "text") {
+          ctx.font = "48px sans-serif"; ctx.fillText(stroke.text || "Text", first.x, first.y);
+        } else if (stroke.tool === "sticky") {
+          ctx.fillStyle = "#fff7a8"; ctx.fillRect(first.x, first.y, Math.max(160, last.x - first.x), Math.max(100, last.y - first.y));
+        }
+        ctx.restore();
+      });
+      ctx.restore();
+    };
+    drawStrokes();
+    return () => { cancelled = true; };
+  }, [page.image_url, strokes, version]);
+  return <div className={`relative shrink-0 w-[144px] rounded-lg border overflow-hidden bg-white transition-colors ${active ? "border-red-500 ring-2 ring-red-500/40" : "border-white/15"}`}>
+    <button type="button" disabled={!canSelect} onClick={onSelect} title={`Go to page ${number}`} className="relative block w-full aspect-video bg-white disabled:cursor-default">
+      {page.image_url && <img src={page.image_url} alt={`Preview of page ${number}`} loading="lazy" draggable="false" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />}
+      <canvas ref={canvasRef} width={240} height={135} className="absolute inset-0 block w-full h-full pointer-events-none" />
+    </button>
+    <span className="absolute right-1 bottom-1 min-w-6 h-6 px-1 rounded-md bg-black/80 text-white text-[11px] font-semibold grid place-items-center">{number}</span>
+    {canDelete && <button type="button" title={`Delete page ${number}`} aria-label={`Delete page ${number}`} onClick={(event) => { event.stopPropagation(); onDelete(); }} className="absolute right-1 top-1 w-6 h-6 rounded-md bg-red-600 text-white text-sm font-bold shadow hover:bg-red-500">×</button>}
+  </div>;
+}
+
 export default function Classroom() {
   const { user } = useAuth(); const { sessionId } = useParams(); const navigate = useNavigate();
   const isTeacher = user?.role === "teacher"; const email = user?.email || "";
@@ -56,6 +115,7 @@ export default function Classroom() {
   const gridRef = useRef(false);
   const [status, setStatus] = useState("Connecting…"), [notice, setNotice] = useState(""), [tool, setTool] = useState("pen"), [color, setColor] = useState("#111827"), [width, setWidth] = useState(3), [grid, setGrid] = useState(false);
   const [slides, setSlides] = useState(() => [makeWhiteboardPage(1)]), [slide, setSlide] = useState(1), [chat, setChat] = useState([]), [message, setMessage] = useState("");
+  const [thumbnailVersion, setThumbnailVersion] = useState(0);
   const [mic, setMic] = useState(false), [camera, setCamera] = useState(false), [screen, setScreen] = useState(false), [studentId, setStudentId] = useState(null), [peerName, setPeerName] = useState("");
   const [permissions, setPermissions] = useState({ mic: true, camera: true, annotate: false, screen_share: false }), [pdfLoading, setPdfLoading] = useState(false), [ending, setEnding] = useState(false), [notesUrl, setNotesUrl] = useState(null), [timer, setTimer] = useState(null), [deadline, setDeadline] = useState(null);
   const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [backPrompt, setBackPrompt] = useState(false);
@@ -91,11 +151,52 @@ export default function Classroom() {
   const point = (event) => { const r = canvasRef.current.getBoundingClientRect(); return { x: clamp((event.clientX - r.left) * W / r.width, 0, W), y: clamp((event.clientY - r.top) * H / r.height, 0, H) }; };
   const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (tool === "select" || !DRAW_TOOLS.has(tool)) return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p] }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
   const onPointerMove = (event) => { const d = drawRef.current; if (!d) return; d.points.push(point(event)); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
-  const onPointerUp = (event) => { const d = drawRef.current; drawRef.current = null; canvasRef.current?.releasePointerCapture?.(event.pointerId); if (!d) return; if (["text", "sticky"].includes(d.tool)) { const text = window.prompt(d.tool === "sticky" ? "Sticky note text" : "Text"); if (!text) { redraw(); return; } d.text = text; if (d.tool === "text") d.points = [d.points[0]]; } const pageNumber = slideRef.current; const pageId = currentPageId(pageNumber); if (!["pen", "highlighter", "eraser"].includes(d.tool)) { if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0); queueLive(d, d.points, true); flushLive(true); } else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); drawBaseRef.current = null; publishCommit(d, pageNumber); send({ type: "whiteboard_event", payload: { kind: "stroke", stroke: d, page_number: pageNumber, page_id: pageId } }); saveSnapshot(); };
+  const onPointerUp = (event) => { const d = drawRef.current; drawRef.current = null; canvasRef.current?.releasePointerCapture?.(event.pointerId); if (!d) return; if (["text", "sticky"].includes(d.tool)) { const text = window.prompt(d.tool === "sticky" ? "Sticky note text" : "Text"); if (!text) { redraw(); return; } d.text = text; if (d.tool === "text") d.points = [d.points[0]]; } const pageNumber = slideRef.current; const pageId = currentPageId(pageNumber); if (!["pen", "highlighter", "eraser"].includes(d.tool)) { if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0); queueLive(d, d.points, true); flushLive(true); } else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); drawBaseRef.current = null; publishCommit(d, pageNumber); send({ type: "whiteboard_event", payload: { kind: "stroke", stroke: d, page_number: pageNumber, page_id: pageId } }); setThumbnailVersion((version) => version + 1); saveSnapshot(); };
   const changeSlide = (target) => { if (!isTeacher) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(currentPageId(next), strokesByPageRef.current.get(currentPageId(next)) || []); publishControl({ kind: "page", page_number: next, page_id: currentPageId(next) }); };
-  const addSlide = () => { if (!isTeacher) return; const current = slideRef.current; saveSnapshotNow(current); const next = slidesRef.current.length + 1; const newPage = makeWhiteboardPage(next); strokesByPageRef.current.set(newPage.page_id, []); const updated = [...slidesRef.current, newPage]; slidesRef.current = updated; setSlides(updated); slideRef.current = next; setSlide(next); slideControlActiveRef.current = true; publishControl({ kind: "slides", pages: updated, page_number: next, page_id: newPage.page_id }); };
-  const undo = () => { if (!isTeacher) return; const list = currentStrokes(); if (!list.length) return; list.pop(); redraw(); send({ type: "whiteboard_event", payload: { kind: "undo", page_number: slideRef.current, page_id: currentPageId() } }); saveSnapshot(); };
-  const clearBoard = () => { if (!isTeacher) return; strokesByPageRef.current.set(currentPageId(), []); redraw(); send({ type: "whiteboard_event", payload: { kind: "clear", page_number: slideRef.current, page_id: currentPageId() } }); saveSnapshot(); };
+  const addSlide = async () => {
+    if (!isTeacher) return;
+    const current = slideRef.current;
+    saveSnapshotNow(current);
+    try {
+      const afterPageId = currentPageId(current);
+      const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}`);
+      const updated = normalizePages(data.pages);
+      const next = Math.max(1, updated.findIndex((page) => page.page_id === data.page_id) + 1);
+      const previousStrokes = strokesByPageRef.current;
+      const nextStrokes = new Map(updated.map((page) => [page.page_id, previousStrokes.get(page.page_id) || []]));
+      nextStrokes.set(data.page_id, []);
+      strokesByPageRef.current = nextStrokes;
+      slidesRef.current = updated; setSlides(updated);
+      slideRef.current = next; setSlide(next);
+      slideControlActiveRef.current = true;
+      publishControl({ kind: "slides", pages: updated, page_number: next, page_id: data.page_id });
+      setThumbnailVersion((version) => version + 1);
+    } catch (error) {
+      setNotice(error.response?.data?.detail || "Could not add slide.");
+    }
+  };
+  const deleteSlide = async (page) => {
+    if (!isTeacher || slidesRef.current.length <= 1) return;
+    const currentPage = slidesRef.current[slideRef.current - 1];
+    try {
+      const query = currentPage?.page_id ? `?active_page_id=${encodeURIComponent(currentPage.page_id)}` : "";
+      const { data } = await api.delete(`/classroom/sessions/${sessionId}/whiteboard-pages/${page.page_id}${query}`);
+      const updated = normalizePages(data.pages);
+      const previousStrokes = strokesByPageRef.current;
+      strokesByPageRef.current = new Map(updated.map((item) => [item.page_id, previousStrokes.get(item.page_id) || []]));
+      slidesRef.current = updated; setSlides(updated);
+      const next = clamp(Number(data.page_number) || 1, 1, updated.length);
+      slideRef.current = next; setSlide(next);
+      slideControlActiveRef.current = true;
+      publishControl({ kind: "slides", pages: updated, page_number: next, page_id: updated[next - 1]?.page_id });
+      setThumbnailVersion((version) => version + 1);
+      setNotice("Slide deleted.");
+    } catch (error) {
+      setNotice(error.response?.data?.detail || "Could not delete slide.");
+    }
+  };
+  const undo = () => { if (!isTeacher) return; const list = currentStrokes(); if (!list.length) return; list.pop(); redraw(); setThumbnailVersion((version) => version + 1); send({ type: "whiteboard_event", payload: { kind: "undo", page_number: slideRef.current, page_id: currentPageId() } }); saveSnapshot(); };
+  const clearBoard = () => { if (!isTeacher) return; strokesByPageRef.current.set(currentPageId(), []); redraw(); setThumbnailVersion((version) => version + 1); send({ type: "whiteboard_event", payload: { kind: "clear", page_number: slideRef.current, page_id: currentPageId() } }); saveSnapshot(); };
   const uploadPdf = async (file) => { if (!isTeacher || !file) return; if (file.size > 30 * 1024 * 1024) return setNotice("PDFs are limited to 30 MB."); if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) return setNotice("Please select a PDF file."); setPdfLoading(true); try { const form = new FormData(); form.append("file", file); const afterPageId = currentPageId(); const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pdf?after_page_id=${encodeURIComponent(afterPageId || "")}`, form); const next = normalizePages(data.pages); const firstInserted = next.findIndex((p) => data.inserted_page_ids?.includes(p.page_id)); const insertedPage = firstInserted >= 0 ? firstInserted + 1 : slideRef.current; slidesRef.current = next; setSlides(next); strokesByPageRef.current = new Map(next.map((p) => [p.page_id, strokesByPageRef.current.get(p.page_id) || []])); slideRef.current = insertedPage; setSlide(insertedPage); slideControlActiveRef.current = true; publishControl({ kind: "slides", pages: next, page_number: insertedPage, page_id: next[insertedPage - 1]?.page_id }); setNotice(`${data.inserted_count} PDF page${data.inserted_count === 1 ? "" : "s"} inserted after the current page.`); } catch (error) { setNotice(error.response?.data?.detail || "PDF upload failed."); } finally { setPdfLoading(false); } };
   const uploadChatFile = async (file) => { if (!file) return; if (file.size > 20 * 1024 * 1024) return setNotice("Chat files are limited to 20 MB."); try { const form = new FormData(); form.append("file", file); const { data } = await api.post(`/classroom/sessions/${sessionId}/chat-file`, form); send({ type: "chat", file_url: data.file_url, file_name: data.file_name, message_text: "" }); setChat((items) => [...items, { mine: true, file_url: data.file_url, file_name: data.file_name }]); } catch (error) { setNotice(error.response?.data?.detail || "Upload failed."); } };
   const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant || mediaBusyRef.current) return; if (kind === "mic" && !isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); if (kind === "camera" && !isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); if (kind === "screen" && !isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); mediaBusyRef.current = true; try { if (kind === "mic") { const publication = participant.getTrackPublication?.(Track.Source.Microphone); const next = !(publication?.track && !publication.isMuted); await participant.setMicrophoneEnabled(next); micStateRef.current = next; setMic(next); } else if (kind === "camera") { const publication = participant.getTrackPublication?.(Track.Source.Camera); const next = !(publication?.track && !publication.isMuted); await participant.setCameraEnabled(next); cameraStateRef.current = next; setCamera(next); } else if (kind === "screen") { const publication = participant.getTrackPublication?.(Track.Source.ScreenShare); const next = !(publication?.track && !publication.isMuted); await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" }); setScreen(next); } } catch (error) { if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") setNotice("Camera/microphone access was blocked. Please allow the device permission in your browser and try again."); else setNotice(error?.message || "Could not change media."); } finally { mediaBusyRef.current = false; } };
@@ -142,14 +243,18 @@ export default function Classroom() {
             roomRef.current?.localParticipant.setScreenShareEnabled(false).then(() => setScreen(false)).catch(() => {});
           }
         }
-        if (msg.type === "pdf_pages_ready") {
-          if (slideControlActiveRef.current) return;
+        if (msg.type === "pdf_pages_ready" || msg.type === "whiteboard_pages_updated") {
           const p = normalizePages(msg.pages);
+          const oldStrokes = strokesByPageRef.current;
+          const activeId = msg.page_id || slidesRef.current[slideRef.current - 1]?.page_id;
           slidesRef.current = p;
           setSlides(p);
-          slideRef.current = 1;
-          setSlide(1);
-          strokesByPageRef.current = new Map(normalizePages(p).map((x) => [x.page_id, []]));
+          strokesByPageRef.current = new Map(p.map((item) => [item.page_id, oldStrokes.get(item.page_id) || []]));
+          const selected = p.findIndex((item) => item.page_id === activeId);
+          const next = selected >= 0 ? selected + 1 : clamp(Number(msg.page_number) || 1, 1, p.length);
+          slideRef.current = next;
+          setSlide(next);
+          setThumbnailVersion((version) => version + 1);
         }
         if (msg.type === "whiteboard_state") {
           if (slideControlActiveRef.current) return;
@@ -185,21 +290,25 @@ export default function Classroom() {
           }
           if (p.kind === "slides") {
             const next = normalizePages(p.pages);
+            const oldStrokes = strokesByPageRef.current;
             slidesRef.current = next;
             setSlides(next);
             const nextPage = clamp(Number(p.page_number) || 1, 1, next.length);
             slideRef.current = nextPage;
             setSlide(nextPage);
-            strokesByPageRef.current = new Map(next.map((x) => [x.page_id, strokesByPageRef.current.get(x.page_id) || []]));
+            strokesByPageRef.current = new Map(next.map((x) => [x.page_id, oldStrokes.get(x.page_id) || []]));
+            setThumbnailVersion((version) => version + 1);
             redraw();
           }
           if (p.kind === "pdf") {
             const next = normalizePages(p.pages);
+            const oldStrokes = strokesByPageRef.current;
             slidesRef.current = next;
             setSlides(next);
             slideRef.current = 1;
             setSlide(1);
-            strokesByPageRef.current = new Map(next.map((x) => [x.page_number, []]));
+            strokesByPageRef.current = new Map(next.map((x) => [x.page_id, oldStrokes.get(x.page_id) || []]));
+            setThumbnailVersion((version) => version + 1);
             redraw();
           }
           if (p.kind === "page") {
@@ -450,6 +559,11 @@ export default function Classroom() {
     <main className="flex-1 min-h-0 flex overflow-hidden"><section className="flex-1 min-w-0 flex flex-col">
       <div className="h-12 shrink-0 px-2 flex items-center gap-1 border-b border-white/10 bg-[#0f172a] overflow-x-auto">{TOOLS.map(([id, label]) => <button key={id} disabled={!canAnnotate} onClick={() => setTool(id)} className={`px-2.5 py-1.5 rounded text-[11px] shrink-0 disabled:opacity-40 disabled:cursor-not-allowed ${tool === id ? "bg-red-600" : "bg-white/5"}`}>{label}</button>)}<button disabled={!isTeacher} onClick={undo} className="px-2.5 py-1.5 bg-white/5 rounded text-[11px] disabled:opacity-40">Undo</button><button disabled={!isTeacher} onClick={clearBoard} className="px-2.5 py-1.5 bg-white/5 rounded text-[11px] disabled:opacity-40">Clear</button><button disabled={!isTeacher} onClick={() => setGrid((v) => { const next = !v; publishControl({ kind: "grid", enabled: next }); return next; })} className="px-2.5 py-1.5 bg-white/5 rounded text-[11px] disabled:opacity-40">Grid</button>{isTeacher && <label className="px-3 py-1.5 bg-white/5 rounded text-[11px] cursor-pointer">{pdfLoading ? "Importing…" : "Upload PDF"}<input hidden type="file" accept="application/pdf,.pdf" disabled={pdfLoading} onChange={(e) => { uploadPdf(e.target.files?.[0]); e.target.value = ""; }} /></label>}<button disabled={!isTeacher} onClick={addSlide} className="px-3 py-1.5 bg-white/5 rounded text-[11px] disabled:opacity-40">＋ Slide</button>{isTeacher && <button onClick={() => setShowPermissions((v) => !v)} className={`px-3 py-1.5 rounded text-[11px] ${showPermissions ? "bg-red-600" : "bg-white/5"}`}>Permissions</button>}<input type="color" value={color} onChange={(e) => setColor(e.target.value)} disabled={!canAnnotate} className="w-7 h-7 ml-auto disabled:opacity-40" /><input type="range" min="1" max="18" value={width} onChange={(e) => setWidth(Number(e.target.value))} disabled={!canAnnotate} className="w-20 disabled:opacity-40" /></div>
       <div className="flex-1 min-h-0 flex items-center justify-center p-3 bg-[#070b16]"><div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl classroom-whiteboard-frame">{slides[slide - 1]?.image_url && <img src={slides[slide - 1].image_url} alt="PDF page" className="absolute inset-0 w-full h-full object-contain pointer-events-none" /> }<canvas ref={canvasRef} width={W} height={H} className={`absolute inset-0 w-full h-full touch-none ${!canAnnotate ? "cursor-default" : "cursor-crosshair"}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} /><div className="absolute inset-0 z-40 pointer-events-none"><img src="/dexmy-logo-bg-removed.png" alt="Dexmy" draggable="false" className="absolute left-[20px] top-[12px] h-[34px] w-auto max-w-[140px] object-contain" /><div className="absolute right-[20px] bottom-[14px] text-[14px] font-medium text-[#64748c] opacity-80">{email}</div></div>{slides.length > 1 && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2 bg-black/70 rounded-xl px-2 py-1.5"><button disabled={!isTeacher} onClick={() => changeSlide(slide - 1)} className="disabled:opacity-40">‹</button><span className="text-xs px-2">Slide {slide}/{slides.length}</span><button disabled={!isTeacher} onClick={() => changeSlide(slide + 1)} className="disabled:opacity-40">›</button></div>}{pdfLoading && <div className="absolute inset-0 z-30 grid place-items-center bg-black/55"><div className="bg-[#111827] rounded-2xl p-6">Importing PDF slides…</div></div>}</div></div>
+      <div className="h-[118px] shrink-0 border-t border-white/10 bg-[#111827] px-3 py-2">
+        <div className="h-full flex items-center gap-3 overflow-x-auto classroom-page-filmstrip">
+          {slides.map((page, index) => <PageThumbnail key={page.page_id} page={page} number={index + 1} active={slide === index + 1} canSelect={isTeacher} canDelete={isTeacher && slides.length > 1} onSelect={() => changeSlide(index + 1)} onDelete={() => deleteSlide(page)} strokes={strokesByPageRef.current.get(page.page_id) || []} version={thumbnailVersion} />)}
+        </div>
+      </div>
       <div className="h-16 shrink-0 border-t border-white/10 bg-[#111827] flex items-center justify-center gap-2 classroom-legacy-controls"><button onClick={() => media("mic")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{mic ? "Mute" : "Mic"}</button><button onClick={() => media("camera")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{camera ? "Camera off" : "Camera"}</button><button onClick={() => media("screen")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{screen ? "Stop sharing" : "Share screen"}</button></div>
     </section>
     <aside className="classroom-side-panel border-l border-white/10 bg-[#0f172a]"><div className="h-14 shrink-0 px-3 border-b border-white/10 flex items-center text-sm font-semibold">{peerName || (isTeacher ? "Dexmy Student" : "Dexmy Tutor")}</div><div className="classroom-video-stack"><div className="classroom-video"><span className="absolute left-2 top-2 z-10 rounded bg-black/60 px-2 py-1 text-[10px]">Teacher</span><div id="local-video" className="absolute inset-0" /><div className="classroom-video-controls-left">{isTeacher && videoControl("mic", mic, "Teacher microphone")}</div>{isTeacher && <div className="classroom-video-controls-right">{videoControl("camera", camera, "Teacher camera")}{videoControl("screen", screen, "Teacher screen share")}</div>}</div><div className="classroom-video"><span className="absolute left-2 top-2 z-10 rounded bg-black/60 px-2 py-1 text-[10px]">Student</span><div id="remote-video" className="absolute inset-0" />{!isTeacher && <><div className="classroom-video-controls-left">{videoControl("mic", mic, "Student microphone")}</div><div className="classroom-video-controls-right">{videoControl("camera", camera, "Student camera")}{videoControl("screen", screen, "Student screen share")}</div></>}{isTeacher && <div className="classroom-student-permission-indicators"><span className={permissions.mic ? "allowed" : "blocked"}>🎙</span><span className={permissions.camera ? "allowed" : "blocked"}>▣</span></div>}</div><div id="remote-screen" className="hidden" /><div id="local-screen" className="hidden" /><div id="remote-audio" className="hidden" /><div id="local-audio" className="hidden" /></div>{isTeacher && showPermissions && <div className="classroom-permissions-popover"><div className="text-xs font-semibold mb-2">Student permissions</div><div className="grid grid-cols-2 gap-1.5">{[["annotate", "Annotate"], ["screen_share", "Share screen"]].map(([key, label]) => <button key={key} onClick={() => setPermission(key, !permissions[key])} className={`px-2 py-2 rounded text-[10px] ${permissions[key] ? "bg-emerald-600/80" : "bg-white/5"}`}>{permissions[key] ? "✓ " : "✕ "}{label}</button>)}</div></div>}<div className="classroom-chat"><div className="classroom-chat-messages">{chat.length === 0 && <div className="h-full grid place-items-center text-xs text-slate-600">No messages yet</div>}{chat.map((item, i) => <div key={i} className={`flex mb-2 ${item.mine ? "justify-end" : "justify-start"}`}><div className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs ${item.mine ? "bg-red-600" : "bg-white/10"}`}>{item.file_url ? <a href={item.file_url} target="_blank" rel="noreferrer" className="underline">{item.file_name || "Open file"}</a> : item.text}</div></div>)}</div><form onSubmit={sendMessage} className="classroom-chat-form p-2 border-t border-white/10 flex gap-2"><label className="h-9 w-9 grid place-items-center bg-white/5 rounded cursor-pointer">＋<input hidden type="file" onChange={(e) => { uploadChatFile(e.target.files?.[0]); e.target.value = ""; }} /></label><input value={message} onChange={(e) => setMessage(e.target.value)} placeholder="Message…" className="flex-1 h-9 bg-white/5 rounded px-3 text-xs" /><button className="h-9 px-3 bg-red-600 rounded text-xs">Send</button></form></div></aside></main>

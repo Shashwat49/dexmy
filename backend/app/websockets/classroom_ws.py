@@ -319,7 +319,13 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         try: page_id=uuid.UUID(str(data.get("page_id"))) if data.get("page_id") else None
         except (ValueError,TypeError): page_id=None
         page=db.get(ClassroomPage,page_id) if page_id else None
-        if page is None or page.session_id != session_id: page=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id,ClassroomPage.position==page_number).first()
+        # An explicitly supplied page ID that no longer exists was deleted or
+        # is stale. Do not fall back to its old page number and attach that
+        # snapshot to a different slide.
+        if page_id and (page is None or page.session_id != session_id):
+            return
+        if page is None:
+            page=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id,ClassroomPage.position==page_number).first()
         if page is None:
             page=ClassroomPage(session_id=session_id,position=page_number,page_type="whiteboard"); db.add(page); db.flush()
         existing=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
