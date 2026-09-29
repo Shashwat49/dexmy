@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Routes, Route } from "react-router-dom";
+import { Navigate, Routes, Route } from "react-router-dom";
 import Landing from "./pages/Landing";
 import ProgramPage from "./pages/ProgramPage";
 import Login from "./pages/Login";
@@ -59,6 +59,20 @@ const StudentTests = lazy(() => import("./pages/dashboard/student/StudentTests")
 
 const ADMIN_ROLES = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"];
 const TEST_CREATOR_ROLES = ["test_creator", "admin", "super_admin"];
+
+function RestrictedStudentTests() {
+  const storedUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("dexmy_user") || "null");
+    } catch {
+      return null;
+    }
+  })();
+  if (String(storedUser?.email || "").toLowerCase() === "wargod3508@gmail.com") {
+    return <Navigate to="/dashboard/student" replace />;
+  }
+  return <StudentTests />;
+}
 
 function PageLoading() {
   return (
@@ -151,8 +165,8 @@ export default function App() {
         <Route path="/test-creator/questions/:id/preview" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorQuestionPreview /></ProtectedRoute>} />
 
         {/* Task 3: Student Tests Routes */}
-        <Route path="/tests" element={<ProtectedRoute><StudentTests /></ProtectedRoute>} />
-        <Route path="/dashboard/student/tests" element={<StudentDashboardPage><StudentTests /></StudentDashboardPage>} />
+        <Route path="/tests" element={<ProtectedRoute><RestrictedStudentTests /></ProtectedRoute>} />
+        <Route path="/dashboard/student/tests" element={<StudentDashboardPage><RestrictedStudentTests /></StudentDashboardPage>} />
       </Routes>
     </Suspense>
   );
