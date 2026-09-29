@@ -254,7 +254,6 @@ export default function Classroom() {
           }
         }
         if (msg.type === "pdf_pages_ready" || msg.type === "whiteboard_pages_updated") {
-          if (slideControlActiveRef.current && msg.type === "pdf_pages_ready") return;
           const p = normalizePages(msg.pages);
           const oldStrokes = strokesByPageRef.current;
           const activeId = msg.page_id || slidesRef.current[slideRef.current - 1]?.page_id;
@@ -313,11 +312,13 @@ export default function Classroom() {
           }
           if (p.kind === "pdf") {
             const next = normalizePages(p.pages);
+            const oldStrokes = strokesByPageRef.current;
             slidesRef.current = next;
             setSlides(next);
             slideRef.current = 1;
             setSlide(1);
-            strokesByPageRef.current = new Map(next.map((x) => [x.page_number, []]));
+            strokesByPageRef.current = new Map(next.map((x) => [x.page_id, oldStrokes.get(x.page_id) || []]));
+            setThumbnailVersion((version) => version + 1);
             redraw();
           }
           if (p.kind === "page") {
