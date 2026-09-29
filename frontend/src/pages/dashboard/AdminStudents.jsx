@@ -56,7 +56,7 @@ export default function AdminStudents() {
     setStudentDetail(null);
     setDetailLoading(true);
     try {
-      const response = await api.get(\`/admin/students/\${student.id}\`);
+      const response = await api.get(`/admin/students/${student.id}`);
       setStudentDetail(response.data);
     } catch (err) {
       setError(err.response?.data?.detail || "Unable to load student details.");
