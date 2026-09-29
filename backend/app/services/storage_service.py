@@ -25,7 +25,7 @@ BUCKET = settings.R2_BUCKET_NAME
 
 
 def _content_type_for(extension: str) -> str:
-    return "application/pdf" if extension == "pdf" else f"image/{extension}"
+    return "application/pdf" if extension == "pdf" else ("image/jpeg" if extension in {"jpg", "jpeg"} else f"image/{extension}")
 
 
 def _upload(file_bytes: bytes, key: str, extension: str) -> str:
@@ -57,3 +57,8 @@ def get_presigned_url(key: str, expires_in: int = 3600) -> str:
         Params={"Bucket": BUCKET, "Key": key},
         ExpiresIn=expires_in,
     )
+
+
+def delete_file(key: str) -> None:
+    """Delete a stored object when a classroom slide is permanently removed."""
+    _get_client().delete_object(Bucket=BUCKET, Key=key)
