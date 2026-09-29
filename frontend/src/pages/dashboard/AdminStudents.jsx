@@ -39,6 +39,10 @@ export default function AdminStudents() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    api.post("/admin/notifications/read-all").catch(() => {});
+  }, []);
+
   async function toggle(student) {
     const reason = window.prompt(student.is_active ? "Reason for suspension:" : "Reason for activation:");
     if (!reason?.trim()) return;
