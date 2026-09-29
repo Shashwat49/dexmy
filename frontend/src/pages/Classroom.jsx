@@ -46,6 +46,15 @@ const normalizePages = (pages) => (pages?.length ? pages : [makeWhiteboardPage(1
 
 function PageThumbnail({ page, strokes, number, active, canSelect, canDelete, onSelect, onDelete, version }) {
   const canvasRef = useRef(null);
+  const [imageSize, setImageSize] = useState(null);
+  useEffect(() => {
+    if (!page.image_url) { setImageSize(null); return; }
+    let cancelled = false;
+    const image = new Image();
+    image.onload = () => { if (!cancelled) setImageSize({ width: image.naturalWidth, height: image.naturalHeight }); };
+    image.src = page.image_url;
+    return () => { cancelled = true; };
+  }, [page.image_url]);
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -59,8 +68,14 @@ function PageThumbnail({ page, strokes, number, active, canSelect, canDelete, on
     let cancelled = false;
     const drawStrokes = () => {
       if (cancelled) return;
+      const fitScale = imageSize?.width && imageSize?.height ? Math.min(width / imageSize.width, height / imageSize.height) : Math.min(width / W, height / H);
+      const contentWidth = imageSize?.width ? imageSize.width * fitScale : width;
+      const contentHeight = imageSize?.height ? imageSize.height * fitScale : height;
+      const contentX = (width - contentWidth) / 2, contentY = (height - contentHeight) / 2;
       ctx.save();
-      ctx.scale(width / W, height / H);
+      ctx.beginPath(); ctx.rect(contentX, contentY, contentWidth, contentHeight); ctx.clip();
+      ctx.translate(contentX, contentY);
+      ctx.scale(contentWidth / W, contentHeight / H);
       (strokes || []).forEach((stroke) => {
         const points = stroke.points || [];
         if (!points.length) return;
@@ -92,7 +107,7 @@ function PageThumbnail({ page, strokes, number, active, canSelect, canDelete, on
     };
     drawStrokes();
     return () => { cancelled = true; };
-  }, [page.image_url, strokes, version]);
+  }, [page.image_url, strokes, version, imageSize]);
   return <div className={`relative shrink-0 w-[144px] rounded-lg border overflow-hidden bg-white transition-colors ${active ? "border-red-500 ring-2 ring-red-500/40" : "border-white/15"}`}>
     <button type="button" disabled={!canSelect} onClick={onSelect} title={`Go to page ${number}`} className="relative block w-full aspect-video bg-white disabled:cursor-default">
       {page.image_url && <img src={page.image_url} alt={`Preview of page ${number}`} loading="lazy" draggable="false" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />}
