@@ -4,12 +4,14 @@
 # access-checked download link.
 import base64
 import uuid
+from functools import lru_cache
 
 import boto3
 from botocore.config import Config
 
 from app.core.config import settings
 
+@lru_cache(maxsize=1)
 def _get_client():
     account_id = settings.R2_ACCOUNT_ID or "dummy"
     return boto3.client(
