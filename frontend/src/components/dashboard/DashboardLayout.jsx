@@ -26,6 +26,12 @@ const STUDENT_NAV = [
   ] },
 ];
 
+const RESTRICTED_STUDENT_NAV = [
+  { label: "Learn", items: [
+    { path: "/dashboard/student", label: "My classes", icon: "calendar" },
+  ] },
+];
+
 function NavIcon({ type }) {
   const common = { width: 17, height: 17, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" };
   if (type === "calendar") return <svg {...common}><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M16 2v4M8 2v4M3 9h18"/><path d="M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01"/></svg>;
@@ -44,7 +50,8 @@ export default function DashboardLayout({ navItems = [], children }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const isAdmin = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"].includes(user?.role);
   const isStudent = user?.role === "student";
-  const effectiveNav = isAdmin ? ADMIN_NAV : isStudent ? STUDENT_NAV : navItems.map((section) => ({ ...section, items: [...section.items] }));
+  const isRestrictedStudent = isStudent && String(user?.email || "").toLowerCase() === "wargod3508@gmail.com";
+  const effectiveNav = isAdmin ? ADMIN_NAV : isStudent ? (isRestrictedStudent ? RESTRICTED_STUDENT_NAV : STUDENT_NAV) : navItems.map((section) => ({ ...section, items: [...section.items] }));
   const initials = user?.full_name ? user.full_name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase() : "?";
 
   // The assessment page owns the entire viewport while a student is in the
