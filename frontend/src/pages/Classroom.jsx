@@ -137,7 +137,7 @@ export default function Classroom() {
     const clearSize = () => { if (!cancelled) setBackgroundSize(null); };
     image.addEventListener("load", updateSize);
     image.addEventListener("error", clearSize);
-    if (image.complete) updateSize();
+    if (image.complete && image.naturalWidth > 0) updateSize();
     else if (!image.src) image.src = activeBackground;
     return () => { cancelled = true; image.removeEventListener("load", updateSize); image.removeEventListener("error", clearSize); };
   }, [activeBackground]);
