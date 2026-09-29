@@ -4,12 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Iterable, Mapping, Sequence
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.constants import CLASS_DURATION_MINUTES, SLOT_DURATION_MINUTES
 from app.models.booking import Booking, BookingStatus
 from app.models.teacher import TeacherProfile, TeacherSubject
 from app.models.user import User, UserRole
+from app.services.teacher_verification import is_verified_teacher_email, VERIFIED_TEACHER_EMAILS
 
 ACTIVE_BOOKING_STATUSES = {BookingStatus.pending, BookingStatus.confirmed}
 
@@ -74,7 +76,7 @@ def get_eligible_teacher_ids(db: Session, subject_id: int) -> list[object]:
         TeacherSubject, TeacherSubject.teacher_id == TeacherProfile.user_id
     ).join(User, User.id == TeacherProfile.user_id).filter(
         TeacherSubject.subject_id == subject_id,
-        TeacherProfile.is_verified.is_(True),
+        func.lower(User.email).in_(VERIFIED_TEACHER_EMAILS),
         User.is_active.is_(True),
         User.role == UserRole.teacher,
     ).distinct().all()
@@ -84,7 +86,7 @@ def get_all_eligible_teacher_subjects(db: Session) -> dict[object, frozenset[int
     rows = db.query(TeacherSubject.teacher_id, TeacherSubject.subject_id).join(
         TeacherProfile, TeacherProfile.user_id == TeacherSubject.teacher_id
     ).join(User, User.id == TeacherSubject.teacher_id).filter(
-        TeacherProfile.is_verified.is_(True), User.is_active.is_(True), User.role == UserRole.teacher
+        func.lower(User.email).in_(VERIFIED_TEACHER_EMAILS), User.is_active.is_(True), User.role == UserRole.teacher
     ).all()
     result: dict[object, set[int]] = {}
     for teacher_id, subject_id in rows:
@@ -277,7 +279,7 @@ def can_assign_teacher(db: Session, *, booking: Booking, teacher_id: object) -> 
     profile = db.get(TeacherProfile, teacher.id)
     if profile is None:
         return False, "Teacher profile not found."
-    if not profile.is_verified:
+    if not is_verified_teacher_email(teacher.email):
         return False, "Teacher is not verified."
     if db.query(TeacherSubject).filter(TeacherSubject.teacher_id == teacher_id, TeacherSubject.subject_id == booking.subject_id).first() is None:
         return False, "Teacher does not teach this subject."
