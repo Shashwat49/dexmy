@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import TeacherDashboardLayout from "../../components/TeacherDashboardLayout";
 import { getMyBookings, getBookingSession } from "../../api/bookings";
 import { getMyTeacherProfile } from "../../api/teachers";
+import { getTeacherClassRecords } from "../../api/classRecords";
 
 const formatDate = (v) => new Date(v).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 const formatTime = (v) => new Date(v).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -12,13 +13,13 @@ const isSameDay = (v) => { const d = new Date(v), t = new Date(); return d.getFu
 
 export default function TeacherDashboard() {
   const navigate = useNavigate();
-  const [bookings, setBookings] = useState([]), [profile, setProfile] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState(""), [profileError, setProfileError] = useState("");
+  const [bookings, setBookings] = useState([]), [classRecords, setClassRecords] = useState([]), [profile, setProfile] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState(""), [profileError, setProfileError] = useState("");
   const [joiningBookingId, setJoiningBookingId] = useState(null);
-  const load = async () => { setLoading(true); setError(""); const [b, p] = await Promise.allSettled([getMyBookings(), getMyTeacherProfile()]); if (b.status === "fulfilled") setBookings(Array.isArray(b.value) ? b.value : []); else setError(b.reason?.response?.data?.detail || "Unable to load your classes."); if (p.status === "fulfilled") setProfile(p.value); else setProfileError(p.reason?.response?.data?.detail || "Unable to load your profile."); setLoading(false); };
+  const load = async () => { setLoading(true); setError(""); const [b, p, r] = await Promise.allSettled([getMyBookings(), getMyTeacherProfile(), getTeacherClassRecords()]); if (b.status === "fulfilled") setBookings(Array.isArray(b.value) ? b.value : []); else setError(b.reason?.response?.data?.detail || "Unable to load your classes."); if (p.status === "fulfilled") setProfile(p.value); else setProfileError(p.reason?.response?.data?.detail || "Unable to load your profile."); if (r.status === "fulfilled") setClassRecords(Array.isArray(r.value) ? r.value : []); setLoading(false); };
   useEffect(() => { load(); }, []);
   const upcoming = useMemo(() => bookings.filter(isUpcoming).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [bookings]);
   const today = useMemo(() => bookings.filter((b) => isSameDay(b.scheduled_at)).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [bookings]);
-  const completed = useMemo(() => bookings.filter((b) => b.status === "completed"), [bookings]);
+  const completed = useMemo(() => classRecords.filter((r) => r.status === "completed"), [classRecords]);
   const join = async (booking) => { if (joiningBookingId) return; setJoiningBookingId(booking.id); setError(""); try { const session = await getBookingSession(booking.id); navigate(`/classroom/${session.id}`); } catch (e) { setError(e.response?.data?.detail || "This classroom is not ready yet."); } finally { setJoiningBookingId(null); } };
   if (loading) return <TeacherDashboardLayout><div className="grid min-h-screen place-items-center p-6"><div className="text-center"><div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-chalk-faint border-t-brand-gold"/><p className="text-sm text-chalk-muted">Loading your teacher dashboard…</p></div></div></TeacherDashboardLayout>;
   return <TeacherDashboardLayout><div className="flex min-h-screen flex-col"><header className="border-b border-chalk-faint bg-panel/50 px-5 py-6 sm:px-7 lg:px-9"><div className="mx-auto flex w-full max-w-[1500px] flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-gold">Teacher Dashboard</p><h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Welcome back{profile?.full_name ? `, ${profile.full_name}` : ""}</h1><p className="mt-2 max-w-2xl text-sm text-chalk-muted">Manage your classes, schedule, and teaching profile from one place.</p></div><Link to="/dashboard/teacher/profile" className="inline-flex w-fit items-center justify-center gap-2 rounded-xl bg-brand-red px-5 py-3 text-sm font-semibold shadow-lg shadow-brand-red/10 transition hover:brightness-110">Edit Profile <span aria-hidden="true">→</span></Link></div></header>
