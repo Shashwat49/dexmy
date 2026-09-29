@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import require_permission
 from app.db.session import get_db
 from app.models.booking import Booking, BookingStatus
+from app.models.external_class_record import ExternalClassRecord
 from app.models.teacher import Subject, TeacherProfile, TeacherSubject
 from app.models.teacher_profile_change_request import TeacherProfileChangeRequest
 from app.models.user import User, UserRole
@@ -14,7 +15,7 @@ from app.services.audit_service import record_admin_action
 router=APIRouter()
 @router.get("",response_model=list[AdminTeacherListItem])
 def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id:int|None=None,current_user:User=Depends(require_permission("teacher.read")),db:Session=Depends(get_db)):
-    completed=select(func.count(Booking.id)).where(Booking.teacher_id==User.id,Booking.status==BookingStatus.completed).correlate(User).scalar_subquery(); upcoming=select(func.count(Booking.id)).where(Booking.teacher_id==User.id,Booking.status==BookingStatus.confirmed).correlate(User).scalar_subquery(); subject_count=select(func.count(TeacherSubject.subject_id)).where(TeacherSubject.teacher_id==User.id).correlate(User).scalar_subquery()
+    completed=select(func.count(ExternalClassRecord.id)).where(ExternalClassRecord.teacher_id==User.id,ExternalClassRecord.status=="completed").correlate(User).scalar_subquery(); upcoming=select(func.count(Booking.id)).where(Booking.teacher_id==User.id,Booking.status==BookingStatus.confirmed,Booking.scheduled_at>=func.now()).correlate(User).scalar_subquery(); subject_count=select(func.count(TeacherSubject.subject_id)).where(TeacherSubject.teacher_id==User.id).correlate(User).scalar_subquery()
     query=select(User,TeacherProfile,subject_count,completed,upcoming).join(TeacherProfile,TeacherProfile.user_id==User.id).where(User.role==UserRole.teacher)
     if verified is not None: query=query.where(TeacherProfile.is_verified.is_(verified))
     if active is not None: query=query.where(User.is_active.is_(active))
@@ -60,7 +61,7 @@ def update_teacher_status(teacher_id:uuid.UUID,payload:AdminTeacherStatusUpdate,
     user=db.execute(select(User).where(User.id==teacher_id,User.role==UserRole.teacher)).scalar_one_or_none()
     if user is None: raise HTTPException(status_code=404,detail="Teacher not found")
     old=user.is_active; user.is_active=payload.is_active; record_admin_action(db,admin_user_id=current_user.id,action="teacher.status.update",resource_type="teacher",resource_id=teacher_id,old_values={"is_active":old},new_values={"is_active":payload.is_active},ip_address=request.client.host if request.client else None,user_agent=request.headers.get("user-agent")); db.commit(); profile=db.get(TeacherProfile,teacher_id)
-    return AdminTeacherListItem(id=user.id,full_name=user.full_name,email=user.email,phone=user.phone,is_active=user.is_active,is_verified=profile.is_verified,rating_avg=profile.rating_avg,rating_count=profile.rating_count,years_experience=profile.years_experience,hourly_rate=profile.hourly_rate,subject_count=db.execute(select(func.count(TeacherSubject.subject_id)).where(TeacherSubject.teacher_id==teacher_id)).scalar_one(),completed_classes=db.execute(select(func.count(Booking.id)).where(Booking.teacher_id==teacher_id,Booking.status==BookingStatus.completed)).scalar_one(),upcoming_classes=db.execute(select(func.count(Booking.id)).where(Booking.teacher_id==teacher_id,Booking.status==BookingStatus.confirmed)).scalar_one())
+    return AdminTeacherListItem(id=user.id,full_name=user.full_name,email=user.email,phone=user.phone,is_active=user.is_active,is_verified=profile.is_verified,rating_avg=profile.rating_avg,rating_count=profile.rating_count,years_experience=profile.years_experience,hourly_rate=profile.hourly_rate,subject_count=db.execute(select(func.count(TeacherSubject.subject_id)).where(TeacherSubject.teacher_id==teacher_id)).scalar_one(),completed_classes=db.execute(select(func.count(ExternalClassRecord.id)).where(ExternalClassRecord.teacher_id==teacher_id,ExternalClassRecord.status=="completed")).scalar_one(),upcoming_classes=db.execute(select(func.count(Booking.id)).where(Booking.teacher_id==teacher_id,Booking.status==BookingStatus.confirmed,Booking.scheduled_at>=func.now())).scalar_one())
 @router.get("/{teacher_id}/subjects",response_model=list[AdminTeacherSubjectRead])
 def list_teacher_subjects(teacher_id:uuid.UUID,current_user:User=Depends(require_permission("teacher.read")),db:Session=Depends(get_db)):
     if db.execute(select(User.id).where(User.id==teacher_id,User.role==UserRole.teacher)).scalar_one_or_none() is None: raise HTTPException(status_code=404,detail="Teacher not found")
