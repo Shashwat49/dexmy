@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_role
@@ -150,14 +150,42 @@ def student_records(
     ).first()
     package = package_row[0] if package_row else None
     plan = package_row[1] if package_row else None
+
+    # Keep the student dashboard entitlement consistent with the parent dashboard
+    # for the legacy/unlimited student account. The parent dashboard aggregates
+    # all active student packages, rather than only the latest package.
+    aggregate_package = None
+    if current_user.email.lower() == "wargod3508@gmail.com":
+        aggregate_package = db.execute(
+            select(
+                func.coalesce(func.sum(StudentPackage.total_classes), 0),
+                func.coalesce(func.sum(StudentPackage.classes_used), 0),
+            )
+            .where(
+                StudentPackage.student_id == current_user.id,
+                StudentPackage.status == "active",
+            )
+        ).one()
     records = db.scalars(
         select(ExternalClassRecord)
         .where(ExternalClassRecord.student_id == current_user.id)
         .order_by(ExternalClassRecord.started_at.desc())
     ).all()
-    return {
-        "student_email": current_user.email,
-        "package": {
+    if aggregate_package is not None and package and plan:
+        total_classes = int(aggregate_package[0] or 0)
+        completed_classes = int(aggregate_package[1] or 0)
+        package_data = {
+            "id": package.id,
+            "name": plan.name,
+            "total_classes": total_classes,
+            "completed_classes": completed_classes,
+            "remaining_classes": max(0, total_classes - completed_classes),
+            "status": package.status,
+            "currency": plan.currency,
+            "price": float(plan.price),
+        }
+    else:
+        package_data = {
             "id": package.id,
             "name": plan.name,
             "total_classes": package.total_classes,
@@ -166,6 +194,10 @@ def student_records(
             "status": package.status,
             "currency": plan.currency,
             "price": float(plan.price),
-        } if package and plan else None,
+        } if package and plan else None
+
+    return {
+        "student_email": current_user.email,
+        "package": package_data,
         "classes": [_record_read(record, db) for record in records],
     }
