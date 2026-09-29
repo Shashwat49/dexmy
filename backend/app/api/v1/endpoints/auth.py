@@ -115,6 +115,22 @@ def signup(
     db.commit()
     db.refresh(user)
 
+    # Admin notification is intentionally best-effort so a notification
+    # failure can never prevent a successful student registration.
+    if payload.role == UserRole.student:
+        try:
+            db.add(
+                AdminNotification(
+                    notification_type="student_registration",
+                    title="New student registration",
+                    message=f"{user.full_name} ({user.email}) has registered as a new student.",
+                    student_id=user.id,
+                )
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+
     # ---------------------------------------------------------
     # Create JWT
     # ---------------------------------------------------------
