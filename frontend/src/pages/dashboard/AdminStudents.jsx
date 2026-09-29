@@ -1,3 +1,8 @@
+
+function DetailItem({ label, value }) {
+  return <div className="rounded-lg border border-chalk-faint bg-panel px-4 py-3"><p className="text-[10px] uppercase tracking-wide text-chalk-muted">{label}</p><p className="mt-1 break-words text-sm font-semibold">{value === null || value === undefined || value === "" ? "—" : value}</p></div>;
+}
+
 import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "../../components/dashboard/DashboardLayout";
 import api from "../../api/client";
