@@ -61,16 +61,6 @@ const ADMIN_ROLES = ["admin", "super_admin", "academic_manager", "teacher_manage
 const TEST_CREATOR_ROLES = ["test_creator", "admin", "super_admin"];
 
 function RestrictedStudentTests() {
-  const storedUser = (() => {
-    try {
-      return JSON.parse(localStorage.getItem("dexmy_user") || "null");
-    } catch {
-      return null;
-    }
-  })();
-  if (String(storedUser?.email || "").toLowerCase() === "wargod3508@gmail.com") {
-    return <Navigate to="/dashboard/student" replace />;
-  }
   return <StudentTests />;
 }
 
