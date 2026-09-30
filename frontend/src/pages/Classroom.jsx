@@ -127,7 +127,7 @@ export default function Classroom() {
   const isTeacher = user?.role === "teacher"; const email = user?.email || "";
   const canvasRef = useRef(null), wsRef = useRef(null), roomRef = useRef(null), drawRef = useRef(null), drawBaseRef = useRef(null);
   const slidesRef = useRef([makeWhiteboardPage(1)]), strokesByPageRef = useRef(new Map()), slideRef = useRef(1);
-  const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false), imageCacheRef = useRef(new Map()), reliableStrokeTimerRef = useRef(null), slideControlActiveRef = useRef(false), pendingSlideIdsRef = useRef(new Set());
+  const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false), imageCacheRef = useRef(new Map()), reliableStrokeTimerRef = useRef(null), slideControlActiveRef = useRef(false);
   const mediaBusyRef = useRef(false);
   const whiteboardStateInitializedRef = useRef(false);
   const selectedStrokeRef = useRef(null), selectInteractionRef = useRef(null), seenWhiteboardActionIdsRef = useRef(new Set());
@@ -207,7 +207,7 @@ export default function Classroom() {
   useEffect(() => { let rafId; const tick = () => { flushLive(false); rafId = requestAnimationFrame(tick); }; rafId = requestAnimationFrame(tick); return () => { cancelAnimationFrame(rafId); flushLive(true); clearTimeout(snapshotTimerRef.current); clearTimeout(reliableStrokeTimerRef.current); }; }, [flushLive]);
   useEffect(() => { if (!isTeacher) return; const id = setInterval(() => { if (drawRef.current?.points?.length) publishStrokeCheckpoint(); }, 250); reliableStrokeTimerRef.current = id; return () => clearInterval(id); }, [isTeacher, publishStrokeCheckpoint]);
   const point = (event, allowOutside = false) => { const r = canvasRef.current.getBoundingClientRect(); if (!r.width || !r.height) return null; const boardX = (event.clientX - r.left) * W / r.width; const boardY = (event.clientY - r.top) * H / r.height; const content = getSlideContentRect(); if (!allowOutside && (boardX < content.x || boardX > content.x + content.width || boardY < content.y || boardY > content.y + content.height)) return null; return { x: clamp((boardX - content.x) * W / content.width, 0, W), y: clamp((boardY - content.y) * H / content.height, 0, H) }; };
-  const onPointerDown = (event) => { if (pendingSlideIdsRef.current.has(currentPageId())) return setNotice("Slide is still being saved. Please wait a moment before drawing."); if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (!p) return; if (tool === "text") { const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p)); if (hit) { selectedStrokeRef.current = hit.id; setTextDraft(hit.text || ""); setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id }); } else { setTextDraft(""); setTextModal({ x: p.x, y: p.y, strokeId: null }); } redraw(); return; } if(tool==="eraser"){const list=currentStrokes();const hit=[...list].reverse().find(s=>strokeHit(s,p));if(!hit)return;strokesByPageRef.current.set(currentPageId(),list.filter(s=>s.id!==hit.id));if(selectedStrokeRef.current===hit.id)selectedStrokeRef.current=null;const action = { kind:"stroke_delete", stroke_id:hit.id, page_number:slideRef.current, page_id:currentPageId(), action_id:newId() };publishWhiteboardAction(action);send({type:"whiteboard_event",payload:action});redraw();setThumbnailVersion(v=>v+1);saveSnapshot();return;} if(tool==="select"){const list=currentStrokes(), selected=list.find(s=>s.id===selectedStrokeRef.current), bounds=strokeBounds(selected); if(bounds&&p.x>=bounds.maxX-10&&p.x<=bounds.maxX+24&&p.y>=bounds.maxY-10&&p.y<=bounds.maxY+24){selectInteractionRef.current={mode:"resize",start:p,original:JSON.parse(JSON.stringify(selected))};}else{const hit=[...list].reverse().find(s=>strokeHit(s,p));selectedStrokeRef.current=hit?.id||null;selectInteractionRef.current=hit?{mode:hit.tool==="text"?"maybe-text":"move",start:p,original:JSON.parse(JSON.stringify(hit))}:null;} canvasRef.current.setPointerCapture(event.pointerId); redraw(); return;} if(!DRAW_TOOLS.has(tool))return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p] }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
+  const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (!p) return; if (tool === "text") { const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p)); if (hit) { selectedStrokeRef.current = hit.id; setTextDraft(hit.text || ""); setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id }); } else { setTextDraft(""); setTextModal({ x: p.x, y: p.y, strokeId: null }); } redraw(); return; } if(tool==="eraser"){const list=currentStrokes();const hit=[...list].reverse().find(s=>strokeHit(s,p));if(!hit)return;strokesByPageRef.current.set(currentPageId(),list.filter(s=>s.id!==hit.id));if(selectedStrokeRef.current===hit.id)selectedStrokeRef.current=null;const action = { kind:"stroke_delete", stroke_id:hit.id, page_number:slideRef.current, page_id:currentPageId(), action_id:newId() };publishWhiteboardAction(action);send({type:"whiteboard_event",payload:action});redraw();setThumbnailVersion(v=>v+1);saveSnapshot();return;} if(tool==="select"){const list=currentStrokes(), selected=list.find(s=>s.id===selectedStrokeRef.current), bounds=strokeBounds(selected); if(bounds&&p.x>=bounds.maxX-10&&p.x<=bounds.maxX+24&&p.y>=bounds.maxY-10&&p.y<=bounds.maxY+24){selectInteractionRef.current={mode:"resize",start:p,original:JSON.parse(JSON.stringify(selected))};}else{const hit=[...list].reverse().find(s=>strokeHit(s,p));selectedStrokeRef.current=hit?.id||null;selectInteractionRef.current=hit?{mode:hit.tool==="text"?"maybe-text":"move",start:p,original:JSON.parse(JSON.stringify(hit))}:null;} canvasRef.current.setPointerCapture(event.pointerId); redraw(); return;} if(!DRAW_TOOLS.has(tool))return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p] }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
   const onPointerMove = (event) => { const interaction=selectInteractionRef.current; if(interaction){const p=point(event,true);if(!p)return;if(interaction.mode==="maybe-text"){if(Math.hypot(p.x-interaction.start.x,p.y-interaction.start.y)<6)return;interaction.mode="move";}const list=currentStrokes(),index=list.findIndex(s=>s.id===interaction.original.id);if(index<0)return;list[index]=transformStroke(interaction.original,interaction.start,p,interaction.mode);redraw();return;} const d = drawRef.current; if (!d) return; const nextPoint = point(event, true); if (!nextPoint) return; d.points.push(nextPoint); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
   const onPointerUp = (event) => { canvasRef.current?.releasePointerCapture?.(event.pointerId); const interaction=selectInteractionRef.current; if(interaction){selectInteractionRef.current=null;if(interaction.mode==="maybe-text"){setTextDraft(interaction.original.text||"");setTextModal({x:interaction.original.points[0].x,y:interaction.original.points[0].y,strokeId:interaction.original.id});redraw();return;}const list=currentStrokes(),index=list.findIndex(s=>s.id===interaction.original.id);if(index>=0){const updated=list[index];strokesByPageRef.current.set(currentPageId(),list);liveRef.current.delete(updated.id);committedRef.current.add(updated.id);publishCommit(updated,slideRef.current);const action = {kind:"stroke_update",stroke:updated,page_number:slideRef.current,page_id:currentPageId(),action_id:newId()};publishWhiteboardAction(action);send({type:"whiteboard_event",payload:action});setThumbnailVersion(v=>v+1);saveSnapshot();}redraw();return;} const d = drawRef.current; drawRef.current = null; if (!d) return;  const pageNumber = slideRef.current; const pageId = currentPageId(pageNumber); if (!["pen", "highlighter", "eraser"].includes(d.tool)) { if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0); queueLive(d, d.points, true); flushLive(true); } else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); drawBaseRef.current = null; publishCommit(d, pageNumber); send({ type: "whiteboard_event", payload: { kind: "stroke", stroke: d, page_number: pageNumber, page_id: pageId } }); setThumbnailVersion((version) => version + 1); saveSnapshot(); };
   const saveTextModal = () => { if (!textModal) return; const text = textDraft.trim(); if (!text) { setTextModal(null); setTextDraft(""); redraw(); return; } const list = currentStrokes(); let stroke; if (textModal.strokeId) { const index = list.findIndex((item) => item.id === textModal.strokeId); if (index >= 0) { stroke = { ...list[index], text }; list[index] = stroke; } } if (!stroke) { stroke = { id: newId(), tool: "text", color, width, text, points: [{ x: textModal.x, y: textModal.y }] }; list.push(stroke); } selectedStrokeRef.current = stroke.id; publishCommit(stroke, slideRef.current); const action = { kind: textModal.strokeId ? "stroke_update" : "stroke", stroke, page_number: slideRef.current, page_id: currentPageId(), ...(textModal.strokeId ? { action_id: newId() } : {}) }; if (textModal.strokeId) publishWhiteboardAction(action); send({ type: "whiteboard_event", payload: action }); setTextModal(null); setTextDraft(""); setThumbnailVersion((version) => version + 1); redraw(); saveSnapshot(); };
@@ -215,35 +215,18 @@ export default function Classroom() {
   const addSlide = async () => {
     if (!isTeacher) return;
     const current = slideRef.current;
-    // Persist the current page before switching to the optimistic new slide.
     saveSnapshotNow(current);
-    const currentPageId = slidesRef.current[current - 1]?.page_id;
-    const optimisticPage = makeWhiteboardPage(current + 1);
-    pendingSlideIdsRef.current.add(optimisticPage.page_id);
-    const beforePages = slidesRef.current.slice();
-    const beforeStrokes = new Map(strokesByPageRef.current);
-    const insertAt = Math.max(0, current);
-    const optimisticPages = [...beforePages.slice(0, insertAt), optimisticPage, ...beforePages.slice(insertAt)]
-      .map((page, index) => ({ ...page, page_number: index + 1 }));
-    const optimisticStrokes = new Map(optimisticPages.map((page) => [page.page_id, beforeStrokes.get(page.page_id) || []]));
-    optimisticStrokes.set(optimisticPage.page_id, []);
-    strokesByPageRef.current = optimisticStrokes;
-    slidesRef.current = optimisticPages;
-    slideRef.current = insertAt + 1;
-    setSlides(optimisticPages);
-    setSlide(insertAt + 1);
-    setThumbnailVersion((version) => version + 1);
     try {
-      const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(currentPageId || "")}`);
+      const afterPageId = currentPageId(current);
+      const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}`);
       if (!Array.isArray(data?.pages) || !data.pages.length || !data.page_id) {
         throw new Error("The server did not return the new slide. Please try again.");
       }
-      pendingSlideIdsRef.current.delete(optimisticPage.page_id);
       const updated = normalizePages(data.pages);
       const next = updated.findIndex((page) => page.page_id === data.page_id) + 1;
       if (next < 1) throw new Error("The new slide was not included in the server response.");
-      const currentStrokes = strokesByPageRef.current;
-      const nextStrokes = new Map(updated.map((page) => [page.page_id, currentStrokes.get(page.page_id) || beforeStrokes.get(page.page_id) || []]));
+      const previousStrokes = strokesByPageRef.current;
+      const nextStrokes = new Map(updated.map((page) => [page.page_id, previousStrokes.get(page.page_id) || []]));
       nextStrokes.set(data.page_id, []);
       strokesByPageRef.current = nextStrokes;
       slidesRef.current = updated;
@@ -255,66 +238,26 @@ export default function Classroom() {
       setThumbnailVersion((version) => version + 1);
       setNotice("Slide added.");
     } catch (error) {
-      pendingSlideIdsRef.current.delete(optimisticPage.page_id);
-      if (slidesRef.current.some((page) => page.page_id === optimisticPage.page_id)) {
-        strokesByPageRef.current = beforeStrokes;
-        slidesRef.current = beforePages;
-        slideRef.current = clamp(current, 1, beforePages.length);
-        setSlides(beforePages);
-        setSlide(slideRef.current);
-        setThumbnailVersion((version) => version + 1);
-      }
       setNotice(error.response?.data?.detail || error.message || "Could not add slide.");
     }
   };
   const deleteSlide = async (page) => {
     if (!isTeacher || slidesRef.current.length <= 1) return;
-    const beforePages = slidesRef.current.slice();
-    const beforeStrokes = new Map(strokesByPageRef.current);
-    const beforeSlide = slideRef.current;
-    // Flush the active page's latest strokes before an optimistic page deletion.
-    saveSnapshotNow(beforeSlide);
-    const targetIndex = beforePages.findIndex((item) => item.page_id === page.page_id);
-    if (targetIndex < 0) return;
-    const remaining = beforePages.filter((item) => item.page_id !== page.page_id);
-    const activeBefore = beforePages[beforeSlide - 1];
-    const activeAfter = activeBefore?.page_id === page.page_id
-      ? remaining[Math.min(targetIndex, remaining.length - 1)]
-      : activeBefore;
-    const next = Math.max(1, remaining.findIndex((item) => item.page_id === activeAfter?.page_id) + 1);
-    const optimisticPages = remaining.map((item, index) => ({ ...item, page_number: index + 1 }));
-    strokesByPageRef.current = new Map(optimisticPages.map((item) => [item.page_id, beforeStrokes.get(item.page_id) || []]));
-    slidesRef.current = optimisticPages;
-    slideRef.current = next;
-    setSlides(optimisticPages);
-    setSlide(next);
-    setThumbnailVersion((version) => version + 1);
+    const currentPage = slidesRef.current[slideRef.current - 1];
     try {
-      const activePageId = activeAfter?.page_id;
-      const query = activePageId ? `?active_page_id=${encodeURIComponent(activePageId)}` : "";
+      const query = currentPage?.page_id ? `?active_page_id=${encodeURIComponent(currentPage.page_id)}` : "";
       const { data } = await api.delete(`/classroom/sessions/${sessionId}/whiteboard-pages/${page.page_id}${query}`);
       const updated = normalizePages(data.pages);
-      const latestStrokes = strokesByPageRef.current;
-      strokesByPageRef.current = new Map(updated.map((item) => [item.page_id, latestStrokes.get(item.page_id) || beforeStrokes.get(item.page_id) || []]));
-      slidesRef.current = updated;
-      setSlides(updated);
-      const serverNext = clamp(Number(data.page_number) || 1, 1, updated.length);
-      slideRef.current = serverNext;
-      setSlide(serverNext);
+      const previousStrokes = strokesByPageRef.current;
+      strokesByPageRef.current = new Map(updated.map((item) => [item.page_id, previousStrokes.get(item.page_id) || []]));
+      slidesRef.current = updated; setSlides(updated);
+      const next = clamp(Number(data.page_number) || 1, 1, updated.length);
+      slideRef.current = next; setSlide(next);
       slideControlActiveRef.current = true;
-      publishControl({ kind: "slides", pages: updated, page_number: serverNext, page_id: updated[serverNext - 1]?.page_id });
+      publishControl({ kind: "slides", pages: updated, page_number: next, page_id: updated[next - 1]?.page_id });
       setThumbnailVersion((version) => version + 1);
       setNotice("Slide deleted.");
     } catch (error) {
-      // Only roll back if this optimistic deletion is still the current local slide set.
-      if (!slidesRef.current.some((item) => item.page_id === page.page_id)) {
-        strokesByPageRef.current = beforeStrokes;
-        slidesRef.current = beforePages;
-        slideRef.current = clamp(beforeSlide, 1, beforePages.length);
-        setSlides(beforePages);
-        setSlide(slideRef.current);
-        setThumbnailVersion((version) => version + 1);
-      }
       setNotice(error.response?.data?.detail || "Could not delete slide.");
     }
   };
@@ -561,33 +504,6 @@ export default function Classroom() {
           if (!participant || !topic) return;
           let msg;
           try { msg = JSON.parse(decoder.decode(payload)); } catch { return; }
-          // The API broadcasts durable page changes to both classroom participants.
-          // Apply this event directly so students receive add/delete updates without
-          // depending on the teacher's separate LiveKit control message.
-          if (msg.type === "whiteboard_pages_updated") {
-            const next = normalizePages(msg.pages);
-            const previousStrokes = strokesByPageRef.current;
-            const nextStrokes = new Map(next.map((page) => [
-              page.page_id,
-              previousStrokes.get(page.page_id) || [],
-            ]));
-            strokesByPageRef.current = nextStrokes;
-            slidesRef.current = next;
-            setSlides(next);
-            const requestedPageId = msg.page_id;
-            const requestedIndex = requestedPageId
-              ? next.findIndex((page) => page.page_id === requestedPageId)
-              : -1;
-            const nextPage = requestedIndex >= 0
-              ? requestedIndex + 1
-              : clamp(Number(msg.page_number) || slideRef.current, 1, next.length);
-            slideRef.current = nextPage;
-            setSlide(nextPage);
-            slideControlActiveRef.current = true;
-            setThumbnailVersion((version) => version + 1);
-            setTimeout(redraw, 0);
-            return;
-          }
           if (msg.type === "classroom_control" && topic === CONTROL_TOPIC) {
             const p = msg.payload || {};
             if (p.kind === "grid") {
