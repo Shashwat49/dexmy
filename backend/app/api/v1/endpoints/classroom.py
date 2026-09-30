@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dependencies import get_current_user
@@ -104,19 +104,22 @@ async def upload_chat_file(session_id: uuid.UUID, file: UploadFile = File(...), 
 
 def _page_payload(pages, db):
     payload = []
+    pdf_page_ids = [page.id for page in pages if page.page_type == "pdf"]
+    original_images = {}
+    if pdf_page_ids:
+        # Fetch original PDF images in one query instead of one query per slide.
+        snapshots = db.query(WhiteboardSnapshot).filter(
+            WhiteboardSnapshot.page_id.in_(pdf_page_ids),
+            WhiteboardSnapshot.image_url.isnot(None),
+        ).order_by(WhiteboardSnapshot.created_at.asc()).all()
+        for snapshot in snapshots:
+            original_images.setdefault(snapshot.page_id, snapshot.image_url)
+
     for index, page in enumerate(pages, 1):
         image_key = page.image_url
-        # For PDF slides, the original PDF page image is stored in the first
-        # snapshot. Older code could overwrite ClassroomPage.image_url with a
-        # canvas-only PNG, so prefer the original snapshot image when available.
+        # Preserve the original PDF image if a canvas snapshot was saved later.
         if page.page_type == "pdf":
-            original = db.query(WhiteboardSnapshot).filter(
-                WhiteboardSnapshot.session_id == page.session_id,
-                WhiteboardSnapshot.page_id == page.id,
-                WhiteboardSnapshot.image_url.isnot(None),
-            ).order_by(WhiteboardSnapshot.created_at.asc()).first()
-            if original and original.image_url:
-                image_key = original.image_url
+            image_key = original_images.get(page.id) or image_key
         payload.append({
             "page_id": str(page.id),
             "page_number": index,
@@ -253,7 +256,7 @@ async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | Non
 
 
 @router.delete("/sessions/{session_id}/whiteboard-pages/{page_id}")
-async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, active_page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, background_tasks: BackgroundTasks, active_page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     cs = db.get(ClassSession, session_id)
     if cs is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -290,11 +293,10 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, acti
         page.position = position
     db.commit()
 
+    # Return the updated slide list immediately; object-storage cleanup runs
+    # after the response so deleting a slide does not wait on network I/O.
     for key in object_keys:
-        try:
-            await asyncio.to_thread(delete_file, key)
-        except Exception:
-            pass
+        background_tasks.add_task(delete_file, key)
     payload_pages = _page_payload(remaining, db)
     active_position = next(i for i, page in enumerate(remaining, 1) if page.id == active_page.id)
     payload = {"type": "whiteboard_pages_updated", "pages": payload_pages, "page_number": active_position, "page_id": str(active_page.id), "deleted_page_id": str(target.id)}
