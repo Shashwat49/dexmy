@@ -458,9 +458,19 @@ export default function Classroom() {
           detachMedia(publication.track);
           if (publication.source === Track.Source.Camera) setCamera(false);
           else if (publication.source === Track.Source.Microphone) setMic(false);
-          else if (publication.source === Track.Source.ScreenShare) setScreen(false);
+          else if (publication.source === Track.Source.ScreenShare) {
+            setScreen(false);
+            // Restore the existing whiteboard canvas after the local share is removed.
+            requestAnimationFrame(() => redraw());
+          }
         });
-        room.on(RoomEvent.TrackUnsubscribed, (track) => detachMedia(track));
+        room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
+          detachMedia(track);
+          if (publication?.source === Track.Source.ScreenShare) {
+            // Remote screen sharing can end without changing this client's local screen state.
+            requestAnimationFrame(() => redraw());
+          }
+        });
         room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
           if (!participant || !topic) return;
           let msg;
