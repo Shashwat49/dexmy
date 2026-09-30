@@ -102,16 +102,28 @@ async def upload_chat_file(session_id: uuid.UUID, file: UploadFile = File(...), 
     key = save_bytes_file(contents, f"chat_{session_id}", ext)
     return FileUploadResponse(file_url=get_presigned_url(key, expires_in=86400), file_name=file.filename)
 
-def _page_payload(pages):
-    return [
-        {
+def _page_payload(pages, db):
+    payload = []
+    for index, page in enumerate(pages, 1):
+        image_key = page.image_url
+        # For PDF slides, the original PDF page image is stored in the first
+        # snapshot. Older code could overwrite ClassroomPage.image_url with a
+        # canvas-only PNG, so prefer the original snapshot image when available.
+        if page.page_type == "pdf":
+            original = db.query(WhiteboardSnapshot).filter(
+                WhiteboardSnapshot.session_id == page.session_id,
+                WhiteboardSnapshot.page_id == page.id,
+                WhiteboardSnapshot.image_url.isnot(None),
+            ).order_by(WhiteboardSnapshot.created_at.asc()).first()
+            if original and original.image_url:
+                image_key = original.image_url
+        payload.append({
             "page_id": str(page.id),
             "page_number": index,
             "page_type": page.page_type,
-            "image_url": get_presigned_url(page.image_url, expires_in=86400) if page.image_url else None,
-        }
-        for index, page in enumerate(pages, 1)
-    ]
+            "image_url": get_presigned_url(image_key, expires_in=86400) if image_key else None,
+        })
+    return payload
 
 
 def _reorder_pages_without_unique_conflicts(pages):
@@ -193,7 +205,7 @@ async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(.
             db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data={"strokes": []}, image_url=page.image_url, page_number=position, page_id=page.id))
     db.commit()
 
-    payload_pages = _page_payload(ordered)
+    payload_pages = _page_payload(ordered, db)
     inserted_ids = [str(page.id) for page in inserted]
     inserted_first_index = next((i for i, page in enumerate(ordered, 1) if str(page.id) in inserted_ids), insert_at + 1)
     await _notify_page_change(session_id, {
@@ -283,7 +295,7 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, acti
             await asyncio.to_thread(delete_file, key)
         except Exception:
             pass
-    payload_pages = _page_payload(remaining)
+    payload_pages = _page_payload(remaining, db)
     active_position = next(i for i, page in enumerate(remaining, 1) if page.id == active_page.id)
     payload = {"type": "whiteboard_pages_updated", "pages": payload_pages, "page_number": active_position, "page_id": str(active_page.id), "deleted_page_id": str(target.id)}
     await _notify_page_change(session_id, payload)
