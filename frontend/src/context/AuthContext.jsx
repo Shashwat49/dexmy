@@ -105,6 +105,31 @@ export function AuthProvider({ children }) {
   }, [user]);
 
   async function login(email, password) {
+    // A single Dexmy browser origin shares one token across all tabs. Validate
+    // any existing token before authenticating so a second tab cannot replace
+    // the account currently in use elsewhere.
+    const existingToken = localStorage.getItem("dexmy_token");
+    if (existingToken) {
+      try {
+        const currentUser = await authApi.getMe();
+        setUser(currentUser);
+        localStorage.setItem("dexmy_user", JSON.stringify(currentUser));
+
+        const error = new Error(
+          "A Dexmy account is already logged in on this browser. Log out of that account first before logging in with another account."
+        );
+        error.code = "DEXMY_SESSION_ALREADY_ACTIVE";
+        throw error;
+      } catch (error) {
+        if (error?.code === "DEXMY_SESSION_ALREADY_ACTIVE") throw error;
+
+        // Only clear an existing session when its token is no longer valid.
+        localStorage.removeItem("dexmy_token");
+        localStorage.removeItem("dexmy_user");
+        setUser(null);
+      }
+    }
+
     setLoading(true);
     try {
       const data = await authApi.login({ email, password });
