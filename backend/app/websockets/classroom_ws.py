@@ -135,20 +135,25 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
             pages_db = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()
             if not pages_db:
                 return
+    # Load all page snapshots in one query. Per-page queries here made reconnects
+    # increasingly slow as a classroom accumulated slides and drawings.
+    snapshots = db.query(WhiteboardSnapshot).filter(
+        WhiteboardSnapshot.session_id == session_id
+    ).order_by(WhiteboardSnapshot.created_at.asc()).all()
+    latest_by_page = {}
+    original_image_by_page = {}
+    for snapshot in snapshots:
+        latest_by_page[snapshot.page_id] = snapshot
+        if snapshot.image_url and snapshot.page_id not in original_image_by_page:
+            original_image_by_page[snapshot.page_id] = snapshot.image_url
+
     pages=[]
     for position,page in enumerate(pages_db,1):
-        snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
+        snap = latest_by_page.get(page.id)
         key = None
         if page.page_type == "pdf":
-            # Keep the original PDF page image as the slide background. Older
-            # snapshots may contain a canvas-only PNG, so use the earliest
-            # non-empty snapshot image as the canonical PDF image key.
-            original = db.query(WhiteboardSnapshot).filter(
-                WhiteboardSnapshot.session_id == session_id,
-                WhiteboardSnapshot.page_id == page.id,
-                WhiteboardSnapshot.image_url.isnot(None),
-            ).order_by(WhiteboardSnapshot.created_at.asc()).first()
-            key = (original.image_url if original else None) or page.image_url
+            # Preserve the first stored PDF-page image as the canonical background.
+            key = original_image_by_page.get(page.id) or page.image_url
         pages.append({"page_id":str(page.id),"page_number":position,"page_type":page.page_type,"image_url":get_presigned_url(key,expires_in=3600) if key else None,"strokes":(snap.snapshot_data or {}).get("strokes",[]) if snap else []})
     cur=pages[-1]
     await websocket.send_json({"type":"whiteboard_state","page_number":cur["page_number"],"page_id":cur["page_id"],"canvas_json":{"strokes":cur["strokes"]},"image_url":cur["image_url"],"pages":pages})
