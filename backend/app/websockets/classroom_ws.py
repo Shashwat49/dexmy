@@ -325,7 +325,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             latest = db.query(WhiteboardSnapshot).filter(
                 WhiteboardSnapshot.session_id == session_id,
                 WhiteboardSnapshot.page_id == page.id,
-            ).order_by(desc(WhiteboardSnapshot.created_at)).first()
+            ).order_by(desc(WhiteboardSnapshot.created_at)).with_for_update().first()
             strokes = list(((latest.snapshot_data or {}).get("strokes") or []) if latest else [])
             stroke = payload.get("stroke")
             if kind == "stroke" and isinstance(stroke, dict) and stroke.get("id"):
@@ -344,13 +344,22 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     strokes.pop()
             elif kind == "clear":
                 strokes = []
-            db.add(WhiteboardSnapshot(
-                session_id=session_id,
-                snapshot_data={"strokes": strokes},
-                image_url=latest.image_url if latest else page.image_url,
-                page_number=page_number,
-                page_id=page.id,
-            ))
+            snapshot_image_url = latest.image_url if latest else page.image_url
+            if latest:
+                # Update the canonical row instead of creating a new snapshot for every stroke.
+                # This prevents competing same-page snapshots from winning reloads out of order.
+                latest.snapshot_data = {"strokes": strokes}
+                latest.image_url = snapshot_image_url
+                latest.page_number = page_number
+                latest.created_at = datetime.now(timezone.utc)
+            else:
+                db.add(WhiteboardSnapshot(
+                    session_id=session_id,
+                    snapshot_data={"strokes": strokes},
+                    image_url=snapshot_image_url,
+                    page_number=page_number,
+                    page_id=page.id,
+                ))
             db.commit()
             payload["page_id"] = str(page.id)
         if peer:
@@ -410,7 +419,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             page=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id,ClassroomPage.position==page_number).first()
         if page is None:
             page=ClassroomPage(session_id=session_id,position=page_number,page_type="whiteboard"); db.add(page); db.flush()
-        existing=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
+        existing=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).with_for_update().first()
         image_url=existing.image_url if existing else page.image_url
         if page.page_type == "pdf":
             # PDF page.image_url must remain the original stored PDF-page image;
@@ -424,7 +433,15 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         elif data.get("image_base64"):
             image_url=save_base64_file(data["image_base64"],f"wb_{session_id}_p{page.id}","png")
             page.image_url=image_url
-        db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=data.get("canvas_json") or {},image_url=image_url,page_number=page_number,page_id=page.id))
+        snapshot_data = data.get("canvas_json") or {}
+        if existing:
+            # Keep one actively updated snapshot per page so reloads use the latest state.
+            existing.snapshot_data = snapshot_data
+            existing.image_url = image_url
+            existing.page_number = page_number
+            existing.created_at = datetime.now(timezone.utc)
+        else:
+            db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=snapshot_data,image_url=image_url,page_number=page_number,page_id=page.id))
         db.commit()
         await websocket.send_json({"type":"snapshot_saved","page_number":page_number,"page_id":str(page.id)})
     elif msg_type == "remove_pdf" and is_teacher:
