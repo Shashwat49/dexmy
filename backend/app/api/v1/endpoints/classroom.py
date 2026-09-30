@@ -222,7 +222,7 @@ async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(.
 
 
 @router.post("/sessions/{session_id}/whiteboard-pages")
-async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def create_whiteboard_page(session_id: uuid.UUID, background_tasks: BackgroundTasks, after_page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     cs = db.get(ClassSession, session_id)
     if cs is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -251,7 +251,7 @@ async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | Non
     db.commit()
     payload_pages = _page_payload(ordered, db)
     payload = {"type": "whiteboard_pages_updated", "pages": payload_pages, "page_number": insert_at + 1, "page_id": str(page.id)}
-    await _notify_page_change(session_id, payload)
+    background_tasks.add_task(_notify_page_change, session_id, payload)
     return {"pages": payload_pages, "page_id": str(page.id), "page_number": insert_at + 1}
 
 
@@ -300,7 +300,7 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, back
     payload_pages = _page_payload(remaining, db)
     active_position = next(i for i, page in enumerate(remaining, 1) if page.id == active_page.id)
     payload = {"type": "whiteboard_pages_updated", "pages": payload_pages, "page_number": active_position, "page_id": str(active_page.id), "deleted_page_id": str(target.id)}
-    await _notify_page_change(session_id, payload)
+    background_tasks.add_task(_notify_page_change, session_id, payload)
     return {"pages": payload_pages, "page_number": active_position, "page_id": str(active_page.id), "deleted_page_id": str(target.id)}
 
 @router.get("/sessions/{session_id}", response_model=None)
