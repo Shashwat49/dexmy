@@ -267,6 +267,8 @@ export default function Classroom() {
     const beforePages = slidesRef.current.slice();
     const beforeStrokes = new Map(strokesByPageRef.current);
     const beforeSlide = slideRef.current;
+    // Flush the active page's latest strokes before an optimistic page deletion.
+    saveSnapshotNow(beforeSlide);
     const targetIndex = beforePages.findIndex((item) => item.page_id === page.page_id);
     if (targetIndex < 0) return;
     const remaining = beforePages.filter((item) => item.page_id !== page.page_id);
