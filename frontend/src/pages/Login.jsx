@@ -70,7 +70,11 @@ export default function Login() {
 
       navigate(DASHBOARD_BY_ROLE[user.role] || "/dashboard");
     } catch (err) {
-      setError(err.response?.data?.detail || "Couldn't log in — check your details and try again.");
+      setError(
+        err.code === "DEXMY_SESSION_ALREADY_ACTIVE"
+          ? err.message
+          : err.response?.data?.detail || "Couldn't log in — check your details and try again."
+      );
     }
   }
 
