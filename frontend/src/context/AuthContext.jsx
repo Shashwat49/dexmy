@@ -95,6 +95,20 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  // End the shared browser session when an authenticated tab is leaving.
+  // Removing the token broadcasts logout to any other open Dexmy tabs.
+  useEffect(() => {
+    if (!user || !localStorage.getItem("dexmy_token")) return;
+
+    function handleTabExit() {
+      localStorage.removeItem("dexmy_token");
+      localStorage.removeItem("dexmy_user");
+    }
+
+    window.addEventListener("pagehide", handleTabExit);
+    return () => window.removeEventListener("pagehide", handleTabExit);
+  }, [user]);
+
   // Keep the local user copy synchronized.
   useEffect(() => {
     if (user) {
