@@ -215,6 +215,8 @@ export default function Classroom() {
   const addSlide = async () => {
     if (!isTeacher) return;
     const current = slideRef.current;
+    // Persist the current page before switching to the optimistic new slide.
+    saveSnapshotNow(current);
     const currentPageId = slidesRef.current[current - 1]?.page_id;
     const optimisticPage = makeWhiteboardPage(current + 1);
     const beforePages = slidesRef.current.slice();
