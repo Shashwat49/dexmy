@@ -129,6 +129,7 @@ export default function Classroom() {
   const slidesRef = useRef([makeWhiteboardPage(1)]), strokesByPageRef = useRef(new Map()), slideRef = useRef(1);
   const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false), imageCacheRef = useRef(new Map()), reliableStrokeTimerRef = useRef(null), slideControlActiveRef = useRef(false);
   const mediaBusyRef = useRef(false);
+  const whiteboardStateInitializedRef = useRef(false);
   const selectedStrokeRef = useRef(null), selectInteractionRef = useRef(null), seenWhiteboardActionIdsRef = useRef(new Set());
   const micStateRef = useRef(false);
   const cameraStateRef = useRef(false);
@@ -315,7 +316,12 @@ export default function Classroom() {
           setThumbnailVersion((version) => version + 1);
         }
         if (msg.type === "whiteboard_state") {
+          // The server sends this on every WebSocket connection. After the teacher has
+          // initialized the board, a reconnect snapshot can be older than the live local
+          // state and must not replace the teacher's in-progress whiteboard.
+          if (isTeacher && whiteboardStateInitializedRef.current) return;
           if (slideControlActiveRef.current) return;
+          whiteboardStateInitializedRef.current = true;
           const p = msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }];
           slidesRef.current = p;
           setSlides(p);
