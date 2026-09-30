@@ -289,8 +289,57 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
             return
+        payload = data.get("payload") or {}
+        kind = payload.get("kind")
+        if kind in {"stroke", "stroke_update", "stroke_delete", "undo", "clear"}:
+            page_number = max(1, int(payload.get("page_number", 1) or 1))
+            try:
+                page_id = uuid.UUID(str(payload.get("page_id"))) if payload.get("page_id") else None
+            except (ValueError, TypeError):
+                page_id = None
+            page = db.get(ClassroomPage, page_id) if page_id else None
+            if page_id and (page is None or page.session_id != session_id):
+                return
+            if page is None:
+                page = db.query(ClassroomPage).filter(
+                    ClassroomPage.session_id == session_id,
+                    ClassroomPage.position == page_number,
+                ).first()
+            if page is None:
+                return
+            latest = db.query(WhiteboardSnapshot).filter(
+                WhiteboardSnapshot.session_id == session_id,
+                WhiteboardSnapshot.page_id == page.id,
+            ).order_by(desc(WhiteboardSnapshot.created_at)).first()
+            strokes = list(((latest.snapshot_data or {}).get("strokes") or []) if latest else [])
+            stroke = payload.get("stroke")
+            if kind == "stroke" and isinstance(stroke, dict) and stroke.get("id"):
+                if not any(item.get("id") == stroke["id"] for item in strokes if isinstance(item, dict)):
+                    strokes.append(stroke)
+            elif kind == "stroke_update" and isinstance(stroke, dict) and stroke.get("id"):
+                index = next((i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == stroke["id"]), None)
+                if index is None:
+                    strokes.append(stroke)
+                else:
+                    strokes[index] = stroke
+            elif kind == "stroke_delete" and payload.get("stroke_id"):
+                strokes = [item for item in strokes if not isinstance(item, dict) or item.get("id") != payload["stroke_id"]]
+            elif kind == "undo":
+                if strokes:
+                    strokes.pop()
+            elif kind == "clear":
+                strokes = []
+            db.add(WhiteboardSnapshot(
+                session_id=session_id,
+                snapshot_data={"strokes": strokes},
+                image_url=latest.image_url if latest else page.image_url,
+                page_number=page_number,
+                page_id=page.id,
+            ))
+            db.commit()
+            payload["page_id"] = str(page.id)
         if peer:
-            await peer.send_json({"type": "whiteboard_event", "payload": data.get("payload") or {}})
+            await peer.send_json({"type": "whiteboard_event", "payload": payload})
     elif msg_type == "whiteboard_live":
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
