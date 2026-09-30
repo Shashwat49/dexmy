@@ -128,7 +128,8 @@ export default function Classroom() {
   const canvasRef = useRef(null), wsRef = useRef(null), roomRef = useRef(null), drawRef = useRef(null), drawBaseRef = useRef(null);
   const slidesRef = useRef([makeWhiteboardPage(1)]), strokesByPageRef = useRef(new Map()), slideRef = useRef(1);
   const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false), imageCacheRef = useRef(new Map()), reliableStrokeTimerRef = useRef(null), slideControlActiveRef = useRef(false);
-  const mediaBusyRef = useRef(false);\n  const selectedStrokeRef = useRef(null), selectInteractionRef = useRef(null);
+  const mediaBusyRef = useRef(false);
+  const selectedStrokeRef = useRef(null), selectInteractionRef = useRef(null);
   const micStateRef = useRef(false);
   const cameraStateRef = useRef(false);
   const gridRef = useRef(false);
