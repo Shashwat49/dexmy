@@ -175,22 +175,24 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
         if is_teacher:
             room.teacher_ws = websocket
             room.permissions[str(user.id)] = {"annotate", "screen_share", "mic", "camera"}
-            if class_session.status == SessionStatus.scheduled:
-                class_session.status = SessionStatus.live
-                class_session.started_at = func.now()
-                db.commit()
-            if room.deadline is None:
-                started = class_session.started_at
-                if started is not None:
-                    if started.tzinfo is None:
-                        started = started.replace(tzinfo=timezone.utc)
-                    room.deadline = started + timedelta(minutes=CLASS_DURATION_MINUTES)
-                else:
-                    room.deadline = datetime.now(timezone.utc) + timedelta(minutes=CLASS_DURATION_MINUTES)
-            if room.timer_task is None or room.timer_task.done():
-                room.timer_task = asyncio.create_task(session_timer(session_id))
             student_waiting = room.student_ws is not None or room.pending_student is not None
-            await websocket.send_json({"type": "class_started", "deadline": room.deadline.isoformat(), "student_present": student_waiting, "student_id": str(booking.student_id) if student_waiting else None})
+            if student_waiting:
+                if class_session.status == SessionStatus.scheduled:
+                    class_session.status = SessionStatus.live
+                    class_session.started_at = func.now()
+                    db.commit()
+                    db.refresh(class_session)
+                if room.deadline is None:
+                    started = class_session.started_at
+                    if started is not None:
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=timezone.utc)
+                        room.deadline = started + timedelta(minutes=CLASS_DURATION_MINUTES)
+                    else:
+                        room.deadline = datetime.now(timezone.utc) + timedelta(minutes=CLASS_DURATION_MINUTES)
+                if room.timer_task is None or room.timer_task.done():
+                    room.timer_task = asyncio.create_task(session_timer(session_id))
+            await websocket.send_json({"type": "class_started", "deadline": room.deadline.isoformat() if room.deadline else None, "student_present": student_waiting, "student_id": str(booking.student_id) if student_waiting else None})
             if room.student_ws:
                 student = db.get(User, booking.student_id)
                 if student:
@@ -216,12 +218,28 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 await websocket.send_json({"type": "waiting_for_teacher"})
             else:
                 room.student_ws = websocket
+                if class_session.status == SessionStatus.scheduled:
+                    class_session.status = SessionStatus.live
+                    class_session.started_at = func.now()
+                    db.commit()
+                    db.refresh(class_session)
+                if room.deadline is None:
+                    started = class_session.started_at
+                    if started is not None:
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=timezone.utc)
+                        room.deadline = started + timedelta(minutes=CLASS_DURATION_MINUTES)
+                    else:
+                        room.deadline = datetime.now(timezone.utc) + timedelta(minutes=CLASS_DURATION_MINUTES)
+                if room.timer_task is None or room.timer_task.done():
+                    room.timer_task = asyncio.create_task(session_timer(session_id))
                 permissions_state = _permission_payload(room, user.id)
-                await websocket.send_json({"type": "admitted", "deadline": room.deadline.isoformat() if room.deadline else None})
+                await websocket.send_json({"type": "admitted", "deadline": room.deadline.isoformat()})
                 teacher = db.get(User, booking.teacher_id)
                 if teacher:
                     await websocket.send_json({"type": "participant_info", "role": "teacher", "name": teacher.full_name})
                 await websocket.send_json({"type": "permissions_state", "permissions": permissions_state})
+                await room.teacher_ws.send_json({"type": "class_started", "deadline": room.deadline.isoformat(), "student_present": True, "student_id": str(user.id)})
                 await room.teacher_ws.send_json({"type": "student_joined", "user_id": str(user.id), "name": user.full_name})
                 await room.teacher_ws.send_json({"type": "permissions_state", "permissions": permissions_state})
         await _send_latest_whiteboard(session_id, websocket, db)
