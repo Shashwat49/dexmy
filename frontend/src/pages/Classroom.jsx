@@ -561,6 +561,33 @@ export default function Classroom() {
           if (!participant || !topic) return;
           let msg;
           try { msg = JSON.parse(decoder.decode(payload)); } catch { return; }
+          // The API broadcasts durable page changes to both classroom participants.
+          // Apply this event directly so students receive add/delete updates without
+          // depending on the teacher's separate LiveKit control message.
+          if (msg.type === "whiteboard_pages_updated") {
+            const next = normalizePages(msg.pages);
+            const previousStrokes = strokesByPageRef.current;
+            const nextStrokes = new Map(next.map((page) => [
+              page.page_id,
+              previousStrokes.get(page.page_id) || [],
+            ]));
+            strokesByPageRef.current = nextStrokes;
+            slidesRef.current = next;
+            setSlides(next);
+            const requestedPageId = msg.page_id;
+            const requestedIndex = requestedPageId
+              ? next.findIndex((page) => page.page_id === requestedPageId)
+              : -1;
+            const nextPage = requestedIndex >= 0
+              ? requestedIndex + 1
+              : clamp(Number(msg.page_number) || slideRef.current, 1, next.length);
+            slideRef.current = nextPage;
+            setSlide(nextPage);
+            slideControlActiveRef.current = true;
+            setThumbnailVersion((version) => version + 1);
+            setTimeout(redraw, 0);
+            return;
+          }
           if (msg.type === "classroom_control" && topic === CONTROL_TOPIC) {
             const p = msg.payload || {};
             if (p.kind === "grid") {
