@@ -246,7 +246,7 @@ async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | Non
         item.position = position
     db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data={"strokes": []}, image_url=None, page_number=insert_at + 1, page_id=page.id))
     db.commit()
-    payload_pages = _page_payload(ordered)
+    payload_pages = _page_payload(ordered, db)
     payload = {"type": "whiteboard_pages_updated", "pages": payload_pages, "page_number": insert_at + 1, "page_id": str(page.id)}
     await _notify_page_change(session_id, payload)
     return {"pages": payload_pages, "page_id": str(page.id), "page_number": insert_at + 1}
