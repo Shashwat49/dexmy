@@ -215,18 +215,31 @@ export default function Classroom() {
   const addSlide = async () => {
     if (!isTeacher) return;
     const current = slideRef.current;
-    saveSnapshotNow(current);
+    const currentPageId = slidesRef.current[current - 1]?.page_id;
+    const optimisticPage = makeWhiteboardPage(current + 1);
+    const beforePages = slidesRef.current.slice();
+    const beforeStrokes = new Map(strokesByPageRef.current);
+    const insertAt = Math.max(0, current);
+    const optimisticPages = [...beforePages.slice(0, insertAt), optimisticPage, ...beforePages.slice(insertAt)]
+      .map((page, index) => ({ ...page, page_number: index + 1 }));
+    const optimisticStrokes = new Map(optimisticPages.map((page) => [page.page_id, beforeStrokes.get(page.page_id) || []]));
+    optimisticStrokes.set(optimisticPage.page_id, []);
+    strokesByPageRef.current = optimisticStrokes;
+    slidesRef.current = optimisticPages;
+    slideRef.current = insertAt + 1;
+    setSlides(optimisticPages);
+    setSlide(insertAt + 1);
+    setThumbnailVersion((version) => version + 1);
     try {
-      const afterPageId = currentPageId(current);
-      const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}`);
+      const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(currentPageId || "")}`);
       if (!Array.isArray(data?.pages) || !data.pages.length || !data.page_id) {
         throw new Error("The server did not return the new slide. Please try again.");
       }
       const updated = normalizePages(data.pages);
       const next = updated.findIndex((page) => page.page_id === data.page_id) + 1;
       if (next < 1) throw new Error("The new slide was not included in the server response.");
-      const previousStrokes = strokesByPageRef.current;
-      const nextStrokes = new Map(updated.map((page) => [page.page_id, previousStrokes.get(page.page_id) || []]));
+      const currentStrokes = strokesByPageRef.current;
+      const nextStrokes = new Map(updated.map((page) => [page.page_id, currentStrokes.get(page.page_id) || beforeStrokes.get(page.page_id) || []]));
       nextStrokes.set(data.page_id, []);
       strokesByPageRef.current = nextStrokes;
       slidesRef.current = updated;
@@ -238,26 +251,63 @@ export default function Classroom() {
       setThumbnailVersion((version) => version + 1);
       setNotice("Slide added.");
     } catch (error) {
+      if (slidesRef.current.some((page) => page.page_id === optimisticPage.page_id)) {
+        strokesByPageRef.current = beforeStrokes;
+        slidesRef.current = beforePages;
+        slideRef.current = clamp(current, 1, beforePages.length);
+        setSlides(beforePages);
+        setSlide(slideRef.current);
+        setThumbnailVersion((version) => version + 1);
+      }
       setNotice(error.response?.data?.detail || error.message || "Could not add slide.");
     }
   };
   const deleteSlide = async (page) => {
     if (!isTeacher || slidesRef.current.length <= 1) return;
-    const currentPage = slidesRef.current[slideRef.current - 1];
+    const beforePages = slidesRef.current.slice();
+    const beforeStrokes = new Map(strokesByPageRef.current);
+    const beforeSlide = slideRef.current;
+    const targetIndex = beforePages.findIndex((item) => item.page_id === page.page_id);
+    if (targetIndex < 0) return;
+    const remaining = beforePages.filter((item) => item.page_id !== page.page_id);
+    const activeBefore = beforePages[beforeSlide - 1];
+    const activeAfter = activeBefore?.page_id === page.page_id
+      ? remaining[Math.min(targetIndex, remaining.length - 1)]
+      : activeBefore;
+    const next = Math.max(1, remaining.findIndex((item) => item.page_id === activeAfter?.page_id) + 1);
+    const optimisticPages = remaining.map((item, index) => ({ ...item, page_number: index + 1 }));
+    strokesByPageRef.current = new Map(optimisticPages.map((item) => [item.page_id, beforeStrokes.get(item.page_id) || []]));
+    slidesRef.current = optimisticPages;
+    slideRef.current = next;
+    setSlides(optimisticPages);
+    setSlide(next);
+    setThumbnailVersion((version) => version + 1);
     try {
-      const query = currentPage?.page_id ? `?active_page_id=${encodeURIComponent(currentPage.page_id)}` : "";
+      const activePageId = activeAfter?.page_id;
+      const query = activePageId ? `?active_page_id=${encodeURIComponent(activePageId)}` : "";
       const { data } = await api.delete(`/classroom/sessions/${sessionId}/whiteboard-pages/${page.page_id}${query}`);
       const updated = normalizePages(data.pages);
-      const previousStrokes = strokesByPageRef.current;
-      strokesByPageRef.current = new Map(updated.map((item) => [item.page_id, previousStrokes.get(item.page_id) || []]));
-      slidesRef.current = updated; setSlides(updated);
-      const next = clamp(Number(data.page_number) || 1, 1, updated.length);
-      slideRef.current = next; setSlide(next);
+      const latestStrokes = strokesByPageRef.current;
+      strokesByPageRef.current = new Map(updated.map((item) => [item.page_id, latestStrokes.get(item.page_id) || beforeStrokes.get(item.page_id) || []]));
+      slidesRef.current = updated;
+      setSlides(updated);
+      const serverNext = clamp(Number(data.page_number) || 1, 1, updated.length);
+      slideRef.current = serverNext;
+      setSlide(serverNext);
       slideControlActiveRef.current = true;
-      publishControl({ kind: "slides", pages: updated, page_number: next, page_id: updated[next - 1]?.page_id });
+      publishControl({ kind: "slides", pages: updated, page_number: serverNext, page_id: updated[serverNext - 1]?.page_id });
       setThumbnailVersion((version) => version + 1);
       setNotice("Slide deleted.");
     } catch (error) {
+      // Only roll back if this optimistic deletion is still the current local slide set.
+      if (!slidesRef.current.some((item) => item.page_id === page.page_id)) {
+        strokesByPageRef.current = beforeStrokes;
+        slidesRef.current = beforePages;
+        slideRef.current = clamp(beforeSlide, 1, beforePages.length);
+        setSlides(beforePages);
+        setSlide(slideRef.current);
+        setThumbnailVersion((version) => version + 1);
+      }
       setNotice(error.response?.data?.detail || "Could not delete slide.");
     }
   };
