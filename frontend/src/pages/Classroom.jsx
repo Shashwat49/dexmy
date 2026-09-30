@@ -219,19 +219,26 @@ export default function Classroom() {
     try {
       const afterPageId = currentPageId(current);
       const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}`);
+      if (!Array.isArray(data?.pages) || !data.pages.length || !data.page_id) {
+        throw new Error("The server did not return the new slide. Please try again.");
+      }
       const updated = normalizePages(data.pages);
-      const next = Math.max(1, updated.findIndex((page) => page.page_id === data.page_id) + 1);
+      const next = updated.findIndex((page) => page.page_id === data.page_id) + 1;
+      if (next < 1) throw new Error("The new slide was not included in the server response.");
       const previousStrokes = strokesByPageRef.current;
       const nextStrokes = new Map(updated.map((page) => [page.page_id, previousStrokes.get(page.page_id) || []]));
       nextStrokes.set(data.page_id, []);
       strokesByPageRef.current = nextStrokes;
-      slidesRef.current = updated; setSlides(updated);
-      slideRef.current = next; setSlide(next);
+      slidesRef.current = updated;
+      slideRef.current = next;
+      setSlides(updated);
+      setSlide(next);
       slideControlActiveRef.current = true;
       publishControl({ kind: "slides", pages: updated, page_number: next, page_id: data.page_id });
       setThumbnailVersion((version) => version + 1);
+      setNotice("Slide added.");
     } catch (error) {
-      setNotice(error.response?.data?.detail || "Could not add slide.");
+      setNotice(error.response?.data?.detail || error.message || "Could not add slide.");
     }
   };
   const deleteSlide = async (page) => {
