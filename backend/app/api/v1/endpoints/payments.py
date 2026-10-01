@@ -2,6 +2,7 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -67,9 +68,16 @@ def checkout(payload: CheckoutRequest, current_user: User = Depends(get_current_
 
     amount = float(teacher.hourly_rate) * (CLASS_DURATION_MINUTES / 60)  # billed on actual class time, not the buffer
 
+    booking_end = payload.scheduled_at + timedelta(minutes=CLASS_DURATION_MINUTES)
+    range_start = payload.scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
+    range_end = booking_end.astimezone(timezone.utc).replace(tzinfo=None)
+
     booking = Booking(
         student_id=student_id, teacher_id=payload.teacher_id, subject_id=payload.subject_id,
-        scheduled_at=payload.scheduled_at, duration_minutes=SLOT_DURATION_MINUTES,
+        scheduled_at=payload.scheduled_at,
+        booking_ends_at=booking_end,
+        booking_time_range=Range(range_start, range_end, bounds="[)"),
+        duration_minutes=SLOT_DURATION_MINUTES,
         status=BookingStatus.pending, price=amount,
     )
     db.add(booking)

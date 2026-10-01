@@ -86,11 +86,15 @@ export default function HeroScene() {
     }
     container.addEventListener("mousemove", handleMouseMove);
 
-    const clock = new THREE.Clock();
+    // THREE.Clock was deprecated in Three.js r183. Timer requires an explicit
+    // update on every simulation step and avoids large deltas after tab switches.
+    const timer = new THREE.Timer();
+    timer.connect(document);
 
-    function animate() {
+    function animate(timestamp) {
       animationId = requestAnimationFrame(animate);
-      const t = clock.getElapsedTime();
+      timer.update(timestamp);
+      const t = timer.getElapsed();
 
       targetX += (mouseX - targetX) * 0.04;
       targetY += (mouseY - targetY) * 0.04;
@@ -120,6 +124,7 @@ export default function HeroScene() {
       cancelAnimationFrame(animationId);
       window.removeEventListener("resize", handleResize);
       container.removeEventListener("mousemove", handleMouseMove);
+      timer.dispose();
       scene.traverse((obj) => {
         if (obj.geometry) obj.geometry.dispose();
         if (obj.material) {

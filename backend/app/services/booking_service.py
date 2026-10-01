@@ -35,6 +35,8 @@ from app.models.free_class import (
     StudentFreeClassUse,
 )
 
+from app.services.teacher_verification import VERIFIED_TEACHER_EMAILS
+
 from app.services.scheduling_service import (
     get_slot_capacity as calculate_scheduling_capacity,
     can_accept_booking,
@@ -152,9 +154,7 @@ def get_eligible_teacher_ids(
             TeacherSubject.subject_id
             == subject_id,
 
-            TeacherProfile.is_verified.is_(
-                True
-            ),
+            User.email.in_(VERIFIED_TEACHER_EMAILS),
 
             User.is_active.is_(True),
 
@@ -518,6 +518,9 @@ def create_booking_atomic(
     # Create the booking.
     # --------------------------------------------------------
 
+    booking_end = scheduled_at + timedelta(minutes=CLASS_DURATION_MINUTES)
+    booking_end = scheduled_at + timedelta(minutes=CLASS_DURATION_MINUTES)
+
     booking = Booking(
         student_id=student_id,
 
@@ -528,6 +531,8 @@ def create_booking_atomic(
         subject_id=subject_id,
 
         scheduled_at=scheduled_at,
+
+        booking_ends_at=booking_end,
 
         duration_minutes=CLASS_DURATION_MINUTES,
 

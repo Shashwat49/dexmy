@@ -10,13 +10,14 @@ from app.models.teacher_profile_change_request import TeacherProfileChangeReques
 from app.models.user import User, UserRole
 from app.schemas.profile import TeacherProfileRead, TeacherProfileUpdate
 from app.schemas.teacher_profile_change import TeacherProfileChangeRequestRead
+from app.services.teacher_verification import is_verified_teacher_email
 router=APIRouter()
 def _get_teacher_profile(teacher_id,db):
     profile=db.get(TeacherProfile,teacher_id)
     if profile is None: raise HTTPException(status_code=404,detail="Teacher profile not found")
     return profile
 def _get_teacher_subject_ids(teacher_id,db): return [row[0] for row in db.query(TeacherSubject.subject_id).filter(TeacherSubject.teacher_id==teacher_id).all()]
-def _build_teacher_profile_read(profile,user,db): return TeacherProfileRead(user_id=profile.user_id,full_name=user.full_name,email=user.email,phone=user.phone,bio=profile.bio,qualifications=profile.qualifications,years_experience=profile.years_experience,hourly_rate=profile.hourly_rate,is_verified=profile.is_verified,rating_avg=profile.rating_avg,rating_count=profile.rating_count,subject_ids=_get_teacher_subject_ids(profile.user_id,db))
+def _build_teacher_profile_read(profile,user,db): return TeacherProfileRead(user_id=profile.user_id,full_name=user.full_name,email=user.email,phone=user.phone,bio=profile.bio,qualifications=profile.qualifications,years_experience=profile.years_experience,hourly_rate=profile.hourly_rate,is_verified=is_verified_teacher_email(user.email),rating_avg=profile.rating_avg,rating_count=profile.rating_count,subject_ids=_get_teacher_subject_ids(profile.user_id,db))
 def _validate_application(profile,subject_ids,user):
     missing=[]
     if not user.full_name or len(user.full_name.strip())<2: missing.append("full_name")

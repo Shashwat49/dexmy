@@ -11,6 +11,7 @@ from app.models.booking import ContactMessage
 from app.models.payment import Payment, PaymentStatus
 from app.models.teacher import TeacherProfile
 from app.models.user import User, UserRole
+from app.services.teacher_verification import VERIFIED_TEACHER_EMAILS
 from app.schemas.admin_dashboard import AdminDashboardMetrics, AdminDashboardResponse
 
 router = APIRouter()
@@ -36,7 +37,7 @@ def get_dashboard_metrics(
         )
     ).scalar_one()
     verified_teachers = db.execute(
-        select(func.count()).select_from(TeacherProfile).where(TeacherProfile.is_verified.is_(True))
+        select(func.count()).select_from(User).where(User.role == UserRole.teacher, func.lower(User.email).in_(VERIFIED_TEACHER_EMAILS))
     ).scalar_one()
     upcoming_bookings = db.execute(
         select(func.count()).select_from(Booking).where(

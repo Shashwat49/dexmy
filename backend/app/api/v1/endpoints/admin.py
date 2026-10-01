@@ -8,15 +8,17 @@ from app.core.dependencies import get_current_admin, require_permission
 from app.core.security import hash_password
 from app.db.session import get_db
 from app.models.admin import AdminAuditLog, AdminPermission, AdminRolePermission, AdminProfile
+from app.models.admin_notification import AdminNotification
 from app.models.booking import Booking, BookingStatus
 from app.models.teacher import Subject, TeacherProfile, TeacherSubject
 from app.models.user import User, UserRole
 from app.schemas.admin import AdminMeRead, AdminUserCreate, AdminUserRead, AdminUserUpdate, AuditLogRead
 from app.schemas.booking import PendingTeacherAssignmentRead, TeacherAssignmentRead, TeacherAssignmentRequest
-from app.schemas.user import UserRead
+from app.schemas.user import UserRead, UserRoleUpdate
 from app.services.audit_service import record_admin_action
 from app.services.booking_service import assign_teacher_atomic
 from app.services.scheduling_service import can_assign_teacher
+from app.services.teacher_verification import VERIFIED_TEACHER_EMAILS, is_verified_teacher_email
 
 router = APIRouter()
 
@@ -274,6 +276,26 @@ def activate_user(
     return user
 
 
+@router.patch("/users/{user_id}/role", response_model=UserRead)
+def update_user_role(
+    user_id: uuid.UUID,
+    payload: UserRoleUpdate,
+    request: Request,
+    current_user: User = Depends(require_permission("student.update")),
+    db: Session = Depends(get_db),
+):
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    old_role = user.role
+    user.role = payload.role
+    record_admin_action(db, admin_user_id=current_user.id, action="user.update_role", resource_type="user", resource_id=user.id,
+                        old_values={"role": old_role.value}, new_values={"role": payload.role.value},
+                        ip_address=request.client.host if request.client else None, user_agent=request.headers.get("user-agent"))
+    db.commit(); db.refresh(user)
+    return user
+
+
 # ============================================================
 # TEACHER MANAGEMENT
 # ============================================================
@@ -288,6 +310,11 @@ def verify_teacher(
     profile = db.get(TeacherProfile, teacher_id)
     if profile is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher profile not found")
+    teacher = db.get(User, teacher_id)
+    if teacher is None or teacher.role != UserRole.teacher:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher not found")
+    if not is_verified_teacher_email(teacher.email):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This teacher is not on the verified teacher allowlist.")
     old_verified = profile.is_verified
     profile.is_verified = True
     record_admin_action(db, admin_user_id=current_user.id, action="teacher.verify", resource_type="teacher", resource_id=teacher_id,
@@ -308,11 +335,7 @@ def list_pending_teacher_assignments(
     rows = db.execute(
         select(Booking, User.full_name.label("student_name"), Subject.name.label("subject_name"))
         .join(User, User.id == Booking.student_id).join(Subject, Subject.id == Booking.subject_id)
-        .where(
-            Booking.status == BookingStatus.confirmed,
-            Booking.teacher_id.is_(None),
-            Booking.teacher_assignment_status != "discarded",
-        )
+        .where(Booking.status == BookingStatus.confirmed, Booking.teacher_id.is_(None))
         .order_by(Booking.scheduled_at.asc())
     ).all()
     return [PendingTeacherAssignmentRead(
@@ -341,7 +364,7 @@ def list_eligible_teachers(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A teacher is already assigned to this booking.")
 
     teachers = db.query(User).join(TeacherProfile, TeacherProfile.user_id == User.id).join(TeacherSubject, TeacherSubject.teacher_id == TeacherProfile.user_id).filter(
-        User.role == UserRole.teacher, User.is_active.is_(True), TeacherProfile.is_verified.is_(True), TeacherSubject.subject_id == booking.subject_id
+        User.role == UserRole.teacher, User.is_active.is_(True), func.lower(User.email).in_(VERIFIED_TEACHER_EMAILS), TeacherSubject.subject_id == booking.subject_id
     ).distinct().all()
     eligible = []
     for teacher in teachers:
@@ -386,53 +409,56 @@ def assign_teacher(
 
 
 # ============================================================
-# DISCARD TEACHER ASSIGNMENT REQUEST
+# ADMIN NOTIFICATIONS
 # ============================================================
 
-@router.post("/bookings/{booking_id}/discard-teacher-assignment", response_model=TeacherAssignmentRead)
-def discard_teacher_assignment(
-    booking_id: uuid.UUID,
-    request: Request,
-    current_user: User = Depends(require_permission("booking.assign_teacher")),
+@router.get("/notifications")
+def list_admin_notifications(
+    limit: int = 20,
+    current_user: User = Depends(require_permission("student.read")),
     db: Session = Depends(get_db),
 ):
-    booking = db.get(Booking, booking_id)
-    if booking is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-    if booking.teacher_id is not None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A teacher is already assigned to this booking.")
-    if booking.status != BookingStatus.confirmed:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only confirmed bookings can have a teacher assignment request discarded.")
-    if booking.teacher_assignment_status == "discarded":
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This teacher assignment request has already been discarded.")
+    limit = max(1, min(limit, 100))
+    rows = db.execute(
+        select(AdminNotification)
+        .order_by(AdminNotification.created_at.desc())
+        .limit(limit)
+    ).scalars().all()
+    return [
+        {
+            "id": row.id,
+            "notification_type": row.notification_type,
+            "title": row.title,
+            "message": row.message,
+            "student_id": row.student_id,
+            "is_read": row.is_read,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
 
-    old_status = booking.teacher_assignment_status
-    booking.teacher_assignment_status = "discarded"
-    record_admin_action(
-        db,
-        admin_user_id=current_user.id,
-        action="booking.discard_teacher_assignment",
-        resource_type="booking",
-        resource_id=booking.id,
-        old_values={"teacher_assignment_status": old_status, "teacher_id": None},
-        new_values={"teacher_assignment_status": "discarded", "teacher_id": None},
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
+
+@router.get("/notifications/unread-count")
+def get_admin_notification_unread_count(
+    current_user: User = Depends(require_permission("student.read")),
+    db: Session = Depends(get_db),
+):
+    count = db.execute(
+        select(func.count())
+        .select_from(AdminNotification)
+        .where(AdminNotification.is_read.is_(False))
+    ).scalar_one()
+    return {"count": count}
+
+
+@router.post("/notifications/read-all")
+def mark_admin_notifications_read(
+    current_user: User = Depends(require_permission("student.read")),
+    db: Session = Depends(get_db),
+):
+    db.query(AdminNotification).filter(AdminNotification.is_read.is_(False)).update(
+        {AdminNotification.is_read: True},
+        synchronize_session=False,
     )
     db.commit()
-    db.refresh(booking)
-
-    student = db.get(User, booking.student_id)
-    subject = db.get(Subject, booking.subject_id)
-    return TeacherAssignmentRead(
-        booking_id=booking.id,
-        student_id=booking.student_id,
-        student_name=student.full_name if student else "Unknown",
-        subject_id=booking.subject_id,
-        subject_name=subject.name if subject else "Unknown",
-        teacher_id=None,
-        teacher_name="Unassigned",
-        scheduled_at=booking.scheduled_at,
-        duration_minutes=booking.duration_minutes,
-        teacher_assignment_status=booking.teacher_assignment_status,
-    )
+    return {"ok": True}

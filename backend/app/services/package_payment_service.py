@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage
@@ -46,8 +47,27 @@ def get_or_create_payment(db: Session, *, payer_id: uuid.UUID, student_id: uuid.
         status=PaymentStatus.created,
         idempotency_key=idempotency_key,
     )
-    db.add(payment)
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.add(payment)
+            db.flush()
+    except IntegrityError:
+        existing = db.execute(
+            select(Payment).where(Payment.idempotency_key == idempotency_key)
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        if (
+            existing.payer_id != payer_id
+            or existing.student_id != student_id
+            or existing.package_plan_id != package_plan.id
+            or existing.provider.value != provider
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Idempotency key is already associated with a different payment",
+            )
+        return existing
     return payment
 
 
@@ -56,10 +76,16 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
     if payment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
 
-    if payment.status == PaymentStatus.paid and payment.package_id is not None:
-        package = db.get(StudentPackage, payment.package_id)
-        if package is not None:
-            return package
+    if payment.status == PaymentStatus.paid:
+        if payment.package_id is not None:
+            package = db.get(StudentPackage, payment.package_id)
+            if package is not None:
+                return package
+        existing_package = db.execute(select(StudentPackage).where(StudentPackage.payment_id == payment.id)).scalar_one_or_none()
+        if existing_package is not None:
+            payment.package_id = existing_package.id
+            db.flush()
+            return existing_package
 
     if payment.package_plan_id is None or payment.student_id is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment is missing package purchase metadata")
@@ -86,8 +112,19 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
         classes_used=0,
         status="active",
     )
-    db.add(package)
-    db.flush()
+    try:
+        with db.begin_nested():
+            db.add(package)
+            db.flush()
+    except IntegrityError:
+        existing_package = db.execute(
+            select(StudentPackage).where(StudentPackage.payment_id == payment.id)
+        ).scalar_one_or_none()
+        if existing_package is not None:
+            payment.package_id = existing_package.id
+            db.flush()
+            return existing_package
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Concurrent package activation detected. Please retry or wait.")
 
     db.add(PackageCreditLedger(
         student_package_id=package.id,

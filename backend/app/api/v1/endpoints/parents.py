@@ -1,6 +1,9 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+
+from app.models.package import StudentPackage
 
 from app.core.dependencies import require_role
 from app.db.session import get_db
@@ -20,10 +23,33 @@ def list_my_students(
     db: Session = Depends(get_db),
 ):
     links = db.query(ParentStudentLink).filter(ParentStudentLink.parent_id == current_user.id).all()
-    return [
-        LinkedStudentRead(id=(s := db.get(User, l.student_id)).id, full_name=s.full_name, email=s.email)
-        for l in links
-    ]
+    students = []
+    for link in links:
+        s = db.get(User, link.student_id)
+        package_totals = (
+            db.query(
+                func.coalesce(func.sum(StudentPackage.total_classes), 0),
+                func.coalesce(func.sum(StudentPackage.classes_used), 0),
+            )
+            .filter(
+                StudentPackage.student_id == s.id,
+                StudentPackage.status == "active",
+            )
+            .one()
+        )
+        total_classes = int(package_totals[0] or 0)
+        classes_completed = int(package_totals[1] or 0)
+        students.append(
+            LinkedStudentRead(
+                id=s.id,
+                full_name=s.full_name,
+                email=s.email,
+                total_classes=total_classes,
+                classes_completed=classes_completed,
+                classes_remaining=max(total_classes - classes_completed, 0),
+            )
+        )
+    return students
 
 
 @router.post("/me/students", response_model=LinkedStudentRead, status_code=status.HTTP_201_CREATED)
@@ -41,7 +67,27 @@ def link_student(
 
     db.add(ParentStudentLink(parent_id=current_user.id, student_id=student.id))
     db.commit()
-    return LinkedStudentRead(id=student.id, full_name=student.full_name, email=student.email)
+    package_totals = (
+        db.query(
+            func.coalesce(func.sum(StudentPackage.total_classes), 0),
+            func.coalesce(func.sum(StudentPackage.classes_used), 0),
+        )
+        .filter(
+            StudentPackage.student_id == student.id,
+            StudentPackage.status == "active",
+        )
+        .one()
+    )
+    total_classes = int(package_totals[0] or 0)
+    classes_completed = int(package_totals[1] or 0)
+    return LinkedStudentRead(
+        id=student.id,
+        full_name=student.full_name,
+        email=student.email,
+        total_classes=total_classes,
+        classes_completed=classes_completed,
+        classes_remaining=max(total_classes - classes_completed, 0),
+    )
 
 
 @router.delete("/me/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT)

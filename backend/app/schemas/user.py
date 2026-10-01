@@ -72,6 +72,10 @@ class UserLogin(BaseModel):
     password: str
 
 
+class UserRoleUpdate(BaseModel):
+    role: UserRole
+
+
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

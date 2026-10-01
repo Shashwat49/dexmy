@@ -37,10 +37,34 @@ BEGIN
     END IF;
 END $$;
 
--- 5. Fix duration_minutes default
+-- 5. Keep the booking interval fields aligned with the production schema.
+-- booking_ends_at is the actual class end; booking_time_range is retained
+-- for PostgreSQL exclusion constraints used by production.
+ALTER TABLE bookings
+ADD COLUMN IF NOT EXISTS booking_ends_at TIMESTAMPTZ;
+
+UPDATE bookings
+SET booking_ends_at = scheduled_at + (duration_minutes * interval '1 minute')
+WHERE booking_ends_at IS NULL;
+
+ALTER TABLE bookings
+ALTER COLUMN booking_ends_at SET NOT NULL;
+
+ALTER TABLE bookings
+ADD COLUMN IF NOT EXISTS booking_time_range TSRANGE;
+
+UPDATE bookings
+SET booking_time_range = tsrange(
+    scheduled_at AT TIME ZONE 'UTC',
+    booking_ends_at AT TIME ZONE 'UTC',
+    '[)'
+)
+WHERE booking_time_range IS NULL;
+
+-- 6. Fix duration_minutes default
 ALTER TABLE bookings ALTER COLUMN duration_minutes SET DEFAULT 55;
 
--- 6. Student Exclusion Constraint
+-- 7. Student Exclusion Constraint
 DO $$ 
 BEGIN
     IF NOT EXISTS (
@@ -58,7 +82,7 @@ BEGIN
     END IF;
 END $$;
 
--- 7. Teacher Exclusion Constraint
+-- 8. Teacher Exclusion Constraint
 DO $$ 
 BEGIN
     IF NOT EXISTS (

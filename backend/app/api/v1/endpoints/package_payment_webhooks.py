@@ -28,7 +28,7 @@ async def razorpay_package_webhook(
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook payload")
 
-    if event.get("event") not in {"payment.captured", "order.paid"}:
+    if event.get("event") not in {"payment.captured", "order.paid", "payment.failed"}:
         return {"received": True}
 
     payment_entity = event.get("payload", {}).get("payment", {}).get("entity", {})
@@ -44,6 +44,11 @@ async def razorpay_package_webhook(
     if payment is None or payment.provider.value != "razorpay":
         return {"received": True}
     if payment.status == PaymentStatus.paid:
+        return {"received": True}
+
+    if event.get("event") == "payment.failed":
+        payment.status = PaymentStatus.failed
+        db.commit()
         return {"received": True}
 
     order = razorpay_service.fetch_order(order_id)

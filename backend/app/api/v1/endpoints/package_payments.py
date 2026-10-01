@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
+from app.models.package import PackagePlan
 from app.models.payment import Payment, PaymentStatus
 from app.models.student import ParentStudentLink
 from app.models.user import User, UserRole
@@ -175,14 +176,21 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature")
 
-    if event["type"] == "payment_intent.succeeded":
+    if event["type"] in ("payment_intent.succeeded", "payment_intent.payment_failed"):
         intent = event["data"]["object"]
         payment = db.execute(
             select(Payment).where(Payment.provider_order_id == intent["id"]).with_for_update()
         ).scalar_one_or_none()
+        
         if payment is not None and payment.status != PaymentStatus.paid:
             if payment.provider.value != "stripe":
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment provider mismatch")
+                
+            if event["type"] == "payment_intent.payment_failed":
+                payment.status = PaymentStatus.failed
+                db.commit()
+                return {"received": True}
+                
             expected_amount = int(round(float(payment.amount) * 100))
             if intent.get("amount") != expected_amount or intent.get("currency") != payment.currency.lower():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment amount or currency mismatch")
@@ -190,3 +198,45 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
             db.commit()
 
     return {"received": True}
+
+
+@router.get("/history")
+def get_payment_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role not in (UserRole.student, UserRole.parent):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only students and parents can view payment history")
+
+    query = (
+        select(Payment, PackagePlan.name.label("package_name"))
+        .outerjoin(PackagePlan, Payment.package_plan_id == PackagePlan.id)
+        .order_by(Payment.created_at.desc())
+    )
+
+    if current_user.role == UserRole.student:
+        query = query.where(
+            (Payment.student_id == current_user.id) | (Payment.payer_id == current_user.id)
+        )
+    else:
+        linked_student_ids = db.scalars(
+            select(ParentStudentLink.student_id).where(ParentStudentLink.parent_id == current_user.id)
+        ).all()
+        query = query.where(
+            (Payment.payer_id == current_user.id) | (Payment.student_id.in_(linked_student_ids))
+        )
+
+    results = db.execute(query).all()
+    items = []
+    for payment, package_name in results:
+        items.append({
+            "id": str(payment.id),
+            "package_name": package_name or ("Class Booking" if payment.booking_id else "Tutoring Package"),
+            "amount": float(payment.amount),
+            "currency": payment.currency,
+            "provider": payment.provider.value if hasattr(payment.provider, "value") else str(payment.provider),
+            "provider_payment_id": payment.provider_payment_id or payment.provider_order_id,
+            "status": payment.status.value if hasattr(payment.status, "value") else str(payment.status),
+            "created_at": payment.created_at.isoformat() if payment.created_at else None,
+        })
+    return items
