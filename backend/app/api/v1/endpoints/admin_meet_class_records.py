@@ -14,6 +14,7 @@ router = APIRouter()
 def _record_read(record: ExternalClassRecord, db: Session) -> ExternalClassRecordRead:
     student = db.get(User, record.student_id)
     teacher = db.get(User, record.teacher_id)
+    admin = db.get(User, record.created_by_admin_id) if record.created_by_admin_id else None
     return ExternalClassRecordRead(
         id=record.id,
         student_id=record.student_id,
@@ -31,6 +32,8 @@ def _record_read(record: ExternalClassRecord, db: Session) -> ExternalClassRecor
         teacher_notes=record.teacher_notes,
         homework=record.homework,
         google_meet_link=record.google_meet_link,
+        created_by_admin_id=record.created_by_admin_id,
+        created_by_admin_name=admin.full_name if admin else None,
         created_at=record.created_at,
     )
 

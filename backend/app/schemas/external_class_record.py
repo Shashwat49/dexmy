@@ -44,6 +44,8 @@ class ExternalClassRecordRead(BaseModel):
     teacher_notes: str | None
     homework: str | None
     google_meet_link: str | None
+    created_by_admin_id: uuid.UUID | None = None
+    created_by_admin_name: str | None = None
     created_at: datetime
 
 
