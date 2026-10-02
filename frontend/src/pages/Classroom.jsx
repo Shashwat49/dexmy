@@ -278,13 +278,6 @@ export default function Classroom() {
 
     const connectWebSocket = () => {
       if (disposedRef.current) return;
-      const reconnecting = Boolean(wsRef.current);
-      if (reconnecting) {
-        // A reconnect must rehydrate from the server instead of retaining a
-        // possibly stale local whiteboard after a dropped connection.
-        whiteboardStateInitializedRef.current = false;
-        slideControlActiveRef.current = false;
-      }
       const token = localStorage.getItem("dexmy_token");
       const nextSocket = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token || "")}`);
       socket = nextSocket;
@@ -670,7 +663,7 @@ export default function Classroom() {
   }, [hasEntered, sessionId, user, wsUrl, isTeacher, navigate, redraw, renderStroke, currentStrokes]);
   const sendMessage = (event) => { event.preventDefault(); const text = message.trim(); if (!text) return; if (!send({ type: "chat", message_text: text })) { setNotice("Chat is reconnecting. Please try again in a moment."); return; } setChat((items) => [...items, { mine: true, text }]); setMessage(""); };
   const setPermission = (permission, granted) => { if (!studentId) return setNotice("Waiting for the student to join."); send({ type: "permission_update", target_user_id: studentId, permission, granted }); };
-  const endClass = async () => { if (!isTeacher || ending) return; setEnding(true); saveSnapshotNow(slideRef.current); try { const { data } = await api.post(`/classroom/sessions/${sessionId}/end`); if (data?.pdf_url) setNotesUrl(data.pdf_url); } catch (error) { setEnding(false); setNotice(error.response?.data?.detail || "Could not end class."); } };
+  const endClass = async () => { if (!isTeacher || ending) return; setEnding(true); try { const { data } = await api.post(`/classroom/sessions/${sessionId}/end`); if (data?.pdf_url) setNotesUrl(data.pdf_url); } catch (error) { setEnding(false); setNotice(error.response?.data?.detail || "Could not end class."); } };
   const controlsAllowed = timer !== null && timer <= 300;
   const videoControl = (kind, active, label) => <button type="button" title={label} aria-label={label} onClick={() => media(kind)} className={`classroom-video-control ${active ? "active" : ""}`}>{kind === "mic" ? (active ? "🎙" : "🔇") : kind === "camera" ? (active ? "▣" : "▢") : "↗"}</button>;
   return <div className="dexmy-classroom-shell h-[100dvh] w-full overflow-hidden bg-[#0b1020] text-white flex flex-col select-none">
