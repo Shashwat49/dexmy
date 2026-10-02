@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.orm import Session
 from app.core.dependencies import require_permission
 from app.db.session import get_db
@@ -42,9 +42,12 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
         verified = is_verified_teacher_email(u.email)
         monthly = {}
         if verified:
+            month_start = func.date_trunc(
+                literal_column("'month'"), ExternalClassRecord.started_at
+            )
             month_rows = db.execute(
                 select(
-                    func.date_trunc("month", ExternalClassRecord.started_at),
+                    month_start,
                     func.count(ExternalClassRecord.id),
                 )
                 .where(
@@ -52,8 +55,8 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
                     ExternalClassRecord.status == "completed",
                     ExternalClassRecord.started_at >= u.created_at,
                 )
-                .group_by(func.date_trunc("month", ExternalClassRecord.started_at))
-                .order_by(func.date_trunc("month", ExternalClassRecord.started_at))
+                .group_by(month_start)
+                .order_by(month_start)
             ).all()
             monthly = {month: 0 for month in month_range(u.created_at)}
             monthly.update({
