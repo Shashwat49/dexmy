@@ -44,7 +44,7 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
         if verified:
             month_rows = db.execute(
                 select(
-                    func.to_char(func.date_trunc("month", ExternalClassRecord.started_at), "YYYY-MM"),
+                    func.date_trunc("month", ExternalClassRecord.started_at),
                     func.count(ExternalClassRecord.id),
                 )
                 .where(
@@ -52,11 +52,14 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
                     ExternalClassRecord.status == "completed",
                     ExternalClassRecord.started_at >= u.created_at,
                 )
-                .group_by(func.to_char(func.date_trunc("month", ExternalClassRecord.started_at), "YYYY-MM"))
-                .order_by(func.to_char(func.date_trunc("month", ExternalClassRecord.started_at), "YYYY-MM"))
+                .group_by(func.date_trunc("month", ExternalClassRecord.started_at))
+                .order_by(func.date_trunc("month", ExternalClassRecord.started_at))
             ).all()
             monthly = {month: 0 for month in month_range(u.created_at)}
-            monthly.update({month: int(count) for month, count in month_rows})
+            monthly.update({
+                month_value.strftime("%Y-%m"): int(count)
+                for month_value, count in month_rows
+            })
         result.append(AdminTeacherListItem(
             id=u.id, full_name=u.full_name, email=u.email, phone=u.phone,
             is_active=u.is_active, is_verified=verified, rating_avg=p.rating_avg,
