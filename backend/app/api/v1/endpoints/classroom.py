@@ -224,7 +224,7 @@ async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(.
 
 
 @router.post("/sessions/{session_id}/whiteboard-pages")
-async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | None = None, page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     cs = db.get(ClassSession, session_id)
     if cs is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -232,7 +232,9 @@ async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | Non
     if current_user.id != booking.teacher_id:
         raise HTTPException(status_code=403, detail="Only the teacher can add slides")
 
-    pages = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()
+    pages = db.query(ClassroomPage).filter(
+        ClassroomPage.session_id == session_id
+    ).order_by(ClassroomPage.position.asc()).all()
     after_index = len(pages) - 1
     if after_page_id:
         try:
@@ -241,20 +243,55 @@ async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | Non
         except (ValueError, TypeError):
             pass
     insert_at = max(0, after_index + 1)
+
+    client_page_id = None
+    if page_id:
+        try:
+            client_page_id = uuid.UUID(page_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid page ID")
+        if db.get(ClassroomPage, client_page_id) is not None:
+            raise HTTPException(status_code=409, detail="Page ID already exists")
+
     _reorder_pages_without_unique_conflicts(pages)
     db.flush()
-    page = ClassroomPage(session_id=session_id, position=-(len(pages) + 1), page_type="whiteboard")
+    page = ClassroomPage(
+        id=client_page_id or uuid.uuid4(),
+        session_id=session_id,
+        position=-(len(pages) + 1),
+        page_type="whiteboard",
+    )
     db.add(page)
     db.flush()
     ordered = pages[:insert_at] + [page] + pages[insert_at:]
     for position, item in enumerate(ordered, 1):
         item.position = position
-    db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data={"strokes": []}, image_url=None, page_number=insert_at + 1, page_id=page.id))
+    db.add(WhiteboardSnapshot(
+        session_id=session_id,
+        snapshot_data={"strokes": []},
+        image_url=None,
+        page_number=insert_at + 1,
+        page_id=page.id,
+    ))
     db.commit()
-    payload_pages = _page_payload(ordered, db)
-    payload = {"type": "whiteboard_pages_updated", "pages": payload_pages, "page_number": insert_at + 1, "page_id": str(page.id)}
-    await _notify_page_change(session_id, payload)
-    return {"pages": payload_pages, "page_id": str(page.id), "page_number": insert_at + 1}
+
+    page_payload = {
+        "page_id": str(page.id),
+        "page_number": insert_at + 1,
+        "page_type": "whiteboard",
+        "image_url": None,
+    }
+    asyncio.create_task(_notify_page_change(session_id, {
+        "type": "whiteboard_page_added",
+        "page": page_payload,
+        "insert_at": insert_at,
+        "page_number": insert_at + 1,
+    }))
+    return {
+        "page": page_payload,
+        "page_id": str(page.id),
+        "page_number": insert_at + 1,
+    }
 
 
 @router.delete("/sessions/{session_id}/whiteboard-pages/{page_id}")
@@ -266,7 +303,9 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, back
     if current_user.id != booking.teacher_id:
         raise HTTPException(status_code=403, detail="Only the teacher can delete slides")
 
-    pages = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()
+    pages = db.query(ClassroomPage).filter(
+        ClassroomPage.session_id == session_id
+    ).order_by(ClassroomPage.position.asc()).all()
     target = next((page for page in pages if page.id == page_id), None)
     if target is None:
         raise HTTPException(status_code=404, detail="Slide not found")
@@ -274,19 +313,26 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, back
         raise HTTPException(status_code=409, detail="A classroom must keep at least one slide")
 
     target_index = pages.index(target)
-    snapshots = db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id == session_id, WhiteboardSnapshot.page_id == target.id).all()
+    snapshots = db.query(WhiteboardSnapshot).filter(
+        WhiteboardSnapshot.session_id == session_id,
+        WhiteboardSnapshot.page_id == target.id,
+    ).all()
     object_keys = {key for key in [target.image_url, *(snapshot.image_url for snapshot in snapshots)] if key}
+
     active_id = None
     try:
         active_id = uuid.UUID(active_page_id) if active_page_id else None
     except (ValueError, TypeError):
         pass
+
     remaining = [page for page in pages if page.id != target.id]
     active_page = next((page for page in remaining if page.id == active_id), None)
     if active_page is None:
         active_page = remaining[min(target_index, len(remaining) - 1)]
 
-    db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.page_id == target.id).delete(synchronize_session=False)
+    db.query(WhiteboardSnapshot).filter(
+        WhiteboardSnapshot.page_id == target.id
+    ).delete(synchronize_session=False)
     db.delete(target)
     db.flush()
     _reorder_pages_without_unique_conflicts(remaining)
@@ -295,15 +341,22 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, back
         page.position = position
     db.commit()
 
-    # Return the updated slide list immediately; object-storage cleanup runs
-    # after the response so deleting a slide does not wait on network I/O.
     for key in object_keys:
         background_tasks.add_task(delete_file, key)
-    payload_pages = _page_payload(remaining, db)
+
     active_position = next(i for i, page in enumerate(remaining, 1) if page.id == active_page.id)
-    payload = {"type": "whiteboard_pages_updated", "pages": payload_pages, "page_number": active_position, "page_id": str(active_page.id), "deleted_page_id": str(target.id)}
-    await _notify_page_change(session_id, payload)
-    return {"pages": payload_pages, "page_number": active_position, "page_id": str(active_page.id), "deleted_page_id": str(target.id)}
+    asyncio.create_task(_notify_page_change(session_id, {
+        "type": "whiteboard_page_deleted",
+        "deleted_page_id": str(target.id),
+        "deleted_index": target_index,
+        "page_number": active_position,
+        "page_id": str(active_page.id),
+    }))
+    return {
+        "deleted_page_id": str(target.id),
+        "page_number": active_position,
+        "page_id": str(active_page.id),
+    }
 
 @router.get("/sessions/{session_id}", response_model=None)
 def get_session_status(session_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
