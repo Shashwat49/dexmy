@@ -12,6 +12,7 @@ export default function AdminTeachers() {
   const [showRequests, setShowRequests] = useState(true);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedMonths, setSelectedMonths] = useState({});
 
   async function load() {
     setLoading(true);
@@ -264,9 +265,7 @@ export default function AdminTeachers() {
                       )}
                     </td>
                     <td className="px-5 py-4">{t.subject_count}</td>
-                    <td className="px-5 py-4">
-                      {t.completed_classes} completed · {t.upcoming_classes} upcoming
-                    </td>
+                    <td className="px-5 py-4">{t.is_verified ? <TeacherClassCount teacher={t} selectedMonth={selectedMonths[t.id]} onMonthChange={(month) => setSelectedMonths((m) => ({ ...m, [t.id]: month }))} /> : <span>{t.completed_classes} completed · {t.upcoming_classes} upcoming</span>}</td>
                     <td className="px-5 py-4">{t.hourly_rate ?? "—"}</td>
                     <td className="px-5 py-4">{t.is_active ? "Active" : "Inactive"}</td>
                     <td className="px-5 py-4">
@@ -388,6 +387,15 @@ export default function AdminTeachers() {
       )}
     </DashboardLayout>
   );
+}
+
+function TeacherClassCount({ teacher, selectedMonth, onMonthChange }) {
+  const month = selectedMonth || "current";
+  const currentKey = new Date().toISOString().slice(0, 7);
+  const months = Object.keys(teacher.monthly_classes || {}).sort().reverse();
+  const value = month === "current" ? (teacher.monthly_classes?.[currentKey] || 0) : (teacher.monthly_classes?.[month] || 0);
+  const label = month === "current" ? "This month" : new Date(month + "-01T00:00:00").toLocaleDateString(undefined, { month: "long" });
+  return <div className="flex items-center gap-2 whitespace-nowrap"><span>{teacher.completed_classes} total</span><span className="text-chalk-muted">·</span><select value={month} onChange={(e) => onMonthChange(e.target.value)} onClick={(e) => e.stopPropagation()} className="rounded-md border border-chalk-faint bg-panel px-2 py-1 text-xs"><option value="current">This month</option>{months.map((m) => <option key={m} value={m}>{new Date(m + "-01T00:00:00").toLocaleDateString(undefined, { month: "long", year: "numeric" })}</option>)}</select><span className="text-chalk-muted">{value} {label}</span></div>;
 }
 
 function Detail({ label, value }) {
