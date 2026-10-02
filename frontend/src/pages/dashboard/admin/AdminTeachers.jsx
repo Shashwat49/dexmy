@@ -11,7 +11,8 @@ export default function AdminTeachers() {
   const [busy, setBusy] = useState(null);
   const [showRequests, setShowRequests] = useState(true);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);\n  const [selectedMonths, setSelectedMonths] = useState({});
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedMonths, setSelectedMonths] = useState({});
 
   async function load() {
     setLoading(true);
@@ -388,7 +389,16 @@ export default function AdminTeachers() {
   );
 }
 
-function TeacherClassCount({ teacher, selectedMonth, onMonthChange }) {\n  const month = selectedMonth || "current";\n  const currentKey = new Date().toISOString().slice(0, 7);\n  const months = Object.keys(teacher.monthly_classes || {}).sort().reverse();\n  const value = month === "current" ? (teacher.monthly_classes?.[currentKey] || 0) : (teacher.monthly_classes?.[month] || 0);\n  const label = month === "current" ? "This month" : new Date(month + "-01T00:00:00").toLocaleDateString(undefined, { month: "long" });\n  return <div className="flex items-center gap-2 whitespace-nowrap"><span>{teacher.completed_classes} total</span><span className="text-chalk-muted">·</span><select value={month} onChange={(e) => onMonthChange(e.target.value)} onClick={(e) => e.stopPropagation()} className="rounded-md border border-chalk-faint bg-panel px-2 py-1 text-xs"><option value="current">This month</option>{months.map((m) => <option key={m} value={m}>{new Date(m + "-01T00:00:00").toLocaleDateString(undefined, { month: "long", year: "numeric" })}</option>)}</select><span className="text-chalk-muted">{value} {label}</span></div>;\n}\n\nfunction Detail({ label, value }) {
+function TeacherClassCount({ teacher, selectedMonth, onMonthChange }) {
+  const month = selectedMonth || "current";
+  const currentKey = new Date().toISOString().slice(0, 7);
+  const months = Object.keys(teacher.monthly_classes || {}).sort().reverse();
+  const value = month === "current" ? (teacher.monthly_classes?.[currentKey] || 0) : (teacher.monthly_classes?.[month] || 0);
+  const label = month === "current" ? "This month" : new Date(month + "-01T00:00:00").toLocaleDateString(undefined, { month: "long" });
+  return <div className="flex items-center gap-2 whitespace-nowrap"><span>{teacher.completed_classes} total</span><span className="text-chalk-muted">·</span><select value={month} onChange={(e) => onMonthChange(e.target.value)} onClick={(e) => e.stopPropagation()} className="rounded-md border border-chalk-faint bg-panel px-2 py-1 text-xs"><option value="current">This month</option>{months.map((m) => <option key={m} value={m}>{new Date(m + "-01T00:00:00").toLocaleDateString(undefined, { month: "long", year: "numeric" })}</option>)}</select><span className="text-chalk-muted">{value} {label}</span></div>;
+}
+
+function Detail({ label, value }) {
   return (
     <div className="rounded-xl border border-chalk-faint bg-panel-2 p-4">
       <p className="text-xs text-chalk-muted">{label}</p>
