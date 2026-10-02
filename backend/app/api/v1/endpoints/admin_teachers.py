@@ -24,7 +24,34 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
     if active is not None: query=query.where(User.is_active.is_(active))
     if subject_id is not None: query=query.join(TeacherSubject,TeacherSubject.teacher_id==User.id).where(TeacherSubject.subject_id==subject_id)
     rows=db.execute(query.order_by(User.created_at.desc())).all()
-    return [AdminTeacherListItem(id=u.id,full_name=u.full_name,email=u.email,phone=u.phone,is_active=u.is_active,is_verified=is_verified_teacher_email(u.email),rating_avg=p.rating_avg,rating_count=p.rating_count,years_experience=p.years_experience,hourly_rate=p.hourly_rate,subject_count=int(s or 0),completed_classes=int(d or 0),upcoming_classes=int(x or 0)) for u,p,s,d,x in rows]
+    result = []
+    for u,p,s,d,x in rows:
+        verified = is_verified_teacher_email(u.email)
+        monthly = {}
+        if verified:
+            month_rows = db.execute(
+                select(
+                    func.to_char(func.date_trunc("month", ExternalClassRecord.started_at), "YYYY-MM"),
+                    func.count(ExternalClassRecord.id),
+                )
+                .where(
+                    ExternalClassRecord.teacher_id == u.id,
+                    ExternalClassRecord.status == "completed",
+                    ExternalClassRecord.started_at >= u.created_at,
+                )
+                .group_by(func.date_trunc("month", ExternalClassRecord.started_at))
+                .order_by(func.date_trunc("month", ExternalClassRecord.started_at))
+            ).all()
+            monthly = {month: int(count) for month, count in month_rows}
+        result.append(AdminTeacherListItem(
+            id=u.id, full_name=u.full_name, email=u.email, phone=u.phone,
+            is_active=u.is_active, is_verified=verified, rating_avg=p.rating_avg,
+            rating_count=p.rating_count, years_experience=p.years_experience,
+            hourly_rate=p.hourly_rate, subject_count=int(s or 0),
+            completed_classes=int(d or 0), upcoming_classes=int(x or 0),
+            monthly_classes=monthly, joined_at=u.created_at
+        ))
+    return result
 @router.get("/profile-change-requests",response_model=list[dict])
 def list_profile_change_requests(current_user:User=Depends(require_permission("teacher.read")),db:Session=Depends(get_db)):
     rows=db.execute(select(TeacherProfileChangeRequest,User).join(User,User.id==TeacherProfileChangeRequest.teacher_id).order_by(TeacherProfileChangeRequest.created_at.desc())).all()
