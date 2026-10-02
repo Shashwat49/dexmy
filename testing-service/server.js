@@ -16,11 +16,35 @@ import { swaggerDocs } from "./swagger.js";
 
 const app = express();
 
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-demo-role"],
-}));
+const allowedOrigins = (
+  process.env.FRONTEND_ORIGINS || "http://localhost:5173,http://localhost:3000"
+)
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  return (
+    allowedOrigins.includes(origin) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+  );
+};
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-demo-role", "Cookie"],
+  }),
+);
 
 app.use(express.json());
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocs));
@@ -76,9 +100,15 @@ app.get("/api", getApiOverview);
 app.get("/health", async (req, res) => {
   try {
     await query("SELECT 1");
-    return res.status(200).json({ success: true, service: "testing-service", database: "ok" });
+    return res
+      .status(200)
+      .json({ success: true, service: "testing-service", database: "ok" });
   } catch (error) {
-    return res.status(503).json({ success: false, service: "testing-service", database: "unavailable" });
+    return res.status(503).json({
+      success: false,
+      service: "testing-service",
+      database: "unavailable",
+    });
   }
 });
 

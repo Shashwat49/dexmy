@@ -30,7 +30,8 @@ function EditQuestion() {
         setMessage("");
 
         const response = await fetch(
-          `http://localhost:5000/api/questions/${id}`
+          `http://localhost:5000/api/questions/${id}`,
+          { credentials: "include" },
         );
 
         const data = await response.json();
@@ -143,6 +144,7 @@ function EditQuestion() {
         `http://localhost:5000/api/questions/${id}`,
         {
           method: "PUT",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
           },

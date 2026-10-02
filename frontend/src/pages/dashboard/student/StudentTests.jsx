@@ -95,6 +95,7 @@ function App() {
         `${TESTING_API_BASE}/question-reports`,
         {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
           },
@@ -246,7 +247,8 @@ function App() {
         let data = null;
         try {
           const response = await fetch(`${TESTING_API_BASE}/tests/published`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
           });
           if (response.ok) {
             data = await response.json();
@@ -257,7 +259,8 @@ function App() {
 
         if (!data || !data.tests || data.tests.length === 0) {
           const legacyRes = await fetch(`${TESTING_API_BASE}/test-creation/published`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
           });
           if (legacyRes.ok) {
             data = await legacyRes.json();
@@ -282,13 +285,8 @@ function App() {
                 const sessionResponse = await fetch(
                   TESTING_API_BASE + "/test-submissions/session/" + savedSession.sessionId,
                   {
-                    headers: {
-                      Authorization: "Bearer " + (
-                        localStorage.getItem("dexmy_token") ||
-                        localStorage.getItem("token") ||
-                        "student"
-                      ),
-                    },
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
                   }
                 );
                 const sessionData = await sessionResponse.json();
@@ -326,7 +324,8 @@ function App() {
     const fetchHistory = async () => {
       try {
         const res = await fetch(`${TESTING_API_BASE}/test-submissions/my-submissions`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.submissions)) {
@@ -359,18 +358,13 @@ function App() {
 
   const handleStartTest = async (test) => {
     try {
-      const token =
-        localStorage.getItem("dexmy_token") ||
-        localStorage.getItem("token") ||
-        "student";
-
       const response = await fetch(
         TESTING_API_BASE + "/test-submissions/start",
         {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
-            Authorization: "Bearer " + token,
           },
           body: JSON.stringify({
             testId: test.id || test._id,
@@ -447,12 +441,11 @@ function App() {
   const handleUnlockTest = async (test) => {
     const tId = String(test.id || test._id);
     try {
-      const token = localStorage.getItem("token") || localStorage.getItem("dexmy_token") || "student";
       const res = await fetch(`${TESTING_API_BASE}/tests/${tId}/purchase`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
       });
       const data = await res.json();
@@ -938,9 +931,9 @@ function App() {
         `${TESTING_API_BASE}/test-submissions`,
         {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}`,
           },
           body: JSON.stringify({
             testId,
@@ -1025,13 +1018,9 @@ function App() {
           TESTING_API_BASE + "/test-submissions/session/" + activeSession.id,
           {
             method: "PATCH",
+            credentials: "include",
             headers: {
               "Content-Type": "application/json",
-              Authorization: "Bearer " + (
-                localStorage.getItem("dexmy_token") ||
-                localStorage.getItem("token") ||
-                "student"
-              ),
             },
             body: JSON.stringify({ answers }),
           }
@@ -1074,15 +1063,15 @@ function App() {
             );
             return saved
               ? {
-                  ...state,
-                  savedAnswer:
-                    saved.selectedAnswer === undefined
-                      ? null
-                      : saved.selectedAnswer,
-                  visited:
-                    saved.selectedAnswer !== null &&
-                    saved.selectedAnswer !== undefined,
-                }
+                ...state,
+                savedAnswer:
+                  saved.selectedAnswer === undefined
+                    ? null
+                    : saved.selectedAnswer,
+                visited:
+                  saved.selectedAnswer !== null &&
+                  saved.selectedAnswer !== undefined,
+              }
               : state;
           })
         );
@@ -1890,10 +1879,10 @@ function App() {
 
                           <span
                             className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${answer.isCorrect
-                                ? "bg-green-100 text-green-700"
-                                : isNotAnswered
-                                  ? "bg-gray-100 text-gray-600"
-                                  : "bg-red-100 text-red-700"
+                              ? "bg-green-100 text-green-700"
+                              : isNotAnswered
+                                ? "bg-gray-100 text-gray-600"
+                                : "bg-red-100 text-red-700"
                               }`}
                           >
                             {answer.isCorrect
@@ -1930,10 +1919,10 @@ function App() {
 
                             <div
                               className={`rounded-xl border p-4 ${answer.isCorrect
-                                  ? "border-green-200 bg-green-50"
-                                  : isNotAnswered
-                                    ? "border-gray-200 bg-gray-50"
-                                    : "border-red-200 bg-red-50"
+                                ? "border-green-200 bg-green-50"
+                                : isNotAnswered
+                                  ? "border-gray-200 bg-gray-50"
+                                  : "border-red-200 bg-red-50"
                                 }`}
                             >
 
@@ -1945,10 +1934,10 @@ function App() {
 
                                 <span
                                   className={`text-sm font-bold ${answer.isCorrect
-                                      ? "text-green-600"
-                                      : isNotAnswered
-                                        ? "text-gray-500"
-                                        : "text-red-600"
+                                    ? "text-green-600"
+                                    : isNotAnswered
+                                      ? "text-gray-500"
+                                      : "text-red-600"
                                     }`}
                                 >
                                   {answer.isCorrect
@@ -1994,10 +1983,10 @@ function App() {
 
                             <p
                               className={`text-base font-bold ${answer.marksObtained < 0
-                                  ? "text-red-600"
-                                  : answer.isCorrect
-                                    ? "text-green-600"
-                                    : "text-gray-600"
+                                ? "text-red-600"
+                                : answer.isCorrect
+                                  ? "text-green-600"
+                                  : "text-gray-600"
                                 }`}
                             >
                               {answer.marksObtained > 0
@@ -2143,27 +2132,24 @@ function App() {
         <button
           key={`${currentQuestion}-${index}`}
           onClick={() => handleAnswer(index)}
-          className={`group w-full min-h-[56px] sm:min-h-[72px] px-4 sm:px-5 py-3 rounded-xl border text-left flex items-center gap-3 sm:gap-4 transition-all duration-200 ${
-            isSelected
-              ? "border-[#e31b23] bg-[#fef2f2] shadow-[0_4px_14px_rgba(227,27,35,0.10)] ring-1 ring-[#e31b23]"
-              : "border-[#e5e7eb] bg-white hover:border-[#e31b23] hover:bg-[#fef2f2] hover:shadow-xs"
-          }`}
+          className={`group w-full min-h-[56px] sm:min-h-[72px] px-4 sm:px-5 py-3 rounded-xl border text-left flex items-center gap-3 sm:gap-4 transition-all duration-200 ${isSelected
+            ? "border-[#e31b23] bg-[#fef2f2] shadow-[0_4px_14px_rgba(227,27,35,0.10)] ring-1 ring-[#e31b23]"
+            : "border-[#e5e7eb] bg-white hover:border-[#e31b23] hover:bg-[#fef2f2] hover:shadow-xs"
+            }`}
         >
           <span
-            className={`w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all ${
-              isSelected
-                ? "bg-[#e31b23] text-white shadow-sm"
-                : "bg-[#f3f4f6] text-[#374151] group-hover:bg-[#e31b23] group-hover:text-white"
-            }`}
+            className={`w-8 h-8 sm:w-10 sm:h-10 shrink-0 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all ${isSelected
+              ? "bg-[#e31b23] text-white shadow-sm"
+              : "bg-[#f3f4f6] text-[#374151] group-hover:bg-[#e31b23] group-hover:text-white"
+              }`}
           >
             {optionLetter}
           </span>
           <span
-            className={`text-sm sm:text-base leading-snug font-medium transition-colors ${
-              isSelected
-                ? "text-[#991b1b]"
-                : "text-[#374151] group-hover:text-[#991b1b]"
-            }`}
+            className={`text-sm sm:text-base leading-snug font-medium transition-colors ${isSelected
+              ? "text-[#991b1b]"
+              : "text-[#374151] group-hover:text-[#991b1b]"
+              }`}
           >
             {optionText}
           </span>
@@ -2198,11 +2184,10 @@ function App() {
             <ClockIcon size={14} className="text-[#e31b23] shrink-0" />
             <span className="hidden md:inline text-xs text-[#4b5563]">Time:</span>
             <span
-              className={`font-semibold text-xs sm:text-sm ${
-                timeLeft <= 300
-                  ? "text-[#dc2626] animate-pulse"
-                  : "text-[#111827]"
-              }`}
+              className={`font-semibold text-xs sm:text-sm ${timeLeft <= 300
+                ? "text-[#dc2626] animate-pulse"
+                : "text-[#111827]"
+                }`}
             >
               {formatTime(timeLeft)}
             </span>

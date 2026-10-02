@@ -4,13 +4,28 @@ const JWT_SECRET = process.env.JWT_SECRET_KEY;
 const JWT_ALGORITHM = process.env.JWT_ALGORITHM || "HS256";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 
+const getCookieValue = (req, name) => {
+  const cookieHeader = req.headers.cookie || "";
+  const cookie = cookieHeader
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${name}=`));
+
+  if (!cookie) return "";
+  try {
+    return decodeURIComponent(cookie.substring(name.length + 1));
+  } catch {
+    return "";
+  }
+};
+
 if (IS_PRODUCTION && !JWT_SECRET) {
   throw new Error("JWT_SECRET_KEY must be configured in production.");
 }
 
 const authMiddleware = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const cookieToken = getCookieValue(req, "dexmy_access");
+  if (!cookieToken) {
     if (!IS_PRODUCTION) {
       req.user = {
         id: "00000000-0000-0000-0000-000000000001",
@@ -18,19 +33,27 @@ const authMiddleware = (req, res, next) => {
       };
       return next();
     }
-    return res.status(401).json({ message: "No token provided" });
+    return res
+      .status(401)
+      .json({ message: "No authentication cookie provided" });
   }
 
-  const token = authHeader.split(" ")[1];
+  const token = cookieToken;
 
   // Demo shortcuts are available only outside production.
   if (!IS_PRODUCTION) {
     if (token === "student" || token === "student_token") {
-      req.user = { id: "00000000-0000-0000-0000-000000000001", role: "student" };
+      req.user = {
+        id: "00000000-0000-0000-0000-000000000001",
+        role: "student",
+      };
       return next();
     }
     if (token === "test_creator" || token === "creator_token") {
-      req.user = { id: "00000000-0000-0000-0000-000000000002", role: "test_creator" };
+      req.user = {
+        id: "00000000-0000-0000-0000-000000000002",
+        role: "test_creator",
+      };
       return next();
     }
     if (token === "admin" || token === "admin_token") {
@@ -38,15 +61,23 @@ const authMiddleware = (req, res, next) => {
       return next();
     }
     if (token === "student-new-unpurchased") {
-      req.user = { id: "00000000-0000-0000-0000-000000000099", role: "student" };
+      req.user = {
+        id: "00000000-0000-0000-0000-000000000099",
+        role: "student",
+      };
       return next();
     }
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITHM] });
+    const decoded = jwt.verify(token, JWT_SECRET, {
+      algorithms: [JWT_ALGORITHM],
+    });
     const userId = decoded.sub || decoded.id || decoded.user_id;
-    if (!userId) return res.status(401).json({ message: "Token does not contain a user id" });
+    if (!userId)
+      return res
+        .status(401)
+        .json({ message: "Token does not contain a user id" });
     req.user = {
       id: userId,
       email: decoded.email,
@@ -59,14 +90,20 @@ const authMiddleware = (req, res, next) => {
 };
 
 export const requireTestCreator = (req, res, next) => {
-  if (req.user && ["test_creator", "admin", "super_admin"].includes(req.user.role)) {
+  if (
+    req.user &&
+    ["test_creator", "admin", "super_admin"].includes(req.user.role)
+  ) {
     return next();
   }
   return res.status(403).json({ message: "Test Creator access required" });
 };
 
 export const requireStudent = (req, res, next) => {
-  if (req.user && ["student", "admin", "super_admin", "test_creator"].includes(req.user.role)) {
+  if (
+    req.user &&
+    ["student", "admin", "super_admin", "test_creator"].includes(req.user.role)
+  ) {
     return next();
   }
   return res.status(403).json({ message: "Student access required" });

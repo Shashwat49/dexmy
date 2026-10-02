@@ -34,7 +34,8 @@ function EditExam() {
         setLoading(true);
 
         const response = await fetch(
-          `http://localhost:5000/api/exams/${examId}`
+          `http://localhost:5000/api/exams/${examId}`,
+          { credentials: "include" },
         );
 
         const data = await response.json();
@@ -100,6 +101,7 @@ function EditExam() {
         `http://localhost:5000/api/exams/${examId}`,
         {
           method: "PUT",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
           },
@@ -420,8 +422,8 @@ function EditExam() {
             {message && (
               <div
                 className={`mt-6 rounded-xl px-4 py-3 text-sm font-medium border ${messageType === "success"
-                    ? "bg-[#eaf6ef] border-[#b8d9c5] text-[#237044]"
-                    : "bg-[#fff1f1] border-[#f0c4c4] text-[#c33d3d]"
+                  ? "bg-[#eaf6ef] border-[#b8d9c5] text-[#237044]"
+                  : "bg-[#fff1f1] border-[#f0c4c4] text-[#c33d3d]"
                   }`}
               >
                 <div className="flex items-center gap-2">

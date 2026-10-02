@@ -21,8 +21,8 @@ function AddQuestions() {
             setMessage("");
 
             const [examResponse, questionsResponse] = await Promise.all([
-                fetch(`http://localhost:5000/api/exams/${examId}`),
-                fetch("http://localhost:5000/api/questions"),
+                fetch(`http://localhost:5000/api/exams/${examId}`, { credentials: "include" }),
+                fetch("http://localhost:5000/api/questions", { credentials: "include" }),
             ]);
 
             const examData = await examResponse.json();
@@ -95,6 +95,7 @@ function AddQuestions() {
                 `http://localhost:5000/api/exams/${examId}/questions`,
                 {
                     method: "POST",
+                    credentials: "include",
                     headers: {
                         "Content-Type": "application/json",
                     },
@@ -136,6 +137,7 @@ function AddQuestions() {
                 `http://localhost:5000/api/exams/${examId}/questions`,
                 {
                     method: "DELETE",
+                    credentials: "include",
                     headers: {
                         "Content-Type": "application/json",
                     },
@@ -436,8 +438,8 @@ function AddQuestions() {
                                         <div
                                             key={question._id}
                                             className={`bg-white border rounded-2xl overflow-hidden transition-all duration-200 ${alreadyAdded
-                                                    ? "border-[#b9d6c7]"
-                                                    : "border-[#dce3df] hover:border-[#b7c8c0] hover:shadow-sm"
+                                                ? "border-[#b9d6c7]"
+                                                : "border-[#dce3df] hover:border-[#b7c8c0] hover:shadow-sm"
                                                 }`}
                                         >
 
@@ -517,15 +519,15 @@ function AddQuestions() {
                                                                             <div
                                                                                 key={optionIndex}
                                                                                 className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition ${isCorrect
-                                                                                        ? "border-[#a8cfba] bg-[#f0f8f3]"
-                                                                                        : "border-[#e0e5e2] bg-[#fafbfa]"
+                                                                                    ? "border-[#a8cfba] bg-[#f0f8f3]"
+                                                                                    : "border-[#e0e5e2] bg-[#fafbfa]"
                                                                                     }`}
                                                                             >
 
                                                                                 <span
                                                                                     className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${isCorrect
-                                                                                            ? "bg-[#18734b] text-white"
-                                                                                            : "bg-[#edf0ef] text-[#53645d]"
+                                                                                        ? "bg-[#18734b] text-white"
+                                                                                        : "bg-[#edf0ef] text-[#53645d]"
                                                                                         }`}
                                                                                 >
                                                                                     {String.fromCharCode(
@@ -535,8 +537,8 @@ function AddQuestions() {
 
                                                                                 <span
                                                                                     className={`text-sm leading-6 ${isCorrect
-                                                                                            ? "text-[#176440] font-medium"
-                                                                                            : "text-[#344840]"
+                                                                                        ? "text-[#176440] font-medium"
+                                                                                        : "text-[#344840]"
                                                                                         }`}
                                                                                 >
                                                                                     {option}
