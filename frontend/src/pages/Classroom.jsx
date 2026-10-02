@@ -191,7 +191,7 @@ export default function Classroom() {
   const strokesFor = useCallback((n = slideRef.current) => strokesByPageRef.current.get(currentPageId(n)) || [], [currentPageId]);
   const currentStrokes = useCallback(() => strokesFor(), [strokesFor]);
   const renderStroke = useCallback((s, record = false) => { const ctx = canvasRef.current?.getContext("2d"); if (!ctx || !s?.points?.length) return; const a = s.points[0], b = s.points[s.points.length - 1]; const content = getSlideContentRect(); ctx.save(); ctx.beginPath(); ctx.rect(content.x, content.y, content.width, content.height); ctx.clip(); ctx.translate(content.x, content.y); ctx.scale(content.width / W, content.height / H); ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = s.tool === "eraser" ? "#fff" : s.color; ctx.fillStyle = s.color; ctx.lineWidth = s.tool === "highlighter" ? s.width * 5 : s.width; ctx.globalAlpha = s.tool === "highlighter" ? 0.24 : 1; if (["pen", "highlighter", "eraser"].includes(s.tool)) { ctx.beginPath(); s.points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke(); } else if (s.tool === "line") { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); } else if (s.tool === "arrow") { const angle = Math.atan2(b.y - a.y, b.x - a.x), head = 16 + s.width * 2; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6)); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6)); ctx.stroke(); } else if (s.tool === "rect") ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y); else if (s.tool === "circle") { ctx.beginPath(); ctx.arc(a.x, a.y, Math.hypot(b.x - a.x, b.y - a.y), 0, Math.PI * 2); ctx.stroke(); } else if (s.tool === "text") { ctx.globalAlpha = 1; ctx.font = `${Math.max(18, s.width * 6)}px sans-serif`; ctx.fillText(s.text || "Text", a.x, a.y); } else if (s.tool === "sticky") { ctx.globalAlpha = 0.92; ctx.fillStyle = "#fff7a8"; ctx.fillRect(a.x, a.y, Math.max(160, b.x - a.x), Math.max(100, b.y - a.y)); ctx.globalAlpha = 1; ctx.fillStyle = "#111827"; ctx.font = "20px sans-serif"; String(s.text || "Note").split("\n").forEach((line, i) => ctx.fillText(line.slice(0, 45), a.x + 12, a.y + 28 + i * 24)); } ctx.restore(); if (record) { const list = currentStrokes(); if (!list.some((x) => x.id === s.id)) list.push(s); } }, [currentStrokes]);
-  const redraw = useCallback(async () => { const canvas = canvasRef.current; if (!canvas) return; const pageAtStart = slideRef.current; const ctx = canvas.getContext("2d"); const bg = slidesRef.current[pageAtStart - 1]?.image_url; ctx.clearRect(0, 0, W, H); if (!bg) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); } if (pageAtStart !== slideRef.current) return; if (gridRef.current) { const content = getSlideContentRect(); ctx.save(); ctx.beginPath(); ctx.rect(content.x, content.y, content.width, content.height); ctx.clip(); ctx.translate(content.x, content.y); ctx.scale(content.width / W, content.height / H); ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1; for (let x = 0; x <= W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } for (let y = 0; y <= H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } ctx.restore(); } (strokesByPageRef.current.get(currentPageId(pageAtStart)) || []).forEach((s) => renderStroke(s)); liveRef.current.forEach((s) => { if (s.page_id === currentPageId(pageAtStart) || (s.page_id == null && s.page_number === pageAtStart)) renderStroke(s); }); const selected=(strokesByPageRef.current.get(currentPageId(pageAtStart))||[]).find(s=>s.id===selectedStrokeRef.current); const bounds=strokeBounds(selected); if(bounds){ctx.save();ctx.strokeStyle="#2563eb";ctx.lineWidth=3;ctx.setLineDash([8,5]);ctx.strokeRect(bounds.minX-8,bounds.minY-8,Math.max(16,bounds.maxX-bounds.minX+16),Math.max(16,bounds.maxY-bounds.minY+16));ctx.setLineDash([]);ctx.fillStyle="#fff";ctx.strokeStyle="#2563eb";ctx.lineWidth=3;ctx.fillRect(bounds.maxX+1,bounds.maxY+1,14,14);ctx.strokeRect(bounds.maxX+1,bounds.maxY+1,14,14);ctx.restore();} }, [renderStroke, currentPageId]);
+  const redraw = useCallback(async () => { const canvas = canvasRef.current; if (!canvas) return; const pageAtStart = slideRef.current; const ctx = canvas.getContext("2d"); const bg = slidesRef.current[pageAtStart - 1]?.image_url; ctx.clearRect(0, 0, W, H); if (!bg) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); } if (pageAtStart !== slideRef.current) return; if (gridRef.current) { const content = getSlideContentRect(); ctx.save(); ctx.beginPath(); ctx.rect(content.x, content.y, content.width, content.height); ctx.clip(); ctx.translate(content.x, content.y); ctx.scale(content.width / W, content.height / H); ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1; for (let x = 0; x <= W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } for (let y = 0; y <= H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } ctx.restore(); } (strokesByPageRef.current.get(currentPageId(pageAtStart)) || []).forEach((s) => renderStroke(s)); liveRef.current.forEach((s) => { if (s.page_id === currentPageId(pageAtStart)) renderStroke(s); }); const selected=(strokesByPageRef.current.get(currentPageId(pageAtStart))||[]).find(s=>s.id===selectedStrokeRef.current); const bounds=strokeBounds(selected); if(bounds){ctx.save();ctx.strokeStyle="#2563eb";ctx.lineWidth=3;ctx.setLineDash([8,5]);ctx.strokeRect(bounds.minX-8,bounds.minY-8,Math.max(16,bounds.maxX-bounds.minX+16),Math.max(16,bounds.maxY-bounds.minY+16));ctx.setLineDash([]);ctx.fillStyle="#fff";ctx.strokeStyle="#2563eb";ctx.lineWidth=3;ctx.fillRect(bounds.maxX+1,bounds.maxY+1,14,14);ctx.strokeRect(bounds.maxX+1,bounds.maxY+1,14,14);ctx.restore();} }, [renderStroke, currentPageId]);
   useEffect(() => { redraw(); }, [slide, slides, grid, redraw]);
   useEffect(() => { redraw(); }, [backgroundSize, redraw]);
   useEffect(() => {
@@ -355,6 +355,10 @@ export default function Classroom() {
         }
         if (msg.type === "whiteboard_page_deleted") {
           const deletedId = msg.deleted_page_id;
+          liveRef.current.forEach((stroke, strokeId) => {
+            if (stroke.page_id === deletedId) liveRef.current.delete(strokeId);
+          });
+          if (pendingLiveRef.current?.page_id === deletedId) pendingLiveRef.current = null;
           const currentPages = slidesRef.current;
           if (deletedId && currentPages.some((item) => item.page_id === deletedId)) {
             const next = normalizePages(currentPages.filter((item) => item.page_id !== deletedId));
@@ -373,6 +377,11 @@ export default function Classroom() {
         }
         if (msg.type === "pdf_pages_ready" || msg.type === "whiteboard_pages_updated") {
           const p = normalizePages(msg.pages);
+          const pageIds = new Set(p.map((item) => item.page_id));
+          liveRef.current.forEach((stroke, strokeId) => {
+            if (stroke.page_id && !pageIds.has(stroke.page_id)) liveRef.current.delete(strokeId);
+          });
+          if (pendingLiveRef.current?.page_id && !pageIds.has(pendingLiveRef.current.page_id)) pendingLiveRef.current = null;
           const oldStrokes = strokesByPageRef.current;
           const activeId = msg.page_id || slidesRef.current[slideRef.current - 1]?.page_id;
           slidesRef.current = p;
@@ -592,6 +601,10 @@ export default function Classroom() {
             }
             if (p.kind === "slide_deleted") {
               const deletedId = p.page_id;
+              liveRef.current.forEach((stroke, strokeId) => {
+                if (stroke.page_id === deletedId) liveRef.current.delete(strokeId);
+              });
+              if (pendingLiveRef.current?.page_id === deletedId) pendingLiveRef.current = null;
               const currentPages = slidesRef.current;
               if (deletedId && currentPages.some((item) => item.page_id === deletedId)) {
                 const next = normalizePages(currentPages.filter((item) => item.page_id !== deletedId));
@@ -609,6 +622,11 @@ export default function Classroom() {
             }
             if (p.kind === "slides") {
               const next = normalizePages(p.pages);
+              const pageIds = new Set(next.map((item) => item.page_id));
+              liveRef.current.forEach((stroke, strokeId) => {
+                if (stroke.page_id && !pageIds.has(stroke.page_id)) liveRef.current.delete(strokeId);
+              });
+              if (pendingLiveRef.current?.page_id && !pageIds.has(pendingLiveRef.current.page_id)) pendingLiveRef.current = null;
               slidesRef.current = next;
               setSlides(next);
               const nextPage = clamp(Number(p.page_number) || 1, 1, next.length);
@@ -664,7 +682,7 @@ export default function Classroom() {
             if (p.page_number !== slideRef.current) {
               let live = liveRef.current.get(stroke.id);
               if (!live) {
-                live = { ...stroke, points: [], page_number: p.page_number };
+                live = { ...stroke, points: [], page_number: p.page_number, page_id: p.page_id || null };
                 liveRef.current.set(stroke.id, live);
               }
               const fresh = Array.isArray(stroke.points) ? stroke.points : [];
@@ -674,7 +692,7 @@ export default function Classroom() {
             }
             let live = liveRef.current.get(stroke.id);
             if (!live) {
-              live = { ...stroke, points: [], page_number: p.page_number };
+              live = { ...stroke, points: [], page_number: p.page_number, page_id: p.page_id || null };
               liveRef.current.set(stroke.id, live);
             }
             const fresh = Array.isArray(stroke.points) ? stroke.points : [];
