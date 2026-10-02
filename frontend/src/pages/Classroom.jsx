@@ -218,7 +218,6 @@ export default function Classroom() {
   const addSlide = async () => {
     if (!isTeacher) return;
     const current = slideRef.current;
-    saveSnapshotNow(current);
     try {
       const afterPageId = currentPageId(current);
       const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}`);
