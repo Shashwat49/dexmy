@@ -294,7 +294,13 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         return
     if msg_type == "chat":
         if peer:
-            await peer.send_json({"type": "chat", "sender_id": str(user.id), "message_text": str(data.get("message_text") or "")[:4000], "file_url": data.get("file_url"), "file_name": data.get("file_name")})
+            try:
+                await peer.send_json({"type": "chat", "sender_id": str(user.id), "message_text": str(data.get("message_text") or "")[:4000], "file_url": data.get("file_url"), "file_name": data.get("file_name")})
+            except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError):
+                if is_teacher and room.student_ws is peer:
+                    room.student_ws = None
+                elif not is_teacher and room.teacher_ws is peer:
+                    room.teacher_ws = None
     elif msg_type == "whiteboard_event":
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
