@@ -139,18 +139,14 @@ def _reorder_pages_without_unique_conflicts(pages):
 
 async def _notify_page_change(session_id, payload):
     room = manager.get_room(session_id)
-
-    async def notify(ws):
-        if not ws:
-            return
-        try:
-            await ws.send_json(payload)
-        except Exception:
-            pass
-
+    # Page changes are ordered classroom state. Await both sends so the student
+    # receives the committed server state before the mutation request completes.
     for ws in (room.teacher_ws, room.student_ws):
         if ws:
-            asyncio.create_task(notify(ws))
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                pass
 
 
 @router.post("/sessions/{session_id}/whiteboard-pdf", response_model=WhiteboardPdfUploadResponse)
