@@ -62,7 +62,7 @@ export default function Login() {
           const profile = await getMyTeacherProfile();
           navigate(teacherProfileComplete(profile) ? "/dashboard/teacher" : "/dashboard/teacher/profile");
         } catch (profileError) {
-          console.error("Teacher profile check failed:", profileError);
+          console.error("Teacher profile check failed:", profileError?.message);
           navigate("/dashboard/teacher/profile");
         }
         return;

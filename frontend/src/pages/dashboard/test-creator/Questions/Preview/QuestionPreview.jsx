@@ -22,7 +22,8 @@ function QuestionPreview() {
         setMessage("");
 
         const response = await fetch(
-          `http://localhost:5000/api/questions/${id}`
+          `http://localhost:5000/api/questions/${id}`,
+          { credentials: "include" },
         );
 
         const data = await response.json();
@@ -521,10 +522,9 @@ function QuestionPreview() {
                       border
                       px-4 py-3
                       transition-all duration-200
-                      ${
-                        isCorrect
-                          ? "border-[#9dc7ae] bg-[#eef8f1]"
-                          : "border-[#d7e0db] bg-white"
+                      ${isCorrect
+                        ? "border-[#9dc7ae] bg-[#eef8f1]"
+                        : "border-[#d7e0db] bg-white"
                       }
                     `}
                   >
@@ -536,10 +536,9 @@ function QuestionPreview() {
                         rounded-full
                         flex items-center justify-center
                         text-sm font-bold
-                        ${
-                          isCorrect
-                            ? "bg-[#0b211a] text-[#f5b91e]"
-                            : "bg-[#edf2ef] text-[#29463b]"
+                        ${isCorrect
+                          ? "bg-[#0b211a] text-[#f5b91e]"
+                          : "bg-[#edf2ef] text-[#29463b]"
                         }
                       `}
                     >
@@ -549,10 +548,9 @@ function QuestionPreview() {
                     <span
                       className={`
                         flex-1 text-sm leading-6
-                        ${
-                          isCorrect
-                            ? "text-[#17643a] font-semibold"
-                            : "text-[#102a25]"
+                        ${isCorrect
+                          ? "text-[#17643a] font-semibold"
+                          : "text-[#102a25]"
                         }
                       `}
                     >
@@ -662,8 +660,8 @@ function QuestionPreview() {
                   <span className="w-7 h-7 rounded-full bg-[#0b211a] text-[#f5b91e] flex items-center justify-center text-xs font-bold">
                     {question.correctAnswer !== undefined
                       ? String.fromCharCode(
-                          65 + Number(question.correctAnswer)
-                        )
+                        65 + Number(question.correctAnswer)
+                      )
                       : "-"}
                   </span>
 

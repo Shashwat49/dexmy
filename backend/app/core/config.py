@@ -9,7 +9,25 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+
+    ACCESS_COOKIE_NAME: str = "dexmy_access"
+    REFRESH_COOKIE_NAME: str = "dexmy_refresh"
+    CSRF_COOKIE_NAME: str = "dexmy_csrf"
+
+    COOKIE_SECURE: bool = False
+    COOKIE_SAMESITE: str = "lax"
+    COOKIE_DOMAIN: str | None = None
+
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://dexmy.vercel.app",
+        "https://dexmyedu.com",
+        "https://www.dexmyedu.com",
+    ]
 
     LIVEKIT_API_KEY: str
     LIVEKIT_API_SECRET: str
@@ -31,8 +49,7 @@ class Settings(BaseSettings):
     WHATSAPP_VERIFY_TOKEN: str = ""
     META_APP_SECRET: str = ""
 
-    # Keep the legacy single-origin setting for compatibility. The API also
-    # accepts the production custom domain and Vercel domain in main.py.
+    # Keep the legacy single-origin setting for compatibility.
     FRONTEND_ORIGIN: str = "https://dexmyedu.com"
 
     class Config:

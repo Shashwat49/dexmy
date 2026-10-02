@@ -102,11 +102,10 @@ function SidebarNav({ profile, onClose, onLogout }) {
                     key={item.path}
                     to={item.path}
                     onClick={onClose}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium transition ${
-                      isActive
-                        ? "bg-brand-red-soft text-chalk shadow-[inset_3px_0_0_#E4271C]"
-                        : "text-chalk-muted hover:bg-panel-2 hover:text-chalk"
-                    }`}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[14px] font-medium transition ${isActive
+                      ? "bg-brand-red-soft text-chalk shadow-[inset_3px_0_0_#E4271C]"
+                      : "text-chalk-muted hover:bg-panel-2 hover:text-chalk"
+                      }`}
                   >
                     <span className={isActive ? "text-brand-red" : "text-chalk-muted"}>
                       <IconComp size={18} />
@@ -182,7 +181,7 @@ function TeacherLayout({ children }) {
           designation: data.designation || "",
           photo: data.photo || "",
         });
-      } catch {}
+      } catch { }
     };
     load();
     window.addEventListener("storage", load);
@@ -190,9 +189,6 @@ function TeacherLayout({ children }) {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem("teacherToken");
-    localStorage.removeItem("dexmy_token");
-    localStorage.removeItem("token");
     navigate("/login");
   };
 

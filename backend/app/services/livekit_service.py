@@ -32,7 +32,7 @@ def create_join_token(
                 can_publish_sources=publish_sources,
             )
         )
-        .with_ttl(timedelta(hours=3))
+        .with_ttl(timedelta(minutes=65))
         .to_jwt()
     )
     return token

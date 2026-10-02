@@ -23,7 +23,8 @@ function ExamPreview() {
                 setMessage("");
 
                 const response = await fetch(
-                    `http://localhost:5000/api/exams/${examId}`
+                    `http://localhost:5000/api/exams/${examId}`,
+                    { credentials: "include" },
                 );
 
                 const data = await response.json();

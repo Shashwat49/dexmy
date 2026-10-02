@@ -26,7 +26,8 @@ function MyExams() {
       setMessage("");
 
       const response = await fetch(
-        "http://localhost:5000/api/test-creation"
+        "http://localhost:5000/api/test-creation",
+        { credentials: "include" },
       );
 
       const data = await response.json();
@@ -56,6 +57,7 @@ function MyExams() {
         `http://localhost:5000/api/exams/${deleteExamId}`,
         {
           method: "DELETE",
+          credentials: "include",
         }
       );
 
@@ -97,6 +99,7 @@ function MyExams() {
         `http://localhost:5000/api/exams/${examId}/publish`,
         {
           method: "PATCH",
+          credentials: "include",
         }
       );
 

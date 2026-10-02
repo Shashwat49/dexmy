@@ -126,12 +126,12 @@ export default function BookClass() {
       } catch (err) {
         console.error(
           "Unable to load subjects:",
-          err
+          err?.message
         );
 
         setError(
           err.response?.data?.detail ||
-            "Unable to load subjects."
+          "Unable to load subjects."
         );
       } finally {
         setLoadingSubjects(false);
@@ -170,14 +170,14 @@ export default function BookClass() {
       } catch (err) {
         console.error(
           "Unable to load available slots:",
-          err
+          err?.message
         );
 
         setSlotData(null);
 
         setError(
           err.response?.data?.detail ||
-            "Unable to load available slots."
+          "Unable to load available slots."
         );
       } finally {
         setLoadingSlots(false);
@@ -252,12 +252,12 @@ export default function BookClass() {
     } catch (err) {
       console.error(
         "Booking failed:",
-        err
+        err?.message
       );
 
       setError(
         err.response?.data?.detail ||
-          "Unable to create your booking."
+        "Unable to create your booking."
       );
     } finally {
       setBooking(false);
@@ -543,11 +543,10 @@ export default function BookClass() {
                           subject
                         )
                       }
-                      className={`rounded-xl border p-5 text-left transition-all ${
-                        selected
+                      className={`rounded-xl border p-5 text-left transition-all ${selected
                           ? "border-brand-gold bg-brand-gold/10"
                           : "border-chalk-faint bg-panel-2 hover:border-chalk-muted"
-                      }`}
+                        }`}
                     >
 
                       <div className="flex items-start justify-between gap-3">
@@ -570,11 +569,10 @@ export default function BookClass() {
 
 
                         <div
-                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-                            selected
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${selected
                               ? "border-brand-gold bg-brand-gold text-[#2C1E04]"
                               : "border-chalk-muted"
-                          }`}
+                            }`}
                         >
                           {selected && (
                             <span className="text-[10px] font-bold">
@@ -633,7 +631,7 @@ export default function BookClass() {
                       {availableSlotCount}{" "}
                       available{" "}
                       {availableSlotCount ===
-                      1
+                        1
                         ? "slot"
                         : "slots"}
                     </p>
@@ -682,13 +680,12 @@ export default function BookClass() {
                             slot
                           )
                         }
-                        className={`rounded-xl border px-4 py-4 text-center transition-all ${
-                          !slot.available
+                        className={`rounded-xl border px-4 py-4 text-center transition-all ${!slot.available
                             ? "cursor-not-allowed border-chalk-faint bg-panel-2 opacity-40"
                             : selected
-                            ? "border-brand-gold bg-brand-gold/10 text-brand-gold"
-                            : "border-chalk-faint bg-panel-2 hover:border-brand-gold"
-                        }`}
+                              ? "border-brand-gold bg-brand-gold/10 text-brand-gold"
+                              : "border-chalk-faint bg-panel-2 hover:border-brand-gold"
+                          }`}
                       >
 
                         <p className="text-sm font-semibold">
@@ -700,12 +697,11 @@ export default function BookClass() {
                         <p className="mt-1 text-[11px] text-chalk-muted">
                           {!slot.available
                             ? "Full"
-                            : `${slot.remaining_capacity} ${
-                                slot.remaining_capacity ===
-                                1
-                                  ? "place"
-                                  : "places"
-                              }`}
+                            : `${slot.remaining_capacity} ${slot.remaining_capacity ===
+                              1
+                              ? "place"
+                              : "places"
+                            }`}
                         </p>
 
                       </button>
