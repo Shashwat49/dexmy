@@ -218,20 +218,6 @@ export default function Classroom() {
   const addSlide = async () => {
     if (!isTeacher) return;
     const current = slideRef.current;
-    const beforePages = slidesRef.current;
-    const beforeStrokes = strokesByPageRef.current;
-    const insertAt = current;
-    const optimisticPage = makeWhiteboardPage(insertAt + 1);
-    const optimisticPages = normalizePages([...beforePages.slice(0, insertAt), optimisticPage, ...beforePages.slice(insertAt)]);
-    strokesByPageRef.current = new Map(optimisticPages.map((page) => [page.page_id, beforeStrokes.get(page.page_id) || []]));
-    strokesByPageRef.current.set(optimisticPage.page_id, []);
-    slidesRef.current = optimisticPages;
-    slideRef.current = insertAt + 1;
-    setSlides(optimisticPages);
-    setSlide(insertAt + 1);
-    slideControlActiveRef.current = true;
-    setThumbnailVersion((version) => version + 1);
-    setNotice("Slide added.");
     try {
       const afterPageId = currentPageId(current);
       const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}`);
@@ -241,63 +227,41 @@ export default function Classroom() {
       const updated = normalizePages(data.pages);
       const next = updated.findIndex((page) => page.page_id === data.page_id) + 1;
       if (next < 1) throw new Error("The new slide was not included in the server response.");
-      const nextStrokes = new Map(updated.map((page) => [page.page_id, beforeStrokes.get(page.page_id) || []]));
-      nextStrokes.set(data.page_id, []);
-      strokesByPageRef.current = nextStrokes;
+      const oldStrokes = strokesByPageRef.current;
+      strokesByPageRef.current = new Map(updated.map((page) => [page.page_id, oldStrokes.get(page.page_id) || []]));
+      strokesByPageRef.current.set(data.page_id, []);
       slidesRef.current = updated;
       slideRef.current = next;
       setSlides(updated);
       setSlide(next);
+      slideControlActiveRef.current = true;
       publishControl({ kind: "slides", pages: updated, page_number: next, page_id: data.page_id });
       setThumbnailVersion((version) => version + 1);
+      setNotice("Slide added.");
     } catch (error) {
-      strokesByPageRef.current = beforeStrokes;
-      slidesRef.current = beforePages;
-      slideRef.current = current;
-      setSlides(beforePages);
-      setSlide(current);
-      setThumbnailVersion((version) => version + 1);
       setNotice(error.response?.data?.detail || error.message || "Could not add slide.");
     }
   };
   const deleteSlide = async (page) => {
     if (!isTeacher || slidesRef.current.length <= 1) return;
-    const beforePages = slidesRef.current;
-    const beforeStrokes = strokesByPageRef.current;
-    const targetIndex = beforePages.findIndex((item) => item.page_id === page.page_id);
-    if (targetIndex < 0) return;
     const current = slideRef.current;
-    const currentPage = beforePages[current - 1];
-    const optimisticPages = beforePages.filter((item) => item.page_id !== page.page_id);
-    const optimisticSlide = current > optimisticPages.length ? optimisticPages.length : (targetIndex < current ? current - 1 : current);
-    strokesByPageRef.current = new Map(optimisticPages.map((item) => [item.page_id, beforeStrokes.get(item.page_id) || []]));
-    slidesRef.current = optimisticPages;
-    slideRef.current = optimisticSlide;
-    setSlides(optimisticPages);
-    setSlide(optimisticSlide);
-    slideControlActiveRef.current = true;
-    setThumbnailVersion((version) => version + 1);
-    setNotice("Slide deleted.");
+    const currentPage = slidesRef.current[current - 1];
     try {
       const query = currentPage?.page_id ? `?active_page_id=${encodeURIComponent(currentPage.page_id)}` : "";
       const { data } = await api.delete(`/classroom/sessions/${sessionId}/whiteboard-pages/${page.page_id}${query}`);
       const updated = normalizePages(data.pages);
       const next = clamp(Number(data.page_number) || 1, 1, updated.length);
-      const nextStrokes = new Map(updated.map((item) => [item.page_id, beforeStrokes.get(item.page_id) || []]));
-      strokesByPageRef.current = nextStrokes;
+      const oldStrokes = strokesByPageRef.current;
+      strokesByPageRef.current = new Map(updated.map((item) => [item.page_id, oldStrokes.get(item.page_id) || []]));
       slidesRef.current = updated;
       slideRef.current = next;
       setSlides(updated);
       setSlide(next);
+      slideControlActiveRef.current = true;
       publishControl({ kind: "slides", pages: updated, page_number: next, page_id: updated[next - 1]?.page_id });
       setThumbnailVersion((version) => version + 1);
+      setNotice("Slide deleted.");
     } catch (error) {
-      strokesByPageRef.current = beforeStrokes;
-      slidesRef.current = beforePages;
-      slideRef.current = current;
-      setSlides(beforePages);
-      setSlide(current);
-      setThumbnailVersion((version) => version + 1);
       setNotice(error.response?.data?.detail || "Could not delete slide.");
     }
   };
