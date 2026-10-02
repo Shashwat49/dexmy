@@ -52,8 +52,8 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
                     ExternalClassRecord.status == "completed",
                     ExternalClassRecord.started_at >= u.created_at,
                 )
-                .group_by(func.date_trunc("month", ExternalClassRecord.started_at))
-                .order_by(func.date_trunc("month", ExternalClassRecord.started_at))
+                .group_by(func.to_char(func.date_trunc("month", ExternalClassRecord.started_at), "YYYY-MM"))
+                .order_by(func.to_char(func.date_trunc("month", ExternalClassRecord.started_at), "YYYY-MM"))
             ).all()
             monthly = {month: 0 for month in month_range(u.created_at)}
             monthly.update({month: int(count) for month, count in month_rows})
