@@ -14,6 +14,19 @@ from app.schemas.admin_teacher import AdminTeacherDetail, AdminTeacherListItem, 
 from app.services.audit_service import record_admin_action
 from app.services.teacher_verification import VERIFIED_TEACHER_EMAILS, is_verified_teacher_email
 router=APIRouter()
+
+def month_range(started_at):
+    start = started_at.date().replace(day=1)
+    today = datetime.now(timezone.utc).date().replace(day=1)
+    months = {}
+    cursor = start
+    while cursor <= today:
+        months[cursor.strftime("%Y-%m")] = 0
+        if cursor.month == 12:
+            cursor = cursor.replace(year=cursor.year + 1, month=1)
+        else:
+            cursor = cursor.replace(month=cursor.month + 1)
+    return months
 @router.get("",response_model=list[AdminTeacherListItem])
 def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id:int|None=None,current_user:User=Depends(require_permission("teacher.read")),db:Session=Depends(get_db)):
     completed=select(func.count(ExternalClassRecord.id)).where(ExternalClassRecord.teacher_id==User.id,ExternalClassRecord.status=="completed").correlate(User).scalar_subquery(); upcoming=select(func.count(Booking.id)).where(Booking.teacher_id==User.id,Booking.status==BookingStatus.confirmed,Booking.scheduled_at>=func.now()).correlate(User).scalar_subquery(); subject_count=select(func.count(TeacherSubject.subject_id)).where(TeacherSubject.teacher_id==User.id).correlate(User).scalar_subquery()
@@ -42,7 +55,8 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
                 .group_by(func.date_trunc("month", ExternalClassRecord.started_at))
                 .order_by(func.date_trunc("month", ExternalClassRecord.started_at))
             ).all()
-            monthly = {month: int(count) for month, count in month_rows}
+            monthly = {month: 0 for month in month_range(u.created_at)}
+            monthly.update({month: int(count) for month, count in month_rows})
         result.append(AdminTeacherListItem(
             id=u.id, full_name=u.full_name, email=u.email, phone=u.phone,
             is_active=u.is_active, is_verified=verified, rating_avg=p.rating_avg,
