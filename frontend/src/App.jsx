@@ -31,6 +31,7 @@ const AdminStudentPackages = lazy(() => import("./pages/dashboard/AdminStudentPa
 const AdminSupport = lazy(() => import("./pages/dashboard/AdminSupport"));
 const AdminBookings = lazy(() => import("./pages/dashboard/AdminBookings"));
 const AdminMeetClassRecords = lazy(() => import("./pages/dashboard/AdminMeetClassRecords"));
+const AdminStudentNoShow = lazy(() => import("./pages/dashboard/AdminStudentNoShow"));
 const BookClass = lazy(() => import("./pages/dashboard/student/BookClass"));
 const MyNotes = lazy(() => import("./pages/dashboard/student/MyNotes"));
 const MyAccount = lazy(() => import("./pages/dashboard/MyAccount"));
