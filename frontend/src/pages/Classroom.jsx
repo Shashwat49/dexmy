@@ -185,23 +185,26 @@ export default function Classroom() {
   useEffect(() => { const root = document.querySelector(".dexmy-classroom-shell"); const toolbar = root?.querySelector("main section > div:first-child"); if (!toolbar) return; toolbar.classList.add("classroom-toolbar"); let dragging = false, startX = 0, startY = 0, originX = 0, originY = 0; const onDown = (event) => { if (event.target.closest("button,input,label")) return; dragging = true; toolbar.classList.add("is-dragging"); startX = event.clientX; startY = event.clientY; const r = toolbar.getBoundingClientRect(); originX = r.left; originY = r.top; toolbar.setPointerCapture?.(event.pointerId); }; const onMove = (event) => { if (!dragging) return; const x = clamp(originX + event.clientX - startX, 8, window.innerWidth - toolbar.offsetWidth - 8); const y = clamp(originY + event.clientY - startY, 58, window.innerHeight - toolbar.offsetHeight - 8); toolbar.style.left = `${x}px`; toolbar.style.top = `${y}px`; }; const onUp = () => { dragging = false; toolbar.classList.remove("is-dragging"); }; toolbar.addEventListener("pointerdown", onDown); toolbar.addEventListener("pointermove", onMove); toolbar.addEventListener("pointerup", onUp); toolbar.addEventListener("pointercancel", onUp); return () => { toolbar.removeEventListener("pointerdown", onDown); toolbar.removeEventListener("pointermove", onMove); toolbar.removeEventListener("pointerup", onUp); toolbar.removeEventListener("pointercancel", onUp); }; }, []);
   const send = useCallback((payload) => { if (wsRef.current?.readyState !== WebSocket.OPEN) return false; try { wsRef.current.send(JSON.stringify(payload)); return true; } catch { return false; } }, []);
   const publishControl = useCallback((payload) => { const participant = roomRef.current?.localParticipant; if (!participant || roomRef.current?.state !== "connected") return false; participant.publishData(encoder.encode(JSON.stringify({ type: "classroom_control", payload })), { reliable: true, topic: CONTROL_TOPIC }).catch(() => { }); return true; }, []);
-  const publishWhiteboardAction = useCallback((payload) => { const participant = roomRef.current?.localParticipant; if (!participant || roomRef.current?.state !== "connected") return false; participant.publishData(encoder.encode(JSON.stringify({ type: "whiteboard_action", payload })), { reliable: true, topic: COMMIT_TOPIC }).catch(() => { }); return true; }, []);
+  // Committed board actions use the classroom WebSocket so each action is applied exactly once.
+  const publishWhiteboardAction = useCallback(() => true, []);
   const currentPageId = useCallback((n = slideRef.current) => slidesRef.current[n - 1]?.page_id || null, []);
   const strokesFor = useCallback((n = slideRef.current) => strokesByPageRef.current.get(currentPageId(n)) || [], [currentPageId]);
   const currentStrokes = useCallback(() => strokesFor(), [strokesFor]);
   const renderStroke = useCallback((s, record = false) => { const ctx = canvasRef.current?.getContext("2d"); if (!ctx || !s?.points?.length) return; const a = s.points[0], b = s.points[s.points.length - 1]; const content = getSlideContentRect(); ctx.save(); ctx.beginPath(); ctx.rect(content.x, content.y, content.width, content.height); ctx.clip(); ctx.translate(content.x, content.y); ctx.scale(content.width / W, content.height / H); ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = s.tool === "eraser" ? "#fff" : s.color; ctx.fillStyle = s.color; ctx.lineWidth = s.tool === "highlighter" ? s.width * 5 : s.width; ctx.globalAlpha = s.tool === "highlighter" ? 0.24 : 1; if (["pen", "highlighter", "eraser"].includes(s.tool)) { ctx.beginPath(); s.points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)); ctx.stroke(); } else if (s.tool === "line") { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); } else if (s.tool === "arrow") { const angle = Math.atan2(b.y - a.y, b.x - a.x), head = 16 + s.width * 2; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle - Math.PI / 6), b.y - head * Math.sin(angle - Math.PI / 6)); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - head * Math.cos(angle + Math.PI / 6), b.y - head * Math.sin(angle + Math.PI / 6)); ctx.stroke(); } else if (s.tool === "rect") ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y); else if (s.tool === "circle") { ctx.beginPath(); ctx.arc(a.x, a.y, Math.hypot(b.x - a.x, b.y - a.y), 0, Math.PI * 2); ctx.stroke(); } else if (s.tool === "text") { ctx.globalAlpha = 1; ctx.font = `${Math.max(18, s.width * 6)}px sans-serif`; ctx.fillText(s.text || "Text", a.x, a.y); } else if (s.tool === "sticky") { ctx.globalAlpha = 0.92; ctx.fillStyle = "#fff7a8"; ctx.fillRect(a.x, a.y, Math.max(160, b.x - a.x), Math.max(100, b.y - a.y)); ctx.globalAlpha = 1; ctx.fillStyle = "#111827"; ctx.font = "20px sans-serif"; String(s.text || "Note").split("\n").forEach((line, i) => ctx.fillText(line.slice(0, 45), a.x + 12, a.y + 28 + i * 24)); } ctx.restore(); if (record) { const list = currentStrokes(); if (!list.some((x) => x.id === s.id)) list.push(s); } }, [currentStrokes]);
-  const redraw = useCallback(async () => { const canvas = canvasRef.current; if (!canvas) return; const pageAtStart = slideRef.current; const ctx = canvas.getContext("2d"); const bg = slidesRef.current[pageAtStart - 1]?.image_url; ctx.clearRect(0, 0, W, H); if (!bg) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); } if (pageAtStart !== slideRef.current) return; if (gridRef.current) { const content = getSlideContentRect(); ctx.save(); ctx.beginPath(); ctx.rect(content.x, content.y, content.width, content.height); ctx.clip(); ctx.translate(content.x, content.y); ctx.scale(content.width / W, content.height / H); ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1; for (let x = 0; x <= W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } for (let y = 0; y <= H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } ctx.restore(); } (strokesByPageRef.current.get(currentPageId(pageAtStart)) || []).forEach((s) => renderStroke(s)); liveRef.current.forEach((s) => { if (s.page_id === currentPageId(pageAtStart) || (s.page_id == null && s.page_number === pageAtStart)) renderStroke(s); }); const selected = (strokesByPageRef.current.get(currentPageId(pageAtStart)) || []).find(s => s.id === selectedStrokeRef.current); const bounds = strokeBounds(selected); if (bounds) { ctx.save(); ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 3; ctx.setLineDash([8, 5]); ctx.strokeRect(bounds.minX - 8, bounds.minY - 8, Math.max(16, bounds.maxX - bounds.minX + 16), Math.max(16, bounds.maxY - bounds.minY + 16)); ctx.setLineDash([]); ctx.fillStyle = "#fff"; ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 3; ctx.fillRect(bounds.maxX + 1, bounds.maxY + 1, 14, 14); ctx.strokeRect(bounds.maxX + 1, bounds.maxY + 1, 14, 14); ctx.restore(); } }, [renderStroke, currentPageId]);
+  const redraw = useCallback(async () => { const canvas = canvasRef.current; if (!canvas) return; const pageAtStart = slideRef.current; const ctx = canvas.getContext("2d"); const bg = slidesRef.current[pageAtStart - 1]?.image_url; ctx.clearRect(0, 0, W, H); if (!bg) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); } if (pageAtStart !== slideRef.current) return; if (gridRef.current) { const content = getSlideContentRect(); ctx.save(); ctx.beginPath(); ctx.rect(content.x, content.y, content.width, content.height); ctx.clip(); ctx.translate(content.x, content.y); ctx.scale(content.width / W, content.height / H); ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1; for (let x = 0; x <= W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } for (let y = 0; y <= H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } ctx.restore(); } (strokesByPageRef.current.get(currentPageId(pageAtStart)) || []).forEach((s) => renderStroke(s)); liveRef.current.forEach((s) => { if (s.page_id === currentPageId(pageAtStart)) renderStroke(s); }); const selected = (strokesByPageRef.current.get(currentPageId(pageAtStart)) || []).find(s => s.id === selectedStrokeRef.current); const bounds = strokeBounds(selected); if (bounds) { ctx.save(); ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 3; ctx.setLineDash([8, 5]); ctx.strokeRect(bounds.minX - 8, bounds.minY - 8, Math.max(16, bounds.maxX - bounds.minX + 16), Math.max(16, bounds.maxY - bounds.minY + 16)); ctx.setLineDash([]); ctx.fillStyle = "#fff"; ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 3; ctx.fillRect(bounds.maxX + 1, bounds.maxY + 1, 14, 14); ctx.strokeRect(bounds.maxX + 1, bounds.maxY + 1, 14, 14); ctx.restore(); } }, [renderStroke, currentPageId]);
   useEffect(() => { redraw(); }, [slide, slides, grid, redraw]);
   useEffect(() => { redraw(); }, [backgroundSize, redraw]);
   useEffect(() => {
     const id = requestAnimationFrame(() => { redraw(); });
     return () => cancelAnimationFrame(id);
   }, [screen, redraw]);
-  const saveSnapshot = useCallback(() => { clearTimeout(snapshotTimerRef.current); snapshotTimerRef.current = setTimeout(async () => { const pageNumber = slideRef.current; const imageBase64 = canvasRef.current?.toDataURL("image/png"); send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, image_base64: imageBase64, page_id: currentPageId(pageNumber) }); }, 500); }, [send, strokesFor, currentPageId]);
+  const saveSnapshot = useCallback(() => { clearTimeout(snapshotTimerRef.current); snapshotTimerRef.current = setTimeout(() => { const pageNumber = slideRef.current; send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, page_id: currentPageId(pageNumber) }); }, 500); }, [send, strokesFor, currentPageId]);
   const saveSnapshotNow = useCallback((pageNumber) => { clearTimeout(snapshotTimerRef.current); const imageBase64 = canvasRef.current?.toDataURL("image/png"); send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, image_base64: imageBase64, page_id: currentPageId(pageNumber) }); }, [send, strokesFor, currentPageId]);
   const publishLive = useCallback((stroke, points, pageNumber, final = false) => { const room = roomRef.current; const participant = room?.localParticipant; if (!participant || room.state !== "connected" || !Array.isArray(points) || !points.length) return; const packet = { type: "whiteboard_live", payload: { stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, points }, page_number: pageNumber, page_id: currentPageId(pageNumber), final } }; participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: false, topic: LIVE_TOPIC }).catch(() => { }); }, []);
-  const publishCommit = useCallback((stroke, pageNumber) => { const room = roomRef.current; const participant = room?.localParticipant; if (!participant || room.state !== "connected") return; const packet = { type: "whiteboard_commit", stroke, page_number: pageNumber, page_id: currentPageId(pageNumber) }; participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: true, topic: COMMIT_TOPIC }).catch(() => { }); }, []);
-  const publishStrokeCheckpoint = useCallback(() => { const d = drawRef.current; const room = roomRef.current; const participant = room?.localParticipant; if (!d || !participant || room.state !== "connected" || !d.points?.length || !["pen", "highlighter", "eraser"].includes(d.tool)) return; const packet = { type: "whiteboard_checkpoint", stroke: { ...d, points: d.points.slice() }, page_number: slideRef.current, page_id: currentPageId() }; participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: true, topic: COMMIT_TOPIC }).catch(() => { }); }, []);
+  // The classroom WebSocket is the authoritative committed-state path. LiveKit remains live-preview only.
+  const publishCommit = useCallback(() => { }, []);
+  // Do not send a second reliable copy of an in-progress stroke.
+  const publishStrokeCheckpoint = useCallback(() => { }, []);
   const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool); if (pending?.id === stroke.id) { if (isShape) pending.points = points.slice(-2); else pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, page_id: currentPageId(), final }; }, []);
   const flushLive = useCallback((force = false) => { const pending = pendingLiveRef.current; if (!pending || (!force && !pending.points.length)) return; const points = pending.points.splice(0, 32); if (!points.length) return; publishLive(pending.stroke, points, pending.page_number, pending.final && pending.points.length === 0); if (!pending.points.length) pendingLiveRef.current = null; }, [publishLive]);
   useEffect(() => { let rafId; const tick = () => { flushLive(false); rafId = requestAnimationFrame(tick); }; rafId = requestAnimationFrame(tick); return () => { cancelAnimationFrame(rafId); flushLive(true); clearTimeout(snapshotTimerRef.current); clearTimeout(reliableStrokeTimerRef.current); }; }, [flushLive]);
@@ -215,49 +218,71 @@ export default function Classroom() {
   const addSlide = async () => {
     if (!isTeacher) return;
     const current = slideRef.current;
-    saveSnapshotNow(current);
+    const beforePages = slidesRef.current;
+    const beforeStrokes = strokesByPageRef.current;
+    const insertAt = current;
+    const clientPageId = newId();
+    const optimisticPage = { page_id: clientPageId, page_number: insertAt + 1, page_type: "whiteboard", image_url: null };
+    const optimisticPages = normalizePages([...beforePages.slice(0, insertAt), optimisticPage, ...beforePages.slice(insertAt)]);
+    strokesByPageRef.current = new Map(optimisticPages.map((page) => [page.page_id, beforeStrokes.get(page.page_id) || []]));
+    strokesByPageRef.current.set(clientPageId, []);
+    slidesRef.current = optimisticPages;
+    slideRef.current = insertAt + 1;
+    setSlides(optimisticPages);
+    setSlide(insertAt + 1);
+    slideControlActiveRef.current = true;
+    setThumbnailVersion((version) => version + 1);
+    publishControl({ kind: "slide_added", page: optimisticPage, insert_at: insertAt, page_number: insertAt + 1 });
+    setNotice("Slide added.");
     try {
       const afterPageId = currentPageId(current);
-      const { data } = await api.post(`/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}`);
-      if (!Array.isArray(data?.pages) || !data.pages.length || !data.page_id) {
-        throw new Error("The server did not return the new slide. Please try again.");
-      }
-      const updated = normalizePages(data.pages);
-      const next = updated.findIndex((page) => page.page_id === data.page_id) + 1;
-      if (next < 1) throw new Error("The new slide was not included in the server response.");
-      const previousStrokes = strokesByPageRef.current;
-      const nextStrokes = new Map(updated.map((page) => [page.page_id, previousStrokes.get(page.page_id) || []]));
-      nextStrokes.set(data.page_id, []);
-      strokesByPageRef.current = nextStrokes;
-      slidesRef.current = updated;
-      slideRef.current = next;
-      setSlides(updated);
-      setSlide(next);
-      slideControlActiveRef.current = true;
-      publishControl({ kind: "slides", pages: updated, page_number: next, page_id: data.page_id });
-      setThumbnailVersion((version) => version + 1);
-      setNotice("Slide added.");
+      const { data } = await api.post(
+        `/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}&page_id=${encodeURIComponent(clientPageId)}`
+      );
+      if (data?.page_id !== clientPageId) throw new Error("The server did not confirm the new slide.");
     } catch (error) {
+      strokesByPageRef.current = beforeStrokes;
+      slidesRef.current = beforePages;
+      slideRef.current = current;
+      setSlides(beforePages);
+      setSlide(current);
+      publishControl({ kind: "slides", pages: beforePages, page_number: current, page_id: beforePages[current - 1]?.page_id });
+      setThumbnailVersion((version) => version + 1);
       setNotice(error.response?.data?.detail || error.message || "Could not add slide.");
     }
   };
+
   const deleteSlide = async (page) => {
     if (!isTeacher || slidesRef.current.length <= 1) return;
-    const currentPage = slidesRef.current[slideRef.current - 1];
+    const beforePages = slidesRef.current;
+    const beforeStrokes = strokesByPageRef.current;
+    const targetIndex = beforePages.findIndex((item) => item.page_id === page.page_id);
+    if (targetIndex < 0) return;
+    const current = slideRef.current;
+    const currentPage = beforePages[current - 1];
+    const optimisticPages = beforePages.filter((item) => item.page_id !== page.page_id);
+    const optimisticSlide = current > optimisticPages.length ? optimisticPages.length : (targetIndex < current ? current - 1 : current);
+    strokesByPageRef.current = new Map(optimisticPages.map((item) => [item.page_id, beforeStrokes.get(item.page_id) || []]));
+    slidesRef.current = optimisticPages;
+    slideRef.current = optimisticSlide;
+    setSlides(optimisticPages);
+    setSlide(optimisticSlide);
+    slideControlActiveRef.current = true;
+    setThumbnailVersion((version) => version + 1);
+    publishControl({ kind: "slide_deleted", page_id: page.page_id, deleted_index: targetIndex, page_number: optimisticSlide, active_page_id: optimisticPages[optimisticSlide - 1]?.page_id || null });
+    setNotice("Slide deleted.");
     try {
       const query = currentPage?.page_id ? `?active_page_id=${encodeURIComponent(currentPage.page_id)}` : "";
       const { data } = await api.delete(`/classroom/sessions/${sessionId}/whiteboard-pages/${page.page_id}${query}`);
-      const updated = normalizePages(data.pages);
-      const previousStrokes = strokesByPageRef.current;
-      strokesByPageRef.current = new Map(updated.map((item) => [item.page_id, previousStrokes.get(item.page_id) || []]));
-      slidesRef.current = updated; setSlides(updated);
-      const next = clamp(Number(data.page_number) || 1, 1, updated.length);
-      slideRef.current = next; setSlide(next);
-      slideControlActiveRef.current = true;
-      publishControl({ kind: "slides", pages: updated, page_number: next, page_id: updated[next - 1]?.page_id });
-      setThumbnailVersion((version) => version + 1);
-      setNotice("Slide deleted.");
+      if (data?.deleted_page_id !== page.page_id) throw new Error("The server did not confirm the deleted slide.");
     } catch (error) {
+      strokesByPageRef.current = beforeStrokes;
+      slidesRef.current = beforePages;
+      slideRef.current = current;
+      setSlides(beforePages);
+      setSlide(current);
+      publishControl({ kind: "slides", pages: beforePages, page_number: current, page_id: beforePages[current - 1]?.page_id });
+      setThumbnailVersion((version) => version + 1);
       setNotice(error.response?.data?.detail || "Could not delete slide.");
     }
   };
@@ -308,8 +333,54 @@ export default function Classroom() {
             roomRef.current?.localParticipant.setScreenShareEnabled(false).then(() => setScreen(false)).catch(() => { });
           }
         }
+        if (msg.type === "whiteboard_page_added") {
+          const p = msg.page || {};
+          if (p.page_id && !slidesRef.current.some((item) => item.page_id === p.page_id)) {
+            const currentPages = slidesRef.current;
+            const insertAt = clamp(Number(msg.insert_at) || 0, 0, currentPages.length);
+            const next = normalizePages([...currentPages.slice(0, insertAt), p, ...currentPages.slice(insertAt)]);
+            slidesRef.current = next;
+            setSlides(next);
+            strokesByPageRef.current = new Map(next.map((item) => [item.page_id, strokesByPageRef.current.get(item.page_id) || []]));
+            const selected = next.findIndex((item) => item.page_id === p.page_id);
+            const nextPage = selected >= 0 ? selected + 1 : clamp(Number(msg.page_number) || 1, 1, next.length);
+            slideRef.current = nextPage;
+            setSlide(nextPage);
+            setThumbnailVersion((version) => version + 1);
+            setTimeout(redraw, 0);
+          }
+          slideControlActiveRef.current = true;
+          return;
+        }
+        if (msg.type === "whiteboard_page_deleted") {
+          const deletedId = msg.deleted_page_id;
+          liveRef.current.forEach((stroke, strokeId) => {
+            if (stroke.page_id === deletedId) liveRef.current.delete(strokeId);
+          });
+          if (pendingLiveRef.current?.page_id === deletedId) pendingLiveRef.current = null;
+          const currentPages = slidesRef.current;
+          if (deletedId && currentPages.some((item) => item.page_id === deletedId)) {
+            const next = normalizePages(currentPages.filter((item) => item.page_id !== deletedId));
+            slidesRef.current = next;
+            setSlides(next);
+            strokesByPageRef.current = new Map(next.map((item) => [item.page_id, strokesByPageRef.current.get(item.page_id) || []]));
+            const selected = next.findIndex((item) => item.page_id === msg.page_id);
+            const nextPage = selected >= 0 ? selected + 1 : clamp(Number(msg.page_number) || 1, 1, next.length);
+            slideRef.current = nextPage;
+            setSlide(nextPage);
+            setThumbnailVersion((version) => version + 1);
+            setTimeout(redraw, 0);
+          }
+          slideControlActiveRef.current = true;
+          return;
+        }
         if (msg.type === "pdf_pages_ready" || msg.type === "whiteboard_pages_updated") {
           const p = normalizePages(msg.pages);
+          const pageIds = new Set(p.map((item) => item.page_id));
+          liveRef.current.forEach((stroke, strokeId) => {
+            if (stroke.page_id && !pageIds.has(stroke.page_id)) liveRef.current.delete(strokeId);
+          });
+          if (pendingLiveRef.current?.page_id && !pageIds.has(pendingLiveRef.current.page_id)) pendingLiveRef.current = null;
           const oldStrokes = strokesByPageRef.current;
           const activeId = msg.page_id || slidesRef.current[slideRef.current - 1]?.page_id;
           slidesRef.current = p;
@@ -510,8 +581,51 @@ export default function Classroom() {
               return;
             }
             slideControlActiveRef.current = true;
+            if (p.kind === "slide_added") {
+              if (p.page?.page_id && !slidesRef.current.some((item) => item.page_id === p.page.page_id)) {
+                const currentPages = slidesRef.current;
+                const insertAt = clamp(Number(p.insert_at) || 0, 0, currentPages.length);
+                const next = normalizePages([...currentPages.slice(0, insertAt), p.page, ...currentPages.slice(insertAt)]);
+                slidesRef.current = next;
+                setSlides(next);
+                strokesByPageRef.current = new Map(next.map((item) => [item.page_id, strokesByPageRef.current.get(item.page_id) || []]));
+                const selected = next.findIndex((item) => item.page_id === p.page.page_id);
+                const nextPage = selected >= 0 ? selected + 1 : clamp(Number(p.page_number) || 1, 1, next.length);
+                slideRef.current = nextPage;
+                setSlide(nextPage);
+                setThumbnailVersion((version) => version + 1);
+                setTimeout(redraw, 0);
+              }
+              return;
+            }
+            if (p.kind === "slide_deleted") {
+              const deletedId = p.page_id;
+              liveRef.current.forEach((stroke, strokeId) => {
+                if (stroke.page_id === deletedId) liveRef.current.delete(strokeId);
+              });
+              if (pendingLiveRef.current?.page_id === deletedId) pendingLiveRef.current = null;
+              const currentPages = slidesRef.current;
+              if (deletedId && currentPages.some((item) => item.page_id === deletedId)) {
+                const next = normalizePages(currentPages.filter((item) => item.page_id !== deletedId));
+                slidesRef.current = next;
+                setSlides(next);
+                strokesByPageRef.current = new Map(next.map((item) => [item.page_id, strokesByPageRef.current.get(item.page_id) || []]));
+                const selected = next.findIndex((item) => item.page_id === p.active_page_id);
+                const nextPage = selected >= 0 ? selected + 1 : clamp(Number(p.page_number) || 1, 1, next.length);
+                slideRef.current = nextPage;
+                setSlide(nextPage);
+                setThumbnailVersion((version) => version + 1);
+                setTimeout(redraw, 0);
+              }
+              return;
+            }
             if (p.kind === "slides") {
               const next = normalizePages(p.pages);
+              const pageIds = new Set(next.map((item) => item.page_id));
+              liveRef.current.forEach((stroke, strokeId) => {
+                if (stroke.page_id && !pageIds.has(stroke.page_id)) liveRef.current.delete(strokeId);
+              });
+              if (pendingLiveRef.current?.page_id && !pageIds.has(pendingLiveRef.current.page_id)) pendingLiveRef.current = null;
               slidesRef.current = next;
               setSlides(next);
               const nextPage = clamp(Number(p.page_number) || 1, 1, next.length);
@@ -567,7 +681,7 @@ export default function Classroom() {
             if (p.page_number !== slideRef.current) {
               let live = liveRef.current.get(stroke.id);
               if (!live) {
-                live = { ...stroke, points: [], page_number: p.page_number };
+                live = { ...stroke, points: [], page_number: p.page_number, page_id: p.page_id || null };
                 liveRef.current.set(stroke.id, live);
               }
               const fresh = Array.isArray(stroke.points) ? stroke.points : [];
@@ -577,7 +691,7 @@ export default function Classroom() {
             }
             let live = liveRef.current.get(stroke.id);
             if (!live) {
-              live = { ...stroke, points: [], page_number: p.page_number };
+              live = { ...stroke, points: [], page_number: p.page_number, page_id: p.page_id || null };
               liveRef.current.set(stroke.id, live);
             }
             const fresh = Array.isArray(stroke.points) ? stroke.points : [];
@@ -656,7 +770,7 @@ export default function Classroom() {
       roomRef.current = null;
     };
   }, [hasEntered, sessionId, user, wsUrl, isTeacher, navigate, redraw, renderStroke, currentStrokes]);
-  const sendMessage = (event) => { event.preventDefault(); const text = message.trim(); if (!text) return; send({ type: "chat", message_text: text }); setChat((items) => [...items, { mine: true, text }]); setMessage(""); };
+  const sendMessage = (event) => { event.preventDefault(); const text = message.trim(); if (!text) return; if (!send({ type: "chat", message_text: text })) { setNotice("Chat is reconnecting. Please try again in a moment."); return; } setChat((items) => [...items, { mine: true, text }]); setMessage(""); };
   const setPermission = (permission, granted) => { if (!studentId) return setNotice("Waiting for the student to join."); send({ type: "permission_update", target_user_id: studentId, permission, granted }); };
   const endClass = async () => { if (!isTeacher || ending) return; setEnding(true); try { const { data } = await api.post(`/classroom/sessions/${sessionId}/end`); if (data?.pdf_url) setNotesUrl(data.pdf_url); } catch (error) { setEnding(false); setNotice(error.response?.data?.detail || "Could not end class."); } };
   const controlsAllowed = timer !== null && timer <= 300;

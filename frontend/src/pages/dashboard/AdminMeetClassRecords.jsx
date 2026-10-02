@@ -53,13 +53,13 @@ export default function AdminMeetClassRecords() {
               </thead>
               <tbody className="divide-y divide-chalk-faint">
                 {records.map((record) => (
-                  <tr key={record.id} className="align-top">
+                  <tr key={record.id} className={`align-top ${record.status === "no_show" ? "bg-amber-400/5" : ""}`}>
                     <td className="px-5 py-4"><div className="font-semibold">{record.student_name}</div><div className="text-xs text-chalk-muted">{record.student_email}</div></td>
                     <td className="px-5 py-4">{record.teacher_name}</td>
                     <td className="px-5 py-4"><div className="font-semibold">{record.subject}</div><div className="text-xs text-chalk-muted">{record.topic}</div></td>
                     <td className="whitespace-nowrap px-5 py-4">{formatDate(record.started_at)}<div className="text-xs text-chalk-muted">{formatTime(record.started_at)} – {formatTime(record.ended_at)}</div></td>
                     <td className="px-5 py-4">{record.duration_minutes} min</td>
-                    <td className="px-5 py-4"><span className={`rounded-full px-3 py-1.5 text-xs ${record.status === "completed" ? "bg-green-500/10 text-green-400" : "bg-amber-400/10 text-amber-300"}`}>{record.status}</span></td>
+                    <td className="px-5 py-4">{record.status === "no_show" ? <div className="space-y-1"><span className="inline-block rounded-md bg-amber-400/15 px-2.5 py-1.5 text-xs font-bold text-amber-300">Student did not join</span><div className="text-xs font-semibold text-green-400">Teacher was present</div>{record.created_by_admin_name && <div className="text-[11px] text-chalk-muted">Logged by {record.created_by_admin_name}</div>}</div> : <span className="rounded-full bg-green-500/10 px-3 py-1.5 text-xs text-green-400">{record.status}</span>}</td>
                     <td className="max-w-[260px] whitespace-pre-wrap px-5 py-4 text-xs text-chalk-muted">{record.teacher_notes || "—"}</td>
                     <td className="max-w-[260px] whitespace-pre-wrap px-5 py-4 text-xs text-chalk-muted">{record.homework || "—"}</td>
                     <td className="px-5 py-4">{record.google_meet_link ? <a href={record.google_meet_link} target="_blank" rel="noreferrer" className="text-brand-gold hover:underline">Open Meet</a> : "—"}</td>

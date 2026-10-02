@@ -19,6 +19,8 @@ class AdminTeacherListItem(BaseModel):
     subject_count: int
     completed_classes: int
     upcoming_classes: int
+    monthly_classes: dict[str, int] = {}
+    joined_at: datetime | None = None
 
 
 class AdminTeacherDetail(AdminTeacherListItem):
