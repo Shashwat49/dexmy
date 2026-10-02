@@ -45,16 +45,22 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
             month_start = func.date_trunc(
                 literal_column("'month'"), ExternalClassRecord.started_at
             )
+            monthly_class_filters = [
+                ExternalClassRecord.teacher_id == u.id,
+                ExternalClassRecord.status == "completed",
+            ]
+            # This teacher has three valid completed classes recorded before
+            # the teacher account's created_at timestamp. Include those
+            # historical classes in the monthly count for this teacher only.
+            if (u.email.lower() != "shivamsaraswat9456@gmail.com"):
+                monthly_class_filters.append(ExternalClassRecord.started_at >= u.created_at)
+
             month_rows = db.execute(
                 select(
                     month_start,
                     func.count(ExternalClassRecord.id),
                 )
-                .where(
-                    ExternalClassRecord.teacher_id == u.id,
-                    ExternalClassRecord.status == "completed",
-                    ExternalClassRecord.started_at >= u.created_at,
-                )
+                .where(*monthly_class_filters)
                 .group_by(month_start)
                 .order_by(month_start)
             ).all()
