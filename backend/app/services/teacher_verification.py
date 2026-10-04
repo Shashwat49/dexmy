@@ -3,6 +3,7 @@ VERIFIED_TEACHER_EMAILS = frozenset({
     "harjeetkaur457@gmail.com",
     "shivamsaraswat9456@gmail.com",
     "tanmaykumar@mymail.com",
+    "shobaselvam85@gmail.com",
 })
 
 
