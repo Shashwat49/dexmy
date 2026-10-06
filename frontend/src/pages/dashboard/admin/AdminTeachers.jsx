@@ -51,18 +51,18 @@ export default function AdminTeachers() {
     }
   }
 
-  async function verifyTeacher(teacherId) {
-    setBusy(`verify-${teacherId}`);
+  async function setTeacherVerification(teacherId, verified) {
+    setBusy(`${verified ? "verify" : "unverify"}-${teacherId}`);
     setError("");
     try {
-      await api.patch(`/admin/teachers/${teacherId}/verify`);
+      await api.patch(`/admin/teachers/${teacherId}/${verified ? "verify" : "unverify"}`);
       await load();
       if (selectedTeacher?.id === teacherId) {
         const response = await api.get(`/admin/teachers/${teacherId}`);
         setSelectedTeacher(response.data);
       }
     } catch (e) {
-      setError(e.response?.data?.detail || "Unable to verify teacher.");
+      setError(e.response?.data?.detail || `Unable to ${verified ? "verify" : "unverify"} teacher.`);
     } finally {
       setBusy(null);
     }
@@ -265,23 +265,23 @@ export default function AdminTeachers() {
                       )}
                     </td>
                     <td className="px-5 py-4">{t.subject_count}</td>
-                    <td className="px-5 py-4">{t.is_verified ? <TeacherClassCount teacher={t} selectedMonth={selectedMonths[t.id]} onMonthChange={(month) => setSelectedMonths((m) => ({ ...m, [t.id]: month }))} /> : <span>{t.completed_classes} completed · {t.upcoming_classes} upcoming</span>}</td>
+                    <td className="px-5 py-4"><TeacherClassCount teacher={t} selectedMonth={selectedMonths[t.id]} onMonthChange={(month) => setSelectedMonths((m) => ({ ...m, [t.id]: month }))} /></td>
                     <td className="px-5 py-4">{t.hourly_rate ?? "—"}</td>
                     <td className="px-5 py-4">{t.is_active ? "Active" : "Inactive"}</td>
                     <td className="px-5 py-4">
                       <div className="flex gap-2">
-                        {!t.is_verified && (
-                          <button
-                            disabled={busy === `verify-${t.id}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              verifyTeacher(t.id);
-                            }}
-                            className="rounded-lg bg-brand-red px-3 py-2 text-xs font-semibold disabled:opacity-50"
-                          >
-                            {busy === `verify-${t.id}` ? "Verifying…" : "Verify Teacher"}
-                          </button>
-                        )}
+                        <button
+                          disabled={busy === `${t.is_verified ? "unverify" : "verify"}-${t.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTeacherVerification(t.id, !t.is_verified);
+                          }}
+                          className={t.is_verified ? "rounded-lg border border-amber-400/40 px-3 py-2 text-xs font-semibold text-amber-300 disabled:opacity-50" : "rounded-lg bg-brand-red px-3 py-2 text-xs font-semibold disabled:opacity-50"}
+                        >
+                          {busy === `${t.is_verified ? "unverify" : "verify"}-${t.id}`
+                            ? (t.is_verified ? "Unverifying…" : "Verifying…")
+                            : (t.is_verified ? "Unverify Teacher" : "Verify Teacher")}
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -369,17 +369,17 @@ export default function AdminTeachers() {
                   </p>
                 </div>
 
-                {!selectedTeacher.is_verified && (
-                  <div className="mt-6 flex justify-end">
-                    <button
-                      disabled={busy === `verify-${selectedTeacher.id}`}
-                      onClick={() => verifyTeacher(selectedTeacher.id)}
-                      className="rounded-xl bg-brand-red px-5 py-3 text-sm font-semibold disabled:opacity-50"
-                    >
-                      {busy === `verify-${selectedTeacher.id}` ? "Verifying…" : "Verify Teacher"}
-                    </button>
-                  </div>
-                )}
+                <div className="mt-6 flex justify-end">
+                  <button
+                    disabled={busy === `${selectedTeacher.is_verified ? "unverify" : "verify"}-${selectedTeacher.id}`}
+                    onClick={() => setTeacherVerification(selectedTeacher.id, !selectedTeacher.is_verified)}
+                    className={selectedTeacher.is_verified ? "rounded-xl border border-amber-400/40 px-5 py-3 text-sm font-semibold text-amber-300 disabled:opacity-50" : "rounded-xl bg-brand-red px-5 py-3 text-sm font-semibold disabled:opacity-50"}
+                  >
+                    {busy === `${selectedTeacher.is_verified ? "unverify" : "verify"}-${selectedTeacher.id}`
+                      ? (selectedTeacher.is_verified ? "Unverifying…" : "Verifying…")
+                      : (selectedTeacher.is_verified ? "Unverify Teacher" : "Verify Teacher")}
+                  </button>
+                </div>
               </>
             )}
           </div>
