@@ -12,7 +12,6 @@ from app.models.teacher_profile_change_request import TeacherProfileChangeReques
 from app.models.user import User, UserRole
 from app.schemas.admin_teacher import AdminTeacherDetail, AdminTeacherListItem, AdminTeacherStatusUpdate, AdminTeacherSubjectRead, AdminTeacherSubjectUpdate
 from app.services.audit_service import record_admin_action
-from app.services.teacher_verification import VERIFIED_TEACHER_EMAILS, is_verified_teacher_email
 router=APIRouter()
 
 def month_range(started_at):
@@ -32,43 +31,41 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
     completed=select(func.count(ExternalClassRecord.id)).where(ExternalClassRecord.teacher_id==User.id,ExternalClassRecord.status=="completed").correlate(User).scalar_subquery(); upcoming=select(func.count(Booking.id)).where(Booking.teacher_id==User.id,Booking.status==BookingStatus.confirmed,Booking.scheduled_at>=func.now()).correlate(User).scalar_subquery(); subject_count=select(func.count(TeacherSubject.subject_id)).where(TeacherSubject.teacher_id==User.id).correlate(User).scalar_subquery()
     query=select(User,TeacherProfile,subject_count,completed,upcoming).join(TeacherProfile,TeacherProfile.user_id==User.id).where(User.role==UserRole.teacher)
     if verified is not None:
-        email_filter = func.lower(User.email).in_(VERIFIED_TEACHER_EMAILS)
-        query=query.where(email_filter if verified else ~email_filter)
+        query=query.where(TeacherProfile.is_verified.is_(verified))
     if active is not None: query=query.where(User.is_active.is_(active))
     if subject_id is not None: query=query.join(TeacherSubject,TeacherSubject.teacher_id==User.id).where(TeacherSubject.subject_id==subject_id)
     rows=db.execute(query.order_by(User.created_at.desc())).all()
     result = []
     for u,p,s,d,x in rows:
-        verified = is_verified_teacher_email(u.email)
+        verified = bool(p.is_verified)
         monthly = {}
-        if verified:
-            month_start = func.date_trunc(
+        month_start = func.date_trunc(
                 literal_column("'month'"), ExternalClassRecord.started_at
             )
-            monthly_class_filters = [
-                ExternalClassRecord.teacher_id == u.id,
-                ExternalClassRecord.status == "completed",
-            ]
-            # This teacher has three valid completed classes recorded before
+        monthly_class_filters = [
+            ExternalClassRecord.teacher_id == u.id,
+            ExternalClassRecord.status == "completed",
+        ]
+        # This teacher has three valid completed classes recorded before
             # the teacher account's created_at timestamp. Include those
-            # historical classes in the monthly count for this teacher only.
-            if (u.email.lower() != "shivamsaraswat9456@gmail.com"):
-                monthly_class_filters.append(ExternalClassRecord.started_at >= u.created_at)
+        # historical classes in the monthly count for this teacher only.
+        if (u.email.lower() != "shivamsaraswat9456@gmail.com"):
+            monthly_class_filters.append(ExternalClassRecord.started_at >= u.created_at)
 
-            month_rows = db.execute(
-                select(
-                    month_start,
-                    func.count(ExternalClassRecord.id),
-                )
-                .where(*monthly_class_filters)
-                .group_by(month_start)
-                .order_by(month_start)
-            ).all()
-            monthly = {month: 0 for month in month_range(u.created_at)}
-            monthly.update({
-                month_value.strftime("%Y-%m"): int(count)
-                for month_value, count in month_rows
-            })
+        month_rows = db.execute(
+            select(
+                month_start,
+                func.count(ExternalClassRecord.id),
+            )
+            .where(*monthly_class_filters)
+            .group_by(month_start)
+            .order_by(month_start)
+        ).all()
+        monthly = {month: 0 for month in month_range(u.created_at)}
+        monthly.update({
+            month_value.strftime("%Y-%m"): int(count)
+            for month_value, count in month_rows
+        })
         result.append(AdminTeacherListItem(
             id=u.id, full_name=u.full_name, email=u.email, phone=u.phone,
             is_active=u.is_active, is_verified=verified, rating_avg=p.rating_avg,
@@ -112,7 +109,7 @@ def get_admin_teacher(teacher_id:uuid.UUID,current_user:User=Depends(require_per
     row=db.execute(select(User,TeacherProfile).join(TeacherProfile,TeacherProfile.user_id==User.id).where(User.id==teacher_id,User.role==UserRole.teacher)).one_or_none()
     if row is None: raise HTTPException(status_code=404,detail="Teacher not found")
     user,profile=row; subjects=db.execute(select(Subject.name).join(TeacherSubject,TeacherSubject.subject_id==Subject.id).where(TeacherSubject.teacher_id==teacher_id).order_by(Subject.name.asc())).scalars().all(); completed=db.execute(select(func.count(ExternalClassRecord.id)).where(ExternalClassRecord.teacher_id==teacher_id,ExternalClassRecord.status=="completed")).scalar_one(); upcoming=db.execute(select(func.count(Booking.id)).where(Booking.teacher_id==teacher_id,Booking.status==BookingStatus.confirmed,Booking.scheduled_at>=func.now())).scalar_one()
-    return AdminTeacherDetail(id=user.id,full_name=user.full_name,email=user.email,phone=user.phone,is_active=user.is_active,is_verified=is_verified_teacher_email(user.email),rating_avg=profile.rating_avg,rating_count=profile.rating_count,years_experience=profile.years_experience,hourly_rate=profile.hourly_rate,subject_count=len(subjects),completed_classes=int(completed),upcoming_classes=int(upcoming),bio=profile.bio,qualifications=profile.qualifications,subjects=list(subjects),created_at=user.created_at)
+    return AdminTeacherDetail(id=user.id,full_name=user.full_name,email=user.email,phone=user.phone,is_active=user.is_active,is_verified=bool(profile.is_verified),rating_avg=profile.rating_avg,rating_count=profile.rating_count,years_experience=profile.years_experience,hourly_rate=profile.hourly_rate,subject_count=len(subjects),completed_classes=int(completed),upcoming_classes=int(upcoming),bio=profile.bio,qualifications=profile.qualifications,subjects=list(subjects),created_at=user.created_at)
 @router.patch("/{teacher_id}/status",response_model=AdminTeacherListItem)
 def update_teacher_status(teacher_id:uuid.UUID,payload:AdminTeacherStatusUpdate,request:Request,current_user:User=Depends(require_permission("teacher.suspend")),db:Session=Depends(get_db)):
     user=db.execute(select(User).where(User.id==teacher_id,User.role==UserRole.teacher)).scalar_one_or_none()
