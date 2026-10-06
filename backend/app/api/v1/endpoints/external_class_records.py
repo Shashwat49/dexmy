@@ -11,7 +11,7 @@ from app.db.session import get_db
 from app.models.external_class_record import ExternalClassRecord
 from app.models.package import PackagePlan, StudentPackage
 from app.models.user import User, UserRole
-from app.services.teacher_verification import is_verified_teacher_email
+from app.models.teacher import TeacherProfile
 from app.schemas.external_class_record import (
     ExternalClassRecordCreate,
     ExternalClassRecordRead,
@@ -102,7 +102,8 @@ def create_teacher_record(
     current_user: User = Depends(require_role(UserRole.teacher)),
     db: Session = Depends(get_db),
 ):
-    if not is_verified_teacher_email(current_user.email):
+    profile = db.get(TeacherProfile, current_user.id)
+    if profile is None or not profile.is_verified:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only verified teachers can record Google Meet classes.")
 
     student = db.get(User, payload.student_id)
