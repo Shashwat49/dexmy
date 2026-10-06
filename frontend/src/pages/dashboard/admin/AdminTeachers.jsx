@@ -265,7 +265,7 @@ export default function AdminTeachers() {
                       )}
                     </td>
                     <td className="px-5 py-4">{t.subject_count}</td>
-                    <td className="px-5 py-4"><TeacherClassCount teacher={t} selectedMonth={selectedMonths[t.id]} onMonthChange={(month) => setSelectedMonths((m) => ({ ...m, [t.id]: month }))} /></td>
+                    <td className="px-5 py-4">{t.is_verified ? <TeacherClassCount teacher={t} selectedMonth={selectedMonths[t.id]} onMonthChange={(month) => setSelectedMonths((m) => ({ ...m, [t.id]: month }))} /> : <span className="text-chalk-muted">—</span>}</td>
                     <td className="px-5 py-4">{t.hourly_rate ?? "—"}</td>
                     <td className="px-5 py-4">{t.is_active ? "Active" : "Inactive"}</td>
                     <td className="px-5 py-4">
