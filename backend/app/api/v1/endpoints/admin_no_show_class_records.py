@@ -12,8 +12,8 @@ from app.db.session import get_db
 from app.models.external_class_record import ExternalClassRecord
 from app.models.package import PackagePlan, StudentPackage
 from app.models.user import User, UserRole
+from app.models.teacher import TeacherProfile
 from app.schemas.external_class_record import ExternalClassRecordRead
-from app.services.teacher_verification import is_verified_teacher_email
 
 router = APIRouter()
 
@@ -107,15 +107,11 @@ def no_show_teachers(
     db: Session = Depends(get_db),
 ):
     teachers = db.scalars(
-        select(User)
-        .where(User.role == UserRole.teacher, User.is_active.is_(True))
+        select(User).join(TeacherProfile, TeacherProfile.user_id == User.id)
+        .where(User.role == UserRole.teacher, User.is_active.is_(True), TeacherProfile.is_verified.is_(True))
         .order_by(User.full_name.asc())
     ).all()
-    return [
-        AdminNoShowTeacherRead(id=t.id, full_name=t.full_name, email=t.email)
-        for t in teachers
-        if is_verified_teacher_email(t.email)
-    ]
+    return [AdminNoShowTeacherRead(id=t.id, full_name=t.full_name, email=t.email) for t in teachers]
 
 
 @router.post("", response_model=ExternalClassRecordRead, status_code=status.HTTP_201_CREATED)
@@ -134,7 +130,7 @@ def create_no_show(
         raise HTTPException(status_code=404, detail="Student not found")
 
     teacher = db.get(User, payload.teacher_id)
-    if teacher is None or teacher.role != UserRole.teacher or not teacher.is_active or not is_verified_teacher_email(teacher.email):
+    if teacher is None or teacher.role != UserRole.teacher or not teacher.is_active or db.get(TeacherProfile, teacher.id) is None or not db.get(TeacherProfile, teacher.id).is_verified:
         raise HTTPException(status_code=400, detail="Only active verified teachers can be selected")
 
     package = db.get(StudentPackage, payload.student_package_id)
