@@ -38,5 +38,5 @@ def review_request(request_id:uuid.UUID,payload:TeacherProfileChangeReview,reque
             for subject_id in ids: db.add(TeacherSubject(teacher_id=item.teacher_id,subject_id=subject_id))
         # Profile approval does not change the admin-controlled verification state.
         item.status="approved";item.reviewed_by=current_user.id;item.review_reason=payload.reason or "Approved by administrator";item.reviewed_at=datetime.now(timezone.utc)
-        record_admin_action(db,admin_user_id=current_user.id,action="teacher.profile.change.approve",resource_type="teacher",resource_id=item.teacher_id,old_values={"is_verified":False},new_values={"is_verified":is_verified_teacher_email(teacher.email),"requested_changes":changes},ip_address=request.client.host if request.client else None,user_agent=request.headers.get("user-agent"))
+        record_admin_action(db,admin_user_id=current_user.id,action="teacher.profile.change.approve",resource_type="teacher",resource_id=item.teacher_id,old_values={"is_verified":False},new_values={"is_verified":profile.is_verified,"requested_changes":changes},ip_address=request.client.host if request.client else None,user_agent=request.headers.get("user-agent"))
     db.commit();db.refresh(item);return item
