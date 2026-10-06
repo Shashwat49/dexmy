@@ -42,15 +42,12 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
         month_start = func.date_trunc(
                 literal_column("'month'"), ExternalClassRecord.started_at
             )
+        # Monthly counts must use the exact same completed-class population
+        # as completed_classes. Never exclude records based on account creation time.
         monthly_class_filters = [
             ExternalClassRecord.teacher_id == u.id,
             ExternalClassRecord.status == "completed",
         ]
-        # This teacher has three valid completed classes recorded before
-            # the teacher account's created_at timestamp. Include those
-        # historical classes in the monthly count for this teacher only.
-        if (u.email.lower() != "shivamsaraswat9456@gmail.com"):
-            monthly_class_filters.append(ExternalClassRecord.started_at >= u.created_at)
 
         month_rows = db.execute(
             select(
@@ -61,7 +58,15 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
             .group_by(month_start)
             .order_by(month_start)
         ).all()
-        monthly = {month: 0 for month in month_range(u.created_at)}
+
+        # Start the displayed month range at the earliest completed class so
+        # historical/pre-created records cannot disappear from the breakdown.
+        earliest_class = db.execute(
+            select(func.min(ExternalClassRecord.started_at))
+            .where(*monthly_class_filters)
+        ).scalar_one()
+        monthly_start = earliest_class or u.created_at
+        monthly = {month: 0 for month in month_range(monthly_start)}
         monthly.update({
             month_value.strftime("%Y-%m"): int(count)
             for month_value, count in month_rows
