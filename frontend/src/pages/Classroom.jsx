@@ -600,6 +600,9 @@ export default function Classroom() {
           reattachTracks();
         };
 
+        room.on(RoomEvent.ParticipantConnected, (participant) => {
+          if (participant?.name) setPeerName(participant.name);
+        });
         room.on(RoomEvent.Reconnecting, () => setStatus("Reconnecting video…"));
         room.on(RoomEvent.Reconnected, () => {
           setStatus("Live");
@@ -803,6 +806,9 @@ export default function Classroom() {
           return;
         }
         setStatus("Live");
+        room.remoteParticipants.forEach((participant) => {
+          if (participant?.name) setPeerName(participant.name);
+        });
         reattachTracks();
         connectWebSocket();
       } catch (error) {
