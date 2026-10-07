@@ -119,7 +119,7 @@ class PackageCreditService:
                 PackageCreditLedger.student_package_id == student_package_id,
                 PackageCreditLedger.booking_id == booking_id,
                 PackageCreditLedger.delta == -1,
-                PackageCreditLedger.reason == "booking_debit",
+                PackageCreditLedger.reason.in_(("booking_debit", "unlimited_booking")),
             )
         ).scalar_one_or_none()
         if debited is None:
