@@ -15,7 +15,19 @@ export default function TeacherDashboard() {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState([]), [classRecords, setClassRecords] = useState([]), [profile, setProfile] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState(""), [profileError, setProfileError] = useState("");
   const [joiningBookingId, setJoiningBookingId] = useState(null);
-  const load = async () => { setLoading(true); setError(""); const [b, p, r] = await Promise.allSettled([getMyBookings(), getMyTeacherProfile(), getTeacherClassRecords()]); if (b.status === "fulfilled") setBookings(Array.isArray(b.value) ? b.value : []); else setError(b.reason?.response?.data?.detail || "Unable to load your classes."); if (p.status === "fulfilled") setProfile(p.value); else setProfileError(p.reason?.response?.data?.detail || "Unable to load your profile."); if (r.status === "fulfilled") setClassRecords(Array.isArray(r.value) ? r.value : []); setLoading(false); };
+  const load = async () => {
+    setLoading(true); setError(""); setProfileError("");
+    getMyBookings()
+      .then((data) => setBookings(Array.isArray(data) ? data : []))
+      .catch((e) => setError(e.response?.data?.detail || "Unable to load your classes."))
+      .finally(() => setLoading(false));
+    getMyTeacherProfile()
+      .then((data) => setProfile(data))
+      .catch((e) => setProfileError(e.response?.data?.detail || "Unable to load your profile."));
+    getTeacherClassRecords()
+      .then((data) => setClassRecords(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  };
   useEffect(() => { load(); }, []);
   const upcoming = useMemo(() => bookings.filter(isUpcoming).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [bookings]);
   const today = useMemo(() => bookings.filter((b) => isSameDay(b.scheduled_at)).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [bookings]);
