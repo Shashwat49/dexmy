@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import api from "../api/client";
 
 export default function ClassReviewModal({ sessionId, open, onClose }) {
@@ -9,6 +10,7 @@ export default function ClassReviewModal({ sessionId, open, onClose }) {
   const [opinion, setOpinion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!open || !sessionId) return;
@@ -30,6 +32,8 @@ export default function ClassReviewModal({ sessionId, open, onClose }) {
   const isTeacher = role === "teacher";
   const title = isTeacher ? "How was your student?" : "How was your class?";
 
+  const finish = () => { onClose(); navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"); };
+
   const submit = async () => {
     setLoading(true);
     setError("");
@@ -38,7 +42,7 @@ export default function ClassReviewModal({ sessionId, open, onClose }) {
         checked_points: checked,
         additional_opinion: opinion.trim() || null,
       });
-      onClose();
+      finish();
     } catch (err) {
       setError(err.response?.data?.detail || "Unable to submit your review.");
     } finally {
@@ -53,7 +57,7 @@ export default function ClassReviewModal({ sessionId, open, onClose }) {
         <p className="mt-2 text-sm text-slate-400">Your class has ended. Take a moment to share quick feedback about the class.</p>
         {error && <div className="mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</div>}
         <div className="mt-6 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg bg-white/10 px-4 py-2 text-sm">Skip</button>
+          <button type="button" onClick={finish} className="rounded-lg bg-white/10 px-4 py-2 text-sm">Skip</button>
           <button type="button" disabled={!!error || !role} onClick={() => setStep("form")} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">Start review</button>
         </div>
       </> : <>
@@ -68,7 +72,7 @@ export default function ClassReviewModal({ sessionId, open, onClose }) {
         <textarea value={opinion} onChange={(e) => setOpinion(e.target.value)} maxLength={5000} rows={4} placeholder="Additional opinions (optional)" className="mt-4 w-full resize-none rounded-lg border border-white/10 bg-white/[0.04] p-3 text-sm outline-none placeholder:text-slate-500 focus:border-red-500" />
         {error && <div className="mt-3 text-xs text-red-300">{error}</div>}
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={loading} className="rounded-lg bg-white/10 px-4 py-2 text-sm disabled:opacity-50">Skip</button>
+          <button type="button" onClick={finish} disabled={loading} className="rounded-lg bg-white/10 px-4 py-2 text-sm disabled:opacity-50">Skip</button>
           <button type="button" onClick={submit} disabled={loading} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">{loading ? "Submitting…" : "Submit review"}</button>
         </div>
       </>}
