@@ -14,7 +14,6 @@ from app.services.livekit_service import create_join_token
 from app.models.classroom_content import ClassNotes, WhiteboardSnapshot, ClassroomPage
 from app.services.storage_service import save_bytes_file, get_presigned_url, delete_file
 from app.services.session_lifecycle import end_class_session
-from app.services.pdf_render_service import render_pdf_to_images
 from app.websockets.connection_manager import manager
 from pydantic import BaseModel
 from sqlalchemy import desc
@@ -30,11 +29,6 @@ class WhiteboardPageResponse(BaseModel):
     page_number: int
     page_type: str
     image_url: str | None = None
-
-class WhiteboardPdfUploadResponse(BaseModel):
-    pages: list[WhiteboardPageResponse]
-    inserted_count: int
-    inserted_page_ids: list[str]
 
 def _student_publish_sources(session_id: uuid.UUID, student_id: uuid.UUID, db: Session) -> list[str]:
     sources = {"camera", "microphone", "screen_share"}
@@ -104,22 +98,8 @@ async def upload_chat_file(session_id: uuid.UUID, file: UploadFile = File(...), 
 
 def _page_payload(pages, db):
     payload = []
-    pdf_page_ids = [page.id for page in pages if page.page_type == "pdf"]
-    original_images = {}
-    if pdf_page_ids:
-        # Fetch original PDF images in one query instead of one query per slide.
-        snapshots = db.query(WhiteboardSnapshot).filter(
-            WhiteboardSnapshot.page_id.in_(pdf_page_ids),
-            WhiteboardSnapshot.image_url.isnot(None),
-        ).order_by(WhiteboardSnapshot.created_at.asc()).all()
-        for snapshot in snapshots:
-            original_images.setdefault(snapshot.page_id, snapshot.image_url)
-
     for index, page in enumerate(pages, 1):
         image_key = page.image_url
-        # Preserve the original PDF image if a canvas snapshot was saved later.
-        if page.page_type == "pdf":
-            image_key = original_images.get(page.id) or image_key
         payload.append({
             "page_id": str(page.id),
             "page_number": index,
@@ -147,80 +127,6 @@ async def _notify_page_change(session_id, payload):
                 await ws.send_json(payload)
             except Exception:
                 pass
-
-
-@router.post("/sessions/{session_id}/whiteboard-pdf", response_model=WhiteboardPdfUploadResponse)
-async def upload_whiteboard_pdf(session_id: uuid.UUID, file: UploadFile = File(...), after_page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    cs = db.get(ClassSession, session_id)
-    if cs is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    booking = db.get(Booking, cs.booking_id)
-    if current_user.id != booking.teacher_id:
-        raise HTTPException(status_code=403, detail="Only the teacher can upload annotation PDFs")
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-
-    contents = await file.read()
-    if len(contents) > 30 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="PDF too large (30MB max)")
-    try:
-        # Render outside the event loop and reject oversized page counts before
-        # rasterizing every page.
-        pages_raw = await asyncio.to_thread(render_pdf_to_images, contents)
-    except ValueError as exc:
-        if "PDF too long" in str(exc):
-            raise HTTPException(status_code=400, detail="PDF too long (50 pages max)")
-        raise HTTPException(status_code=400, detail="Could not read PDF")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Could not read PDF")
-
-    existing_pages = db.query(ClassroomPage).filter(ClassroomPage.session_id == session_id).order_by(ClassroomPage.position.asc()).all()
-    after_index = len(existing_pages) - 1
-    if after_page_id:
-        try:
-            target_id = uuid.UUID(after_page_id)
-            after_index = next((i for i, page in enumerate(existing_pages) if page.id == target_id), after_index)
-        except (ValueError, TypeError):
-            pass
-    insert_at = max(0, after_index + 1)
-
-    # JPEG at moderate resolution greatly reduces rendering and upload time and
-    # storage/network payload size while remaining legible on the 1600x900 board.
-    semaphore = asyncio.Semaphore(5)
-    async def store_page(index, image_bytes):
-        async with semaphore:
-            key = await asyncio.to_thread(save_bytes_file, image_bytes, f"annotate_{session_id}_p{index}", "jpg")
-            return index, key
-    stored = await asyncio.gather(*(store_page(i, image) for i, image in enumerate(pages_raw, 1)))
-
-    _reorder_pages_without_unique_conflicts(existing_pages)
-    db.flush()
-    inserted = []
-    for offset, (original_index, key) in enumerate(stored):
-        page = ClassroomPage(session_id=session_id, position=-(len(existing_pages) + offset + 1), page_type="pdf", image_url=key)
-        db.add(page)
-        db.flush()
-        inserted.append(page)
-    ordered = existing_pages[:insert_at] + inserted + existing_pages[insert_at:]
-    for position, page in enumerate(ordered, 1):
-        page.position = position
-    db.flush()
-    for position, page in enumerate(ordered, 1):
-        if page in inserted:
-            db.add(WhiteboardSnapshot(session_id=session_id, snapshot_data={"strokes": []}, image_url=page.image_url, page_number=position, page_id=page.id))
-    db.commit()
-
-    payload_pages = _page_payload(ordered, db)
-    inserted_ids = [str(page.id) for page in inserted]
-    inserted_first_index = next((i for i, page in enumerate(ordered, 1) if str(page.id) in inserted_ids), insert_at + 1)
-    await _notify_page_change(session_id, {
-        "type": "pdf_pages_ready",
-        "pages": payload_pages,
-        "inserted_page_ids": inserted_ids,
-        "page_number": inserted_first_index,
-        "page_id": inserted_ids[0] if inserted_ids else None,
-    })
-    return WhiteboardPdfUploadResponse(pages=[WhiteboardPageResponse(**page) for page in payload_pages], inserted_count=len(inserted), inserted_page_ids=inserted_ids)
 
 
 @router.post("/sessions/{session_id}/whiteboard-pages")
