@@ -30,7 +30,7 @@ class PackageCreditService:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Student package is not active")
         if package.expires_at is not None and package.expires_at <= datetime.now(timezone.utc):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Student package has expired")
-        if package.classes_used >= package.total_classes:
+        if not package.is_unlimited and package.classes_used >= package.total_classes:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No package credits remaining")
 
         existing = db.execute(
@@ -43,12 +43,13 @@ class PackageCreditService:
         if existing is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This booking has already consumed a package credit")
 
-        package.classes_used += 1
+        if not package.is_unlimited:
+            package.classes_used += 1
         ledger = PackageCreditLedger(
             student_package_id=student_package_id,
             booking_id=booking_id,
             delta=-1,
-            reason="booking_debit",
+            reason="booking_debit" if not package.is_unlimited else "unlimited_booking",
             created_by=created_by,
         )
         db.add(ledger)
@@ -64,7 +65,7 @@ class PackageCreditService:
             .where(
                 StudentPackage.student_id == student_id,
                 StudentPackage.status == "active",
-                StudentPackage.classes_used < StudentPackage.total_classes,
+                (StudentPackage.is_unlimited.is_(True)) | (StudentPackage.classes_used < StudentPackage.total_classes),
                 (StudentPackage.expires_at.is_(None)) | (StudentPackage.expires_at > now),
             )
             .order_by(
@@ -135,7 +136,8 @@ class PackageCreditService:
         if already_refunded is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This booking credit has already been refunded")
 
-        package.classes_used = max(0, package.classes_used - 1)
+        if not package.is_unlimited:
+            package.classes_used = max(0, package.classes_used - 1)
         ledger = PackageCreditLedger(
             student_package_id=student_package_id,
             booking_id=booking_id,
