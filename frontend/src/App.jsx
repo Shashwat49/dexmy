@@ -30,6 +30,7 @@ const AdminUsers = lazy(() => import("./pages/dashboard/AdminUsers"));
 const AdminStudentPackages = lazy(() => import("./pages/dashboard/AdminStudentPackages"));
 const AdminSupport = lazy(() => import("./pages/dashboard/AdminSupport"));
 const AdminBookings = lazy(() => import("./pages/dashboard/AdminBookings"));
+const AdminReviews = lazy(() => import("./pages/dashboard/AdminReviews"));
 const AdminMeetClassRecords = lazy(() => import("./pages/dashboard/AdminMeetClassRecords"));
 const AdminStudentNoShow = lazy(() => import("./pages/dashboard/AdminStudentNoShow"));
 const BookClass = lazy(() => import("./pages/dashboard/student/BookClass"));
@@ -131,6 +132,7 @@ export default function App() {
         <Route path="/dashboard/admin/students" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminStudents /></ProtectedRoute>} />
         <Route path="/dashboard/admin/teachers" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminTeachers /></ProtectedRoute>} />
         <Route path="/dashboard/admin/bookings" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminBookings /></ProtectedRoute>} />
+        <Route path="/dashboard/admin/reviews" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminReviews /></ProtectedRoute>} />
         <Route path="/dashboard/admin/meet-class-records" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminMeetClassRecords /></ProtectedRoute>} />
         <Route path="/dashboard/admin/student-no-show" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminStudentNoShow /></ProtectedRoute>} />
         <Route path="/dashboard/admin/packages" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminPackages /></ProtectedRoute>} />
