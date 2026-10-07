@@ -4,7 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import api from "../../api/client";
 
 const ADMIN_NAV = [
-  { label: "Operations", items: [{ path: "/dashboard/admin", label: "Overview" }, { path: "/dashboard/admin/students", label: "Students" }, { path: "/dashboard/admin/teachers", label: "Teachers" }, { path: "/dashboard/admin/bookings", label: "Bookings" }, { path: "/dashboard/admin/meet-class-records", label: "Meet Class Records", icon: "records" }, { path: "/dashboard/admin/student-no-show", label: "Student Did Not Join", icon: "records" }, { path: "/dashboard/admin/student-packages", label: "Student Packages" }, { path: "/dashboard/admin/support", label: "Support" }] },
+  { label: "Operations", items: [{ path: "/dashboard/admin", label: "Overview" }, { path: "/dashboard/admin/students", label: "Students" }, { path: "/dashboard/admin/teachers", label: "Teachers" }, { path: "/dashboard/admin/bookings", label: "Bookings" }, { path: "/dashboard/admin/reviews", label: "Class Reviews", icon: "records" }, { path: "/dashboard/admin/meet-class-records", label: "Meet Class Records", icon: "records" }, { path: "/dashboard/admin/student-no-show", label: "Student Did Not Join", icon: "records" }, { path: "/dashboard/admin/student-packages", label: "Student Packages" }, { path: "/dashboard/admin/support", label: "Support" }] },
   { label: "Finance", items: [{ path: "/dashboard/admin/packages", label: "Packages" }, { path: "/dashboard/admin/payments", label: "Payments" }, { path: "/dashboard/admin/finance", label: "Finance" }, { path: "/dashboard/admin/payouts", label: "Payouts" }] },
   { label: "Administration", items: [{ path: "/dashboard/admin/audit-logs", label: "Audit Logs" }, { path: "/dashboard/admin/users", label: "Admin Users" }] },
 ];
