@@ -7,7 +7,7 @@ from fastapi import (
     HTTPException,
     status,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
@@ -344,119 +344,45 @@ def list_my_bookings(
     Return the current user's bookings.
     """
 
-    query = db.query(Booking)
+    student_user = aliased(User)
+    teacher_user = aliased(User)
 
-    # --------------------------------------------------------
-    # Teacher
-    # --------------------------------------------------------
+    query = (
+        db.query(Booking, student_user, teacher_user, Subject)
+        .join(student_user, Booking.student_id == student_user.id)
+        .outerjoin(teacher_user, Booking.teacher_id == teacher_user.id)
+        .join(Subject, Booking.subject_id == Subject.id)
+    )
 
     if current_user.role == UserRole.teacher:
-
-        query = query.filter(
-            Booking.teacher_id
-            == current_user.id
-        )
-
-    # --------------------------------------------------------
-    # Student
-    # --------------------------------------------------------
-
+        query = query.filter(Booking.teacher_id == current_user.id)
     elif current_user.role == UserRole.student:
-
-        query = query.filter(
-            Booking.student_id
-            == current_user.id
-        )
-
+        query = query.filter(Booking.student_id == current_user.id)
     else:
-
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not allowed.",
         )
 
-    bookings = (
-        query
-        .order_by(
-            Booking.scheduled_at.asc()
-        )
-        .all()
-    )
-
+    rows = query.order_by(Booking.scheduled_at.asc()).all()
     results = []
 
-    for booking in bookings:
-
-        student_user = db.get(
-            User,
-            booking.student_id,
-        )
-
-        teacher_user = None
-
-        if booking.teacher_id is not None:
-
-            teacher_user = db.get(
-                User,
-                booking.teacher_id,
-            )
-
-        subject = db.get(
-            Subject,
-            booking.subject_id,
-        )
-
+    for booking, student_user, teacher_user, subject in rows:
         results.append(
             BookingDetailRead(
                 id=booking.id,
-
                 student_id=booking.student_id,
-
-                student_name=(
-                    student_user.full_name
-                    if student_user
-                    else "Unknown"
-                ),
-
+                student_name=student_user.full_name if student_user else "Unknown",
                 teacher_id=booking.teacher_id,
-
-                teacher_name=(
-                    teacher_user.full_name
-                    if teacher_user
-                    else None
-                ),
-
+                teacher_name=teacher_user.full_name if teacher_user else None,
                 subject_id=booking.subject_id,
-
-                subject_name=(
-                    subject.name
-                    if subject
-                    else "Unknown"
-                ),
-
-                scheduled_at=(
-                    booking.scheduled_at
-                ),
-
-                duration_minutes=(
-                    booking.duration_minutes
-                ),
-
+                subject_name=subject.name if subject else "Unknown",
+                scheduled_at=booking.scheduled_at,
+                duration_minutes=booking.duration_minutes,
                 status=booking.status,
-
-                price=(
-                    float(booking.price)
-                    if booking.price is not None
-                    else None
-                ),
-
-                created_at=(
-                    booking.created_at
-                ),
-
-                teacher_assignment_status=(
-                    booking.teacher_assignment_status
-                ),
+                price=float(booking.price) if booking.price is not None else None,
+                created_at=booking.created_at,
+                teacher_assignment_status=booking.teacher_assignment_status,
             )
         )
 
