@@ -4,7 +4,6 @@ Revision ID: 20261008_unlimited_test_package
 Revises: 20261007_class_reviews
 """
 from alembic import op
-import sqlalchemy as sa
 
 
 revision = "20261008_unlimited_test_package"
@@ -14,9 +13,8 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column(
-        "student_packages",
-        sa.Column("is_unlimited", sa.Boolean(), nullable=False, server_default=sa.false()),
+    op.execute(
+        "ALTER TABLE student_packages ADD COLUMN IF NOT EXISTS is_unlimited BOOLEAN NOT NULL DEFAULT FALSE"
     )
     op.execute(
         """
