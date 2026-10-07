@@ -323,9 +323,12 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             except (ValueError, TypeError):
                 page_id = None
             page = db.get(ClassroomPage, page_id) if page_id else None
-            if page_id and (page is None or page.session_id != session_id):
-                return
-            if page is None:
+            # The client can briefly hold a stale page_id while slide state is
+            # being reconciled. The page number is the canonical ordering key,
+            # so recover the current server page instead of silently dropping
+            # the committed drawing event. Always send the canonical page_id
+            # back to the peer after resolving it.
+            if page is None or page.session_id != session_id:
                 page = db.query(ClassroomPage).filter(
                     ClassroomPage.session_id == session_id,
                     ClassroomPage.position == page_number,
