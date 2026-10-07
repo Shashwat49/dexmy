@@ -10,6 +10,7 @@ from app.db.session import SessionLocal
 from app.models.booking import Booking, BookingStatus
 from app.models.classroom import ClassSession, SessionStatus
 from app.models.classroom_content import ClassNotes, WhiteboardSnapshot, ClassroomPage
+from app.models.package import PackageCreditLedger, StudentPackage
 from app.services.notes_service import compile_notes_pdf
 from app.services.storage_service import download_bytes, save_bytes_file
 
@@ -67,6 +68,16 @@ def end_class_session(session_id: uuid.UUID, db: Session) -> ClassNotes | None:
     booking = db.get(Booking, class_session.booking_id)
     if booking is not None and booking.status != BookingStatus.cancelled:
         booking.status = BookingStatus.completed
+        if booking.student_package_id is not None:
+            package = db.get(StudentPackage, booking.student_package_id)
+            if package is not None and package.is_unlimited:
+                package.classes_used += 1
+                db.add(PackageCreditLedger(
+                    student_package_id=package.id,
+                    booking_id=booking.id,
+                    delta=1,
+                    reason="classroom_completed",
+                ))
     db.commit()
     existing = db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first()
     if existing:
