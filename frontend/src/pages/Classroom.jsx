@@ -455,9 +455,11 @@ export default function Classroom() {
           // The server sends this on every WebSocket connection. After the teacher has
           // initialized the board, a reconnect snapshot can be older than the live local
           // state and must not replace the teacher's in-progress whiteboard.
-          if (isTeacher && whiteboardStateInitializedRef.current) return;
-          if (slideControlActiveRef.current) return;
+          if (whiteboardStateInitializedRef.current) {
+            if (isTeacher || slideControlActiveRef.current) return;
+          }
           whiteboardStateInitializedRef.current = true;
+          slideControlActiveRef.current = false;
           const p = msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }];
           slidesRef.current = p;
           setSlides(p);
