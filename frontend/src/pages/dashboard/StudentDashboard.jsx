@@ -35,10 +35,14 @@ export default function StudentDashboard() {
 
   const load = async () => {
     setLoading(true); setRecordLoading(true); setError(""); setRecordError("");
-    const [bookingResult, recordResult] = await Promise.allSettled([bookingsApi.getMyBookings(), getMyClassRecords()]);
-    if (bookingResult.status === "fulfilled") setBookings(bookingResult.value || []); else setError(bookingResult.reason?.response?.data?.detail || "Unable to load classes.");
-    if (recordResult.status === "fulfilled") setClassData(recordResult.value || { package: null, classes: [], student_email: "" }); else setRecordError(recordResult.reason?.response?.data?.detail || "Unable to load package information.");
-    setLoading(false); setRecordLoading(false);
+    bookingsApi.getMyBookings()
+      .then((data) => setBookings(data || []))
+      .catch((e) => setError(e.response?.data?.detail || "Unable to load classes."))
+      .finally(() => setLoading(false));
+    getMyClassRecords()
+      .then((data) => setClassData(data || { package: null, classes: [], student_email: "" }))
+      .catch((e) => setRecordError(e.response?.data?.detail || "Unable to load package information."))
+      .finally(() => setRecordLoading(false));
   };
   useEffect(() => { load(); }, []);
 
