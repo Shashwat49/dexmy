@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.dependencies import require_role
 from app.db.session import get_db
@@ -25,6 +25,10 @@ def _record_read(record: ExternalClassRecord, db: Session) -> ExternalClassRecor
     student = db.get(User, record.student_id)
     teacher = db.get(User, record.teacher_id)
     admin = db.get(User, record.created_by_admin_id) if record.created_by_admin_id else None
+    return _record_read_with_users(record, student, teacher, admin)
+
+
+def _record_read_with_users(record, student, teacher, admin):
     return ExternalClassRecordRead(
         id=record.id,
         student_id=record.student_id,
@@ -48,52 +52,23 @@ def _record_read(record: ExternalClassRecord, db: Session) -> ExternalClassRecor
     )
 
 
-@router.get("/teacher/students", response_model=list[ExternalStudentPackageRead])
-def teacher_students(
-    current_user: User = Depends(require_role(UserRole.teacher)),
-    db: Session = Depends(get_db),
-):
-    rows = db.execute(
-        select(StudentPackage, PackagePlan, User)
-        .join(PackagePlan, PackagePlan.id == StudentPackage.package_plan_id)
-        .join(User, User.id == StudentPackage.student_id)
-        .where(StudentPackage.status == "active", User.role == UserRole.student)
-        .order_by(User.full_name.asc(), StudentPackage.purchased_at.desc())
-    ).all()
-
-    seen = set()
-    result = []
-    for package, plan, student in rows:
-        if student.id in seen:
-            continue
-        seen.add(student.id)
-        result.append(ExternalStudentPackageRead(
-            id=package.id,
-            student_id=student.id,
-            student_name=student.full_name,
-            student_email=student.email,
-            total_classes=package.total_classes,
-            completed_classes=package.classes_used,
-            remaining_classes=max(0, package.total_classes - package.classes_used),
-            status=package.status,
-            package_name=plan.name,
-            currency=plan.currency,
-            price=float(plan.price),
-        ))
-    return result
-
-
 @router.get("/teacher", response_model=list[ExternalClassRecordRead])
 def teacher_records(
     current_user: User = Depends(require_role(UserRole.teacher)),
     db: Session = Depends(get_db),
 ):
-    records = db.scalars(
-        select(ExternalClassRecord)
+    student_user = aliased(User)
+    teacher_user = aliased(User)
+    admin_user = aliased(User)
+    rows = db.execute(
+        select(ExternalClassRecord, student_user, teacher_user, admin_user)
+        .join(student_user, ExternalClassRecord.student_id == student_user.id)
+        .join(teacher_user, ExternalClassRecord.teacher_id == teacher_user.id)
+        .outerjoin(admin_user, ExternalClassRecord.created_by_admin_id == admin_user.id)
         .where(ExternalClassRecord.teacher_id == current_user.id)
         .order_by(ExternalClassRecord.started_at.desc())
     ).all()
-    return [_record_read(record, db) for record in records]
+    return [_record_read_with_users(record, student, teacher, admin) for record, student, teacher, admin in rows]
 
 
 @router.post("/teacher", response_model=ExternalClassRecordRead, status_code=status.HTTP_201_CREATED)
@@ -174,11 +149,21 @@ def student_records(
                 StudentPackage.status == "active",
             )
         ).one()
-    records = db.scalars(
-        select(ExternalClassRecord)
+    student_user = aliased(User)
+    teacher_user = aliased(User)
+    admin_user = aliased(User)
+    rows = db.execute(
+        select(ExternalClassRecord, student_user, teacher_user, admin_user)
+        .join(student_user, ExternalClassRecord.student_id == student_user.id)
+        .join(teacher_user, ExternalClassRecord.teacher_id == teacher_user.id)
+        .outerjoin(admin_user, ExternalClassRecord.created_by_admin_id == admin_user.id)
         .where(ExternalClassRecord.student_id == current_user.id)
         .order_by(ExternalClassRecord.started_at.desc())
     ).all()
+    records = [
+        _record_read_with_users(record, student, teacher, admin)
+        for record, student, teacher, admin in rows
+    ]
     if aggregate_package is not None and package and plan:
         total_classes = int(aggregate_package[0] or 0)
         completed_classes = int(aggregate_package[1] or 0)
@@ -207,5 +192,5 @@ def student_records(
     return {
         "student_email": current_user.email,
         "package": package_data,
-        "classes": [_record_read(record, db) for record in records],
+        "classes": records,
     }
