@@ -35,3 +35,63 @@
   .dexmy-classroom-shell .classroom-video-name{left:6px;top:6px;padding:4px 7px;font-size:10px}
   .dexmy-classroom-shell .classroom-tool-button{width:30px;height:30px;flex-basis:30px}
 }
+
+/* Smooth, soothing classroom motion — UI-only; no interaction logic changes. */
+.dexmy-classroom-shell .classroom-toolbar-content,
+.dexmy-classroom-shell .classroom-filmstrip-wrap,
+.dexmy-classroom-shell .classroom-video-name,
+.dexmy-classroom-shell .classroom-tool-button,
+.dexmy-classroom-shell .classroom-video-control,
+.dexmy-classroom-shell .classroom-filmstrip-toggle{
+  transition: opacity 180ms ease, transform 220ms cubic-bezier(.22,1,.36,1), background-color 180ms ease, border-color 180ms ease, box-shadow 220ms ease, color 180ms ease;
+}
+.dexmy-classroom-shell .classroom-toolbar-content{
+  transform-origin: top left;
+  will-change: transform, opacity;
+}
+.dexmy-classroom-shell .classroom-toolbar-content-collapsed{
+  transform: scale(.97);
+}
+.dexmy-classroom-shell .classroom-tool-button:hover:not(:disabled),
+.dexmy-classroom-shell .classroom-video-control:hover:not(:disabled),
+.dexmy-classroom-shell .classroom-filmstrip-toggle:hover{
+  transform: translateY(-1px);
+}
+.dexmy-classroom-shell .classroom-tool-button:active:not(:disabled),
+.dexmy-classroom-shell .classroom-video-control:active:not(:disabled),
+.dexmy-classroom-shell .classroom-filmstrip-toggle:active{
+  transform: translateY(0) scale(.96);
+}
+.dexmy-classroom-shell .classroom-video-name{
+  transition: opacity 220ms ease, background-color 220ms ease;
+}
+.dexmy-classroom-shell .classroom-filmstrip-wrap{
+  overflow:hidden;
+  transition: height 260ms cubic-bezier(.22,1,.36,1);
+}
+.dexmy-classroom-shell .classroom-filmstrip-collapsed{
+  overflow:hidden;
+}
+.dexmy-classroom-shell .classroom-filmstrip-toggle{
+  transition-duration: 180ms;
+}
+.dexmy-classroom-shell .classroom-tool-button svg,
+.dexmy-classroom-shell .classroom-filmstrip-toggle svg{
+  transition: transform 200ms cubic-bezier(.22,1,.36,1);
+}
+.dexmy-classroom-shell .classroom-toolbar-toggle:hover svg,
+.dexmy-classroom-shell .classroom-filmstrip-toggle:hover svg{
+  transform: scale(1.06);
+}
+@media (prefers-reduced-motion: reduce){
+  .dexmy-classroom-shell .classroom-toolbar-content,
+  .dexmy-classroom-shell .classroom-filmstrip-wrap,
+  .dexmy-classroom-shell .classroom-video-name,
+  .dexmy-classroom-shell .classroom-tool-button,
+  .dexmy-classroom-shell .classroom-video-control,
+  .dexmy-classroom-shell .classroom-filmstrip-toggle,
+  .dexmy-classroom-shell .classroom-tool-button svg,
+  .dexmy-classroom-shell .classroom-filmstrip-toggle svg{
+    transition:none!important;
+  }
+}
