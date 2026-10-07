@@ -6,3 +6,32 @@
 .dexmy-classroom-shell .classroom-toolbar{z-index:110}
 @media (max-width:900px) and (orientation:portrait){.dexmy-classroom-shell .classroom-mobile-orientation{display:flex;position:fixed;inset:0;z-index:9999;background:#070b16;align-items:center;justify-content:center;text-align:center;padding:24px}.dexmy-classroom-shell .classroom-mobile-orientation>div{max-width:320px}.dexmy-classroom-shell .classroom-mobile-orientation strong{display:block;font-size:18px;margin-bottom:8px}.dexmy-classroom-shell .classroom-mobile-orientation span{font-size:13px;color:#94a3b8}.dexmy-classroom-shell .classroom-side-panel{width:38vw;flex-basis:38vw}.dexmy-classroom-shell .classroom-video-stack{gap:5px;padding:5px 8px}.dexmy-classroom-shell .classroom-video{width:min(100%,230px);border-radius:7px}.dexmy-classroom-shell .classroom-toolbar{left:8px;top:62px;max-width:calc(100vw - 16px);overflow-x:auto}.dexmy-classroom-shell .classroom-video-control{width:24px;height:24px;font-size:10px}.dexmy-classroom-shell .classroom-permissions-popover{left:8px;top:105px;width:220px}.dexmy-classroom-shell .classroom-chat-messages{padding:7px}.dexmy-classroom-shell .classroom-chat-form{padding:5px}.dexmy-classroom-shell #remote-screen:has(video){right:38vw}}
 @media (max-width:900px) and (orientation:landscape){.dexmy-classroom-shell .classroom-side-panel{width:38vw;flex-basis:38vw}.dexmy-classroom-shell .classroom-video-stack{gap:5px;padding:5px 8px}.dexmy-classroom-shell .classroom-video{width:min(100%,230px);border-radius:7px}.dexmy-classroom-shell .classroom-toolbar{left:8px;top:62px;max-width:calc(100vw - 16px)}.dexmy-classroom-shell .classroom-video-control{width:24px;height:24px;font-size:10px}.dexmy-classroom-shell .classroom-chat-messages{padding:7px}.dexmy-classroom-shell .classroom-chat-form{padding:5px}.dexmy-classroom-shell #remote-screen:has(video){right:38vw}}
+
+.dexmy-classroom-shell .classroom-toolbar-content{position:fixed!important;left:16px;top:68px;z-index:110;width:max-content;max-width:calc(100vw - 32px);padding:4px;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 14px 34px rgba(0,0,0,.32);cursor:grab;touch-action:none}
+.dexmy-classroom-shell .classroom-toolbar-content-collapsed{padding:3px}
+.dexmy-classroom-shell .classroom-tool-button{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;flex:0 0 32px;background:rgba(255,255,255,.05);color:#e2e8f0;border:1px solid transparent;cursor:pointer}
+.dexmy-classroom-shell .classroom-tool-button:hover:not(:disabled){background:rgba(255,255,255,.1)}
+.dexmy-classroom-shell .classroom-tool-button.active{background:#dc2626;color:#fff}
+.dexmy-classroom-shell .classroom-tool-button:disabled{opacity:.4;cursor:not-allowed}
+.dexmy-classroom-shell .classroom-toolbar-toggle{background:rgba(255,255,255,.08)}
+.dexmy-classroom-shell .classroom-tool-color{width:28px;height:28px;padding:0;border:1px solid rgba(255,255,255,.16);border-radius:7px;overflow:hidden;cursor:pointer}
+.dexmy-classroom-shell .classroom-tool-width{width:72px;accent-color:#dc2626;cursor:pointer}
+.dexmy-classroom-shell .classroom-video-name{position:absolute;left:8px;top:8px;z-index:25;max-width:calc(100% - 16px);padding:5px 9px;border-radius:7px;background:rgba(8,12,22,.72);backdrop-filter:blur(5px);color:#fff;font-size:11px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.dexmy-classroom-shell .classroom-filmstrip-wrap{height:118px;position:relative}
+.dexmy-classroom-shell .classroom-filmstrip-toggle{position:absolute;right:10px;top:7px;z-index:5;height:28px;min-width:58px;padding:0 8px;display:flex;align-items:center;justify-content:center;gap:5px;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:rgba(8,12,22,.78);color:#e2e8f0;font-size:10px;cursor:pointer}
+.dexmy-classroom-shell .classroom-filmstrip-toggle:hover{background:rgba(255,255,255,.1)}
+.dexmy-classroom-shell .classroom-filmstrip-collapsed{height:38px}
+@media (max-width:900px) and (orientation:portrait){
+  .dexmy-classroom-shell .classroom-toolbar-content{left:8px;top:62px;max-width:calc(100vw - 16px);overflow-x:auto}
+  .dexmy-classroom-shell .classroom-filmstrip-wrap{height:108px}
+  .dexmy-classroom-shell .classroom-filmstrip-collapsed{height:36px}
+  .dexmy-classroom-shell .classroom-video-name{left:6px;top:6px;padding:4px 7px;font-size:10px}
+  .dexmy-classroom-shell .classroom-tool-button{width:30px;height:30px;flex-basis:30px}
+}
+@media (max-width:900px) and (orientation:landscape){
+  .dexmy-classroom-shell .classroom-toolbar-content{left:8px;top:62px;max-width:calc(100vw - 16px)}
+  .dexmy-classroom-shell .classroom-filmstrip-wrap{height:108px}
+  .dexmy-classroom-shell .classroom-filmstrip-collapsed{height:36px}
+  .dexmy-classroom-shell .classroom-video-name{left:6px;top:6px;padding:4px 7px;font-size:10px}
+  .dexmy-classroom-shell .classroom-tool-button{width:30px;height:30px;flex-basis:30px}
+}
