@@ -4,6 +4,7 @@ import { Room, RoomEvent, Track } from "livekit-client";
 import api from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import "./Classroom.css";
+import ClassReviewModal from "../components/ClassReviewModal";
 
 const attachMedia = (track, containerId, muted = false) => {
   if (!track) return;
@@ -144,7 +145,7 @@ export default function Classroom() {
   backgroundSizeRef.current = backgroundSize;
   const [mic, setMic] = useState(false), [camera, setCamera] = useState(false), [screen, setScreen] = useState(false), [studentId, setStudentId] = useState(null), [peerName, setPeerName] = useState("");
   const [permissions, setPermissions] = useState({ mic: true, camera: true, annotate: false, screen_share: false }), [ending, setEnding] = useState(false), [notesUrl, setNotesUrl] = useState(null), [timer, setTimer] = useState(null), [deadline, setDeadline] = useState(null);
-  const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [backPrompt, setBackPrompt] = useState(false);
+  const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [backPrompt, setBackPrompt] = useState(false), [showReview, setShowReview] = useState(false);
   const [hasEntered, setHasEntered] = useState(false), [cameraDevices, setCameraDevices] = useState([]), [microphoneDevices, setMicrophoneDevices] = useState([]), [selectedCameraId, setSelectedCameraId] = useState(""), [selectedMicrophoneId, setSelectedMicrophoneId] = useState(""), [deviceError, setDeviceError] = useState("");
   const previewRef = useRef(null), previewStreamRef = useRef(null);
   useEffect(() => { let cancelled = false; const prepareDevices = async () => { try { let stream; try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); previewStreamRef.current = stream; if (previewRef.current) previewRef.current.srcObject = stream; } catch (error) { setDeviceError(error?.message || "Allow camera and microphone access to choose devices."); } const devices = await navigator.mediaDevices.enumerateDevices(); if (cancelled) { stream?.getTracks().forEach((track) => track.stop()); return; } const cameras = devices.filter((device) => device.kind === "videoinput"); const microphones = devices.filter((device) => device.kind === "audioinput"); setCameraDevices(cameras); setMicrophoneDevices(microphones); setSelectedCameraId((current) => current || cameras[0]?.deviceId || ""); setSelectedMicrophoneId((current) => current || microphones[0]?.deviceId || ""); } catch (error) { if (!cancelled) setDeviceError(error?.message || "Unable to list media devices."); } }; prepareDevices(); return () => { cancelled = true; previewStreamRef.current?.getTracks().forEach((track) => track.stop()); previewStreamRef.current = null; }; }, []);
@@ -467,8 +468,8 @@ export default function Classroom() {
         if (msg.type === "class_extended") setDeadline(msg.new_deadline);
         if (msg.type === "session_ended") {
           setEnding(true);
+          setShowReview(true);
           api.get(`/classroom/sessions/${sessionId}/notes`).then((r) => setNotesUrl(r.data.pdf_url)).catch(() => {});
-          setTimeout(() => navigate("/dashboard"), 2200);
         }
       };
 
@@ -794,5 +795,6 @@ export default function Classroom() {
     {notice && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-black/80 px-4 py-2 rounded-xl text-xs">{notice}</div>}
     {ending && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/80"><div className="bg-[#111827] rounded-2xl p-8 text-center"><div className="text-lg font-semibold">Class ended</div>{notesUrl && <a href={notesUrl} target="_blank" rel="noreferrer" className="text-red-400 text-sm underline mt-2 inline-block">Download notes</a>}</div></div>}
     {backPrompt && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/70"><div className="bg-[#111827] rounded-2xl p-6 text-center"><div className="font-semibold">End class?</div><div className="text-xs text-slate-400 mt-2">Going back will end the class for everyone. The classroom will then be frozen.</div><div className="flex gap-2 justify-center mt-4"><button onClick={() => setBackPrompt(false)} className="px-4 py-2 bg-white/10 rounded">Keep class open</button><button onClick={() => { setBackPrompt(false); endClass(); }} disabled={ending} className="px-4 py-2 bg-red-600 rounded disabled:opacity-50">{ending ? "Ending…" : "End class"}</button></div></div></div>}
+    <ClassReviewModal sessionId={sessionId} open={showReview} onClose={() => navigate("/dashboard")} />
   </div>;
 }
