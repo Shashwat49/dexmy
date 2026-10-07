@@ -49,13 +49,25 @@ export default function MyNotes() {
           pastClasses.map(async (booking) => {
             try {
               const session = await bookingsApi.getBookingSession(booking.id);
-              try {
-                const { data: notes } = await api.get(`/classroom/sessions/${session.id}/notes`);
-                return { booking, session, notes, available: !!notes?.pdf_url };
-              } catch (notesError) {
-                if (notesError.response?.status === 404) return { booking, session, notes: null, available: false };
-                throw notesError;
+              const isRecentlyCompleted = Date.now() - new Date(booking.scheduled_at).getTime() < 30 * 60 * 1000;
+              const maxAttempts = isRecentlyCompleted ? 10 : 1;
+
+              for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+                try {
+                  const { data: notes } = await api.get(`/classroom/sessions/${session.id}/notes`);
+                  return { booking, session, notes, available: !!notes?.pdf_url };
+                } catch (notesError) {
+                  if (notesError.response?.status !== 404 || attempt === maxAttempts - 1) {
+                    if (notesError.response?.status === 404) {
+                      return { booking, session, notes: null, available: false };
+                    }
+                    throw notesError;
+                  }
+                  await new Promise((resolve) => setTimeout(resolve, 1500));
+                }
               }
+
+              return { booking, session, notes: null, available: false };
             } catch {
               return { booking, session: null, notes: null, available: false };
             }
