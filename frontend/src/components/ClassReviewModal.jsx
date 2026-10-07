@@ -20,7 +20,7 @@ export default function ClassReviewModal({ sessionId, open, onClose }) {
     setError("");
     api.get(`/classroom/reviews/sessions/${sessionId}/options`)
       .then(({ data }) => {
-        if (data?.submitted) { onClose(); return; }
+        if (data?.submitted) { onClose(); navigate(data?.role === "teacher" ? "/dashboard/teacher" : "/dashboard/student"); return; }
         setRole(data?.role || null);
         setPoints(data?.points || []);
       })
