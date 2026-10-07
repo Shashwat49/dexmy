@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.core.dependencies import get_current_user, require_permission
+from app.core.dependencies import get_current_admin, get_current_user
 from app.db.session import get_db
 from app.models.booking import Booking
 from app.models.class_review import ClassReview
@@ -82,10 +82,27 @@ def submit_review(session_id: uuid.UUID, payload: ClassReviewCreate, current_use
     return review
 
 
-@router.get("/admin", response_model=list[ClassReviewRead])
-def list_reviews(current_user: User = Depends(require_permission("review.read")), db: Session = Depends(get_db)):
+@router.get("/admin")
+def list_reviews(current_user: User = Depends(get_current_admin), db: Session = Depends(get_db)):
     rows = db.execute(
-        select(ClassReview)
+        select(ClassReview, Booking, User)
+        .join(ClassSession, ClassSession.id == ClassReview.session_id)
+        .join(Booking, Booking.id == ClassSession.booking_id)
+        .join(User, User.id == ClassReview.reviewer_id)
         .order_by(desc(ClassReview.created_at))
-    ).scalars().all()
-    return rows
+    ).all()
+    return [{
+        "id": review.id,
+        "session_id": review.session_id,
+        "reviewer_id": review.reviewer_id,
+        "reviewee_id": review.reviewee_id,
+        "reviewer_role": review.reviewer_role,
+        "reviewer_name": reviewer.full_name,
+        "reviewer_email": reviewer.email,
+        "reviewee_name": db.get(User, review.reviewee_id).full_name if db.get(User, review.reviewee_id) else None,
+        "subject_name": None,
+        "scheduled_at": booking.scheduled_at,
+        "checked_points": review.checked_points,
+        "additional_opinion": review.additional_opinion,
+        "created_at": review.created_at,
+    } for review, booking, reviewer in rows]
