@@ -307,6 +307,15 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             return
         payload = data.get("payload") or {}
         kind = payload.get("kind")
+        action_id = payload.get("action_id")
+        if action_id:
+            already_processed = db.query(WhiteboardSnapshot).filter(
+                WhiteboardSnapshot.session_id == session_id,
+                WhiteboardSnapshot.snapshot_data.contains({"action_id": str(action_id)}),
+            ).first()
+            if already_processed:
+                await websocket.send_json({"type": "whiteboard_event_ack", "action_id": str(action_id)})
+                return
         if kind in {"stroke", "stroke_update", "stroke_delete", "undo", "clear"}:
             page_number = max(1, int(payload.get("page_number", 1) or 1))
             try:
@@ -345,15 +354,20 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     strokes.pop()
             elif kind == "clear":
                 strokes = []
+            snapshot_data = {"strokes": strokes}
+            if action_id:
+                snapshot_data["action_id"] = str(action_id)
             db.add(WhiteboardSnapshot(
                 session_id=session_id,
-                snapshot_data={"strokes": strokes},
+                snapshot_data=snapshot_data,
                 image_url=latest.image_url if latest else page.image_url,
                 page_number=page_number,
                 page_id=page.id,
             ))
             db.commit()
             payload["page_id"] = str(page.id)
+            if action_id:
+                await websocket.send_json({"type": "whiteboard_event_ack", "action_id": str(action_id)})
         if peer:
             await peer.send_json({"type": "whiteboard_event", "payload": payload})
     elif msg_type == "whiteboard_live":
