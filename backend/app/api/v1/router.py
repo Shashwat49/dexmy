@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    admin, admin_dashboard, admin_students, admin_teachers, admin_bookings, admin_teacher_candidates, admin_teacher_profile_requests, admin_packages, admin_student_packages, admin_payouts, admin_finance, package_payments, package_payment_webhooks, auth, bookings, package_bookings, classroom, external_class_records, admin_meet_class_records, admin_no_show_class_records, marketing, parents, students, teachers, users, payments, system, profiles, subjects, whatsapp, packages,
+    admin, admin_dashboard, admin_students, admin_teachers, admin_bookings, class_reviews, admin_teacher_candidates, admin_teacher_profile_requests, admin_packages, admin_student_packages, admin_payouts, admin_finance, package_payments, package_payment_webhooks, auth, bookings, package_bookings, classroom, external_class_records, admin_meet_class_records, admin_no_show_class_records, marketing, parents, students, teachers, users, payments, system, profiles, subjects, whatsapp, packages,
 )
 api_router=APIRouter()
 api_router.include_router(auth.router,prefix="/auth",tags=["auth"])
 api_router.include_router(users.router,prefix="/users",tags=["users"])
 api_router.include_router(classroom.router,prefix="/classroom",tags=["classroom"])
+api_router.include_router(class_reviews.router,prefix="/classroom/reviews",tags=["class-reviews"])
 api_router.include_router(teachers.router,prefix="/teachers",tags=["teachers"])
 api_router.include_router(students.router,prefix="/students",tags=["students"])
 api_router.include_router(parents.router,prefix="/parents",tags=["parents"])
