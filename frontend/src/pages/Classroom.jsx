@@ -774,7 +774,9 @@ export default function Classroom() {
                 live.points.push(...fresh);
               }
             }
-            if (p.final) liveRef.current.delete(stroke.id);
+            // Keep the final live shape visible until the authoritative WebSocket
+            // stroke event arrives. Deleting it here makes a redraw erase the shape,
+            // causing the student to see it disappear and then reappear after commit.
             return;
           }
           if (msg.type === "whiteboard_checkpoint" && topic === COMMIT_TOPIC) {
