@@ -34,8 +34,6 @@ const detachMedia = (track) => {
 
 const W = 1600, H = 900;
 const CONTROL_TOPIC = "dexmy-classroom-control";
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
 const TOOLS = [["select", "Select"], ["pen", "Pen"], ["highlighter", "Highlight"], ["line", "Line"], ["arrow", "Arrow"], ["rect", "Rectangle"], ["circle", "Circle"], ["text", "Text"], ["eraser", "Eraser"]];
 const ToolIcon = ({ id, size = 17 }) => {
   const props = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
