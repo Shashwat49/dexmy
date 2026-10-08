@@ -793,67 +793,6 @@ export default function Classroom() {
             setThumbnailVersion((version) => version + 1);
             return;
           }
-          if (msg.type === "whiteboard_live" && topic === LIVE_TOPIC) {
-            const p = msg.payload || {}, stroke = p.stroke;
-            if (!stroke?.id || committedRef.current.has(stroke.id)) return;
-            if (p.page_number !== slideRef.current) {
-              let live = liveRef.current.get(stroke.id);
-              if (!live) {
-                live = { ...stroke, points: [], page_number: p.page_number, page_id: p.page_id || null };
-                liveRef.current.set(stroke.id, live);
-              }
-              const fresh = Array.isArray(stroke.points) ? stroke.points : [];
-              if (fresh.length) live.points.push(...fresh);
-              if (p.final) liveRef.current.delete(stroke.id);
-              return;
-            }
-            let live = liveRef.current.get(stroke.id);
-            if (!live) {
-              live = { ...stroke, points: [], page_number: p.page_number, page_id: p.page_id || null };
-              liveRef.current.set(stroke.id, live);
-            }
-            const fresh = Array.isArray(stroke.points) ? stroke.points : [];
-            if (fresh.length) {
-              if (["line", "arrow", "rect", "circle", "text", "sticky"].includes(stroke.tool)) {
-                live.points = fresh.slice(-2);
-                redraw();
-                setTimeout(() => {
-                  if (!committedRef.current.has(stroke.id) && slideRef.current === Number(p.page_number)) renderStroke(live);
-                }, 0);
-              } else {
-                const previous = live.points.length ? live.points[live.points.length - 1] : null;
-                renderStroke({ ...live, points: previous ? [previous, ...fresh] : fresh });
-                live.points.push(...fresh);
-              }
-            }
-            // Keep the final live shape visible until the authoritative WebSocket
-            // stroke event arrives. Deleting it here makes a redraw erase the shape,
-            // causing the student to see it disappear and then reappear after commit.
-            return;
-          }
-          if (msg.type === "whiteboard_checkpoint" && topic === COMMIT_TOPIC) {
-            const stroke = msg.stroke;
-            const pageNumber = Number(msg.page_number) || 1; const pageId = msg.page_id || currentPageId(pageNumber);
-            if (!stroke?.id || !stroke?.points?.length) return;
-            const existing = liveRef.current.get(stroke.id);
-            if (existing && existing.points.length >= stroke.points.length) return;
-            liveRef.current.set(stroke.id, { ...stroke, points: stroke.points.slice(), page_number: pageNumber, page_id: pageId });
-            if (pageNumber === slideRef.current) redraw();
-            return;
-          }
-          if (msg.type === "whiteboard_commit" && topic === COMMIT_TOPIC) {
-            const stroke = msg.stroke;
-            const pageNumber = Number(msg.page_number) || 1; const pageId = msg.page_id || currentPageId(pageNumber);
-            if (!stroke?.id) return;
-            committedRef.current.add(stroke.id);
-            liveRef.current.delete(stroke.id);
-            const list = strokesByPageRef.current.get(pageId) || [];
-            const isNewStroke = !list.some((s) => s.id === stroke.id);
-            if (isNewStroke) list.push(stroke);
-            strokesByPageRef.current.set(pageId, list);
-            if (isNewStroke && pageNumber === slideRef.current) renderStroke(stroke);
-            return;
-          }
         });
 
         await room.connect(data.livekit_url, data.livekit_token);
