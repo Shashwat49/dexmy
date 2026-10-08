@@ -248,7 +248,23 @@ export default function Classroom() {
   const publishLive = useCallback((stroke, points, pageNumber, final = false) => { const room = roomRef.current; const participant = room?.localParticipant; if (!participant || room.state !== "connected" || !Array.isArray(points) || !points.length) return; const packet = { type: "whiteboard_live", payload: { stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, points }, page_number: pageNumber, page_id: currentPageId(pageNumber), final } }; const reliableShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool);
     participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: reliableShape, topic: LIVE_TOPIC }).catch(() => { }); }, []);
   // The classroom WebSocket is the authoritative committed-state path. LiveKit remains live-preview only.
-  const publishCommit = useCallback(() => { }, []);
+  const publishCommit = useCallback((stroke, pageNumber) => {
+    const room = roomRef.current;
+    const participant = room?.localParticipant;
+    if (!participant || room.state !== "connected" || !stroke?.id) return;
+    const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool);
+    if (!isShape) return;
+    const packet = {
+      type: "whiteboard_commit",
+      stroke,
+      page_number: pageNumber,
+      page_id: currentPageId(pageNumber)
+    };
+    participant.publishData(
+      encoder.encode(JSON.stringify(packet)),
+      { reliable: true, topic: COMMIT_TOPIC }
+    ).catch(() => { });
+  }, [currentPageId]);
   // Do not send a second reliable copy of an in-progress stroke.
   const publishStrokeCheckpoint = useCallback(() => { }, []);
   const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool); if (pending?.id === stroke.id) { if (isShape) pending.points = points.slice(-2); else pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, page_id: currentPageId(), final }; }, []);
