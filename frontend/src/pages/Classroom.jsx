@@ -245,32 +245,68 @@ export default function Classroom() {
   }, [screen, redraw]);
   const saveSnapshot = useCallback(() => { clearTimeout(snapshotTimerRef.current); snapshotTimerRef.current = setTimeout(() => { const pageNumber = slideRef.current; send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, page_id: currentPageId(pageNumber) }); }, 500); }, [send, strokesFor, currentPageId]);
   const saveSnapshotNow = useCallback((pageNumber) => { clearTimeout(snapshotTimerRef.current); const imageBase64 = canvasRef.current?.toDataURL("image/png"); send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, image_base64: imageBase64, page_id: currentPageId(pageNumber) }); }, [send, strokesFor, currentPageId]);
-  const publishLive = useCallback((stroke, points, pageNumber, final = false) => { const room = roomRef.current; const participant = room?.localParticipant; if (!participant || room.state !== "connected" || !Array.isArray(points) || !points.length) return; const packet = { type: "whiteboard_live", payload: { stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, points }, page_number: pageNumber, page_id: currentPageId(pageNumber), final } }; const reliableShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool);
-    participant.publishData(encoder.encode(JSON.stringify(packet)), { reliable: reliableShape, topic: LIVE_TOPIC }).catch(() => { }); }, []);
-  // The classroom WebSocket is the authoritative committed-state path. LiveKit remains live-preview only.
-  const publishCommit = useCallback((stroke, pageNumber) => {
-    const room = roomRef.current;
-    const participant = room?.localParticipant;
-    if (!participant || room.state !== "connected" || !stroke?.id) return;
+  // Whiteboard synchronization uses one transport only: the classroom WebSocket.
+  // Live preview is transient; the whiteboard_event is the authoritative committed action.
+  const publishLive = useCallback((stroke, points, pageNumber, final = false) => {
+    if (!stroke?.id || !Array.isArray(points) || !points.length) return;
+    send({
+      type: "whiteboard_live",
+      payload: {
+        stroke: {
+          id: stroke.id,
+          tool: stroke.tool,
+          color: stroke.color,
+          width: stroke.width,
+          text: stroke.text,
+          points
+        },
+        page_number: pageNumber,
+        page_id: currentPageId(pageNumber),
+        final
+      }
+    });
+  }, [send, currentPageId]);
+
+  const queueLive = useCallback((stroke, points, final = false) => {
+    const pending = pendingLiveRef.current;
     const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool);
-    if (!isShape) return;
-    const packet = {
-      type: "whiteboard_commit",
-      stroke,
-      page_number: pageNumber,
-      page_id: currentPageId(pageNumber)
-    };
-    participant.publishData(
-      encoder.encode(JSON.stringify(packet)),
-      { reliable: true, topic: COMMIT_TOPIC }
-    ).catch(() => { });
+    if (pending?.id === stroke.id) {
+      pending.points = isShape ? points.slice(-2) : [...pending.points, ...points];
+      pending.final = final;
+    } else {
+      pendingLiveRef.current = {
+        id: stroke.id,
+        stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, text: stroke.text },
+        points: [...points],
+        page_number: slideRef.current,
+        page_id: currentPageId(),
+        final
+      };
+    }
   }, [currentPageId]);
-  // Do not send a second reliable copy of an in-progress stroke.
-  const publishStrokeCheckpoint = useCallback(() => { }, []);
-  const queueLive = useCallback((stroke, points, final = false) => { const pending = pendingLiveRef.current; const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool); if (pending?.id === stroke.id) { if (isShape) pending.points = points.slice(-2); else pending.points.push(...points); pending.final = final; } else pendingLiveRef.current = { id: stroke.id, stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width }, points: [...points], page_number: slideRef.current, page_id: currentPageId(), final }; }, []);
-  const flushLive = useCallback((force = false) => { const pending = pendingLiveRef.current; if (!pending || (!force && !pending.points.length)) return; const points = pending.points.splice(0, 32); if (!points.length) return; publishLive(pending.stroke, points, pending.page_number, pending.final && pending.points.length === 0); if (!pending.points.length) pendingLiveRef.current = null; }, [publishLive]);
-  useEffect(() => { let rafId; const tick = () => { flushLive(false); rafId = requestAnimationFrame(tick); }; rafId = requestAnimationFrame(tick); return () => { cancelAnimationFrame(rafId); flushLive(true); clearTimeout(snapshotTimerRef.current); clearTimeout(reliableStrokeTimerRef.current); }; }, [flushLive]);
-  useEffect(() => { if (!isTeacher) return; const id = setInterval(() => { if (drawRef.current?.points?.length) publishStrokeCheckpoint(); }, 250); reliableStrokeTimerRef.current = id; return () => clearInterval(id); }, [isTeacher, publishStrokeCheckpoint]);
+
+  const flushLive = useCallback((force = false) => {
+    const pending = pendingLiveRef.current;
+    if (!pending || (!force && !pending.points.length)) return;
+    const points = pending.points.splice(0, 32);
+    if (!points.length) return;
+    publishLive(pending.stroke, points, pending.page_number, pending.final && pending.points.length === 0);
+    if (!pending.points.length) pendingLiveRef.current = null;
+  }, [publishLive]);
+
+  useEffect(() => {
+    let rafId;
+    const tick = () => {
+      flushLive(false);
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+      flushLive(true);
+      clearTimeout(snapshotTimerRef.current);
+    };
+  }, [flushLive]);
   const point = (event, allowOutside = false) => { const r = canvasRef.current.getBoundingClientRect(); if (!r.width || !r.height) return null; const boardX = (event.clientX - r.left) * W / r.width; const boardY = (event.clientY - r.top) * H / r.height; const content = getSlideContentRect(); if (!allowOutside && (boardX < content.x || boardX > content.x + content.width || boardY < content.y || boardY > content.y + content.height)) return null; return { x: clamp((boardX - content.x) * W / content.width, 0, W), y: clamp((boardY - content.y) * H / content.height, 0, H) }; };
   const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (!p) return; if (tool === "text") { const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p)); if (hit) { selectedStrokeRef.current = hit.id; setTextDraft(hit.text || ""); setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id }); } else { setTextDraft(""); setTextModal({ x: p.x, y: p.y, strokeId: null }); } redraw(); return; } if (tool === "eraser") { const list = currentStrokes(); const hit = [...list].reverse().find(s => strokeHit(s, p)); if (!hit) return; strokesByPageRef.current.set(currentPageId(), list.filter(s => s.id !== hit.id)); if (selectedStrokeRef.current === hit.id) selectedStrokeRef.current = null; const action = { kind: "stroke_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); redraw(); setThumbnailVersion(v => v + 1); saveSnapshot(); return; } if (tool === "select") { const list = currentStrokes(), selected = list.find(s => s.id === selectedStrokeRef.current), bounds = strokeBounds(selected); if (bounds && p.x >= bounds.maxX - 10 && p.x <= bounds.maxX + 24 && p.y >= bounds.maxY - 10 && p.y <= bounds.maxY + 24) { selectInteractionRef.current = { mode: "resize", start: p, original: JSON.parse(JSON.stringify(selected)) }; } else { const hit = [...list].reverse().find(s => strokeHit(s, p)); selectedStrokeRef.current = hit?.id || null; selectInteractionRef.current = hit ? { mode: hit.tool === "text" ? "maybe-text" : "move", start: p, original: JSON.parse(JSON.stringify(hit)) } : null; } canvasRef.current.setPointerCapture(event.pointerId); redraw(); return; } if (!DRAW_TOOLS.has(tool)) return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p] }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
   const onPointerMove = (event) => { const interaction = selectInteractionRef.current; if (interaction) { const p = point(event, true); if (!p) return; if (interaction.mode === "maybe-text") { if (Math.hypot(p.x - interaction.start.x, p.y - interaction.start.y) < 6) return; interaction.mode = "move"; } const list = currentStrokes(), index = list.findIndex(s => s.id === interaction.original.id); if (index < 0) return; list[index] = transformStroke(interaction.original, interaction.start, p, interaction.mode); redraw(); return; } const d = drawRef.current; if (!d) return; const nextPoint = point(event, true); if (!nextPoint) return; d.points.push(nextPoint); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
