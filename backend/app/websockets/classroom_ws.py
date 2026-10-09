@@ -349,20 +349,6 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 if index is None:
                     strokes.append(stroke)
                 else:
-                    current_stroke = strokes[index]
-                    try:
-                        incoming_revision = int(stroke.get("_whiteboard_revision") or 0)
-                    except (TypeError, ValueError):
-                        incoming_revision = 0
-                    try:
-                        current_revision = int(current_stroke.get("_whiteboard_revision") or 0)
-                    except (AttributeError, TypeError, ValueError):
-                        current_revision = 0
-                    # A delayed older move must never roll an object back.
-                    if incoming_revision and current_revision and incoming_revision < current_revision:
-                        if action_id:
-                            await websocket.send_json({"type": "whiteboard_event_ack", "action_id": str(action_id)})
-                        return
                     strokes[index] = stroke
             elif kind == "stroke_delete" and payload.get("stroke_id"):
                 strokes = [item for item in strokes if not isinstance(item, dict) or item.get("id") != payload["stroke_id"]]
@@ -459,24 +445,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         elif data.get("image_base64"):
             image_url=save_base64_file(data["image_base64"],f"wb_{session_id}_p{page.id}","png")
             page.image_url=image_url
-        # Stroke events are the canonical whiteboard state. Snapshot requests may
-        # arrive from a client holding an older local copy, so never let a full
-        # client snapshot replace newer committed strokes already stored here.
-        incoming_canvas = data.get("canvas_json") or {}
-        incoming_strokes = incoming_canvas.get("strokes") if isinstance(incoming_canvas, dict) else None
-        canonical_strokes = incoming_strokes if isinstance(incoming_strokes, list) else []
-        if existing:
-            latest_canvas = existing.snapshot_data or {}
-            latest_strokes = latest_canvas.get("strokes") if isinstance(latest_canvas, dict) else None
-            if isinstance(latest_strokes, list):
-                canonical_strokes = latest_strokes
-        db.add(WhiteboardSnapshot(
-            session_id=session_id,
-            snapshot_data={"strokes": canonical_strokes},
-            image_url=image_url,
-            page_number=page_number,
-            page_id=page.id,
-        ))
+        db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=data.get("canvas_json") or {},image_url=image_url,page_number=page_number,page_id=page.id))
         db.commit()
         await websocket.send_json({"type":"snapshot_saved","page_number":page_number,"page_id":str(page.id)})
     elif msg_type == "remove_pdf" and is_teacher:
