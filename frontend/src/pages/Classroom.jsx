@@ -521,12 +521,11 @@ export default function Classroom() {
           setThumbnailVersion((version) => version + 1);
         }
         if (msg.type === "whiteboard_state") {
-          // The server sends this on every WebSocket connection. After the teacher has
-          // initialized the board, a reconnect snapshot can be older than the live local
-          // state and must not replace the teacher's in-progress whiteboard.
-          if (whiteboardStateInitializedRef.current) {
-            if (isTeacher || slideControlActiveRef.current) return;
-          }
+          // A WebSocket snapshot can lag behind newer LiveKit previews and committed
+          // edits. Apply it only for the initial board bootstrap; subsequent page and
+          // stroke changes arrive as ordered classroom events. Reapplying a stale
+          // snapshot makes moved objects jump back to their old positions.
+          if (whiteboardStateInitializedRef.current) return;
           whiteboardStateInitializedRef.current = true;
           slideControlActiveRef.current = false;
           const p = msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }];
@@ -582,7 +581,7 @@ export default function Classroom() {
           if (p.action_id) { if (seenWhiteboardActionIdsRef.current.has(p.action_id)) return; seenWhiteboardActionIdsRef.current.add(p.action_id); if (seenWhiteboardActionIdsRef.current.size > 500) seenWhiteboardActionIdsRef.current.delete(seenWhiteboardActionIdsRef.current.values().next().value); }
           if (p.kind === "page" || p.kind === "slides" || p.kind === "pdf") return;
           if (p.kind === "stroke_delete" && p.stroke_id) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter(s => s.id !== p.stroke_id)); if (selectedStrokeRef.current === p.stroke_id) selectedStrokeRef.current = null; if ((Number(p.page_number) || 1) === slideRef.current) redraw(); setThumbnailVersion(v => v + 1); }
-          if (p.kind === "stroke_update" && p.stroke) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || [], index = list.findIndex(s => s.id === p.stroke.id); if (index >= 0) list[index] = p.stroke; else list.push(p.stroke); strokesByPageRef.current.set(pageId, list); committedRef.current.add(p.stroke.id); liveRef.current.delete(p.stroke.id); if ((Number(p.page_number) || 1) === slideRef.current) redraw(); setThumbnailVersion(v => v + 1); }
+          if (p.kind === "stroke_update" && p.stroke) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || [], index = list.findIndex(s => s.id === p.stroke.id), existing = index >= 0 ? list[index] : null; const incomingRevision = Number(p.stroke._whiteboard_revision) || 0, existingRevision = Number(existing?._whiteboard_revision) || 0; if (!existing || incomingRevision >= existingRevision) { if (index >= 0) list[index] = p.stroke; else list.push(p.stroke); strokesByPageRef.current.set(pageId, list); committedRef.current.add(p.stroke.id); liveRef.current.delete(p.stroke.id); if ((Number(p.page_number) || 1) === slideRef.current) redraw(); setThumbnailVersion(v => v + 1); } }
           if (p.kind === "stroke" && p.stroke) {
             const pageNumber = Number(p.page_number) || 1; const pageId = p.page_id || currentPageId(pageNumber);
             const list = strokesByPageRef.current.get(pageId) || [];
