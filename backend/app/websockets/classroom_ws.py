@@ -480,11 +480,12 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     incoming_revision = int(stroke.get("_whiteboard_revision") or 0)
                 except (TypeError, ValueError):
                     continue
-                if committed_revision > incoming_revision:
-                    # The stored stroke is a newer committed edit. Preserve its
-                    # complete geometry as well as its revision; copying only
-                    # the revision onto stale incoming coordinates lets a
-                    # delayed snapshot resurrect the old position.
+                if committed_revision > 0 and committed_revision >= incoming_revision:
+                    # The committed event stream is authoritative for every
+                    # stroke type, including freehand pen/highlighter paths.
+                    # A snapshot with an equal revision can still carry stale
+                    # points, so preserve the complete committed stroke unless
+                    # the snapshot explicitly has a newer revision.
                     incoming_strokes[incoming_strokes.index(stroke)] = dict(committed)
         db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=snapshot_data,image_url=image_url,page_number=page_number,page_id=page.id))
         db.commit()
