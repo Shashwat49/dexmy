@@ -34,6 +34,7 @@ const detachMedia = (track) => {
 
 const W = 1600, H = 900;
 const CONTROL_TOPIC = "dexmy-classroom-control";
+const LIVE_TOPIC = "dexmy-whiteboard-live";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const TOOLS = [["select", "Select"], ["pen", "Pen"], ["highlighter", "Highlight"], ["line", "Line"], ["arrow", "Arrow"], ["rect", "Rectangle"], ["circle", "Circle"], ["text", "Text"], ["eraser", "Eraser"]];
@@ -242,11 +243,13 @@ export default function Classroom() {
   }, [screen, redraw]);
   const saveSnapshot = useCallback(() => { clearTimeout(snapshotTimerRef.current); snapshotTimerRef.current = setTimeout(() => { const pageNumber = slideRef.current; send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, page_id: currentPageId(pageNumber) }); }, 500); }, [send, strokesFor, currentPageId]);
   const saveSnapshotNow = useCallback((pageNumber) => { clearTimeout(snapshotTimerRef.current); const imageBase64 = canvasRef.current?.toDataURL("image/png"); send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, image_base64: imageBase64, page_id: currentPageId(pageNumber) }); }, [send, strokesFor, currentPageId]);
-  // Whiteboard synchronization uses one transport only: the classroom WebSocket.
-  // Live preview is transient; the whiteboard_event is the authoritative committed action.
+  // Send transient strokes directly over LiveKit to avoid WebSocket/database
+  // traffic delaying the live preview. Final edits still commit over the WebSocket.
   const publishLive = useCallback((stroke, points, pageNumber, final = false) => {
-    if (!stroke?.id || !Array.isArray(points) || !points.length) return;
-    send({
+    const room = roomRef.current;
+    const participant = room?.localParticipant;
+    if (!participant || room.state !== "connected" || !stroke?.id || !Array.isArray(points) || !points.length) return;
+    const packet = {
       type: "whiteboard_live",
       payload: {
         stroke: {
@@ -261,8 +264,15 @@ export default function Classroom() {
         page_id: currentPageId(pageNumber),
         final
       }
+    };
+    const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool);
+    participant.publishData(encoder.encode(JSON.stringify(packet)), {
+      reliable: isShape,
+      topic: LIVE_TOPIC
+    }).catch(() => {
+      // Do not block drawing on a transient preview packet; final state is committed separately.
     });
-  }, [send, currentPageId]);
+  }, [currentPageId]);
 
   const queueLive = useCallback((stroke, points, final = false) => {
     const pending = pendingLiveRef.current;
@@ -721,6 +731,33 @@ export default function Classroom() {
           if (!participant || !topic) return;
           let msg;
           try { msg = JSON.parse(decoder.decode(payload)); } catch { return; }
+          if (msg.type === "whiteboard_live" && topic === LIVE_TOPIC) {
+            const p = msg.payload || {};
+            const stroke = p.stroke;
+            if (!stroke?.id) return;
+            const pageNumber = Number(p.page_number) || 1;
+            const pageId = p.page_id || currentPageId(pageNumber);
+            let live = liveRef.current.get(stroke.id);
+            if (!live) {
+              live = { ...stroke, points: [], page_number: pageNumber, page_id: pageId };
+              liveRef.current.set(stroke.id, live);
+            }
+            const fresh = Array.isArray(stroke.points) ? stroke.points : [];
+            if (fresh.length) {
+              if (["line", "arrow", "rect", "circle", "text"].includes(stroke.tool)) {
+                live.points = fresh.slice(-2);
+              } else {
+                const previous = live.points.length ? live.points[live.points.length - 1] : null;
+                live.points.push(...(previous ? fresh.filter((point) => point.x !== previous.x || point.y !== previous.y) : fresh));
+              }
+              if (pageNumber === slideRef.current) redraw();
+            }
+            if (p.final) {
+              // Keep the preview until the committed WebSocket action replaces it.
+              live.final = true;
+            }
+            return;
+          }
           if (msg.type === "classroom_control" && topic === CONTROL_TOPIC) {
             const p = msg.payload || {};
             if (p.kind === "grid") {
