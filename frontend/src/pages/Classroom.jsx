@@ -286,7 +286,7 @@ export default function Classroom() {
     } else {
       pendingLiveRef.current = {
         id: stroke.id,
-        stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, text: stroke.text },
+        stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, text: stroke.text, _whiteboard_revision: stroke._whiteboard_revision || Date.now() },
         points: replace ? [...points] : (isShape ? [points[0], points[points.length - 1]] : [...points]),
         replace,
         page_number: slideRef.current,
@@ -543,6 +543,8 @@ export default function Classroom() {
           if (!stroke?.id) return;
           const pageNumber = Number(p.page_number) || 1;
           const pageId = p.page_id || currentPageId(pageNumber);
+          const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
+          if (committed && Number(committed._whiteboard_revision) > 0 && Number(committed._whiteboard_revision) >= Number(p.revision || 0)) return;
           let live = liveRef.current.get(stroke.id);
           if (!live) {
             live = {
@@ -750,6 +752,8 @@ export default function Classroom() {
             if (!stroke?.id) return;
             const pageNumber = Number(p.page_number) || 1;
             const pageId = p.page_id || currentPageId(pageNumber);
+            const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
+            if (committed && Number(committed._whiteboard_revision) > 0 && Number(committed._whiteboard_revision) >= Number(p.revision || 0)) return;
             let live = liveRef.current.get(stroke.id);
             if (!live) {
               live = { ...stroke, points: [], page_number: pageNumber, page_id: pageId };
