@@ -150,6 +150,7 @@ export default function Classroom() {
   const canvasRef = useRef(null), wsRef = useRef(null), roomRef = useRef(null), drawRef = useRef(null), drawBaseRef = useRef(null);
   const slidesRef = useRef([makeWhiteboardPage(1)]), strokesByPageRef = useRef(new Map()), slideRef = useRef(1);
   const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false), imageCacheRef = useRef(new Map()), reliableStrokeTimerRef = useRef(null), slideControlActiveRef = useRef(false);
+  const whiteboardPreviewRevisionRef = useRef(0);
   const mediaBusyRef = useRef(false);
   const whiteboardStateInitializedRef = useRef(false);
   const whiteboardQueueRef = useRef(new Map());
@@ -264,15 +265,21 @@ export default function Classroom() {
         page_id: currentPageId(pageNumber),
         final,
         replace,
-        revision: stroke._whiteboard_revision || Date.now()
+        revision: stroke._whiteboard_revision || Date.now(),
+        preview_revision: ++whiteboardPreviewRevisionRef.current,
+        base_revision: Number(stroke._whiteboard_revision) || 0
       }
     };
-    const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool);
-    participant.publishData(encoder.encode(JSON.stringify(packet)), {
-      reliable: isShape,
+    const encoded = encoder.encode(JSON.stringify(packet));
+    if (encoded.byteLength > 12 * 1024) {
+      if (import.meta.env.VITE_WHITEBOARD_DEBUG === "1") console.debug("Skipped oversized whiteboard preview", encoded.byteLength);
+      return;
+    }
+    participant.publishData(encoded, {
+      reliable: true,
       topic: LIVE_TOPIC
-    }).catch(() => {
-      // Do not block drawing on a transient preview packet; final state is committed separately.
+    }).catch((error) => {
+      if (import.meta.env.VITE_WHITEBOARD_DEBUG === "1") console.debug("Whiteboard preview publish failed", error);
     });
   }, [currentPageId]);
 
@@ -544,7 +551,8 @@ export default function Classroom() {
           const pageNumber = Number(p.page_number) || 1;
           const pageId = p.page_id || currentPageId(pageNumber);
           const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
-          if (committed && Number(committed._whiteboard_revision) > 0 && Number(committed._whiteboard_revision) >= Number(p.revision || 0)) return;
+          const committedRevision = Number(committed?._whiteboard_revision) || 0;
+          if (p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) : (committedRevision > 0 && committedRevision >= Number(p.revision || 0))) return;
           let live = liveRef.current.get(stroke.id);
           if (!live) {
             live = {
@@ -562,9 +570,9 @@ export default function Classroom() {
           const fresh = Array.isArray(stroke.points) ? stroke.points : [];
           if (fresh.length) {
             if (p.replace) {
-              const revision = Number(p.revision) || 0;
-              if (revision && revision <= (Number(live._whiteboard_revision) || 0)) return;
-              if (revision) live._whiteboard_revision = revision;
+              const revision = Number(p.preview_revision ?? p.revision) || 0;
+              if (revision && revision <= (Number(live._preview_revision) || 0)) return;
+              if (revision) live._preview_revision = revision;
               live.points = fresh;
             } else if (["line", "arrow", "rect", "circle", "text"].includes(stroke.tool)) {
               live.points = fresh.slice(-2);
@@ -572,7 +580,7 @@ export default function Classroom() {
               const previous = live.points.length ? live.points[live.points.length - 1] : null;
               live.points.push(...(previous ? fresh.filter((point) => point.x !== previous.x || point.y !== previous.y) : fresh));
             }
-            if (pageNumber === slideRef.current) redraw();
+            if (pageId === currentPageId()) redraw();
           }
           return;
         }
@@ -580,8 +588,8 @@ export default function Classroom() {
           const p = msg.payload || {};
           if (p.action_id) { if (seenWhiteboardActionIdsRef.current.has(p.action_id)) return; seenWhiteboardActionIdsRef.current.add(p.action_id); if (seenWhiteboardActionIdsRef.current.size > 500) seenWhiteboardActionIdsRef.current.delete(seenWhiteboardActionIdsRef.current.values().next().value); }
           if (p.kind === "page" || p.kind === "slides" || p.kind === "pdf") return;
-          if (p.kind === "stroke_delete" && p.stroke_id) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter(s => s.id !== p.stroke_id)); if (selectedStrokeRef.current === p.stroke_id) selectedStrokeRef.current = null; if ((Number(p.page_number) || 1) === slideRef.current) redraw(); setThumbnailVersion(v => v + 1); }
-          if (p.kind === "stroke_update" && p.stroke) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || [], index = list.findIndex(s => s.id === p.stroke.id), existing = index >= 0 ? list[index] : null; const incomingRevision = Number(p.stroke._whiteboard_revision) || 0, existingRevision = Number(existing?._whiteboard_revision) || 0; if (!existing || incomingRevision >= existingRevision) { if (index >= 0) list[index] = p.stroke; else list.push(p.stroke); strokesByPageRef.current.set(pageId, list); committedRef.current.add(p.stroke.id); liveRef.current.delete(p.stroke.id); if ((Number(p.page_number) || 1) === slideRef.current) redraw(); setThumbnailVersion(v => v + 1); } }
+          if (p.kind === "stroke_delete" && p.stroke_id) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter(s => s.id !== p.stroke_id)); if (selectedStrokeRef.current === p.stroke_id) selectedStrokeRef.current = null; if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); }
+          if (p.kind === "stroke_update" && p.stroke) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || [], index = list.findIndex(s => s.id === p.stroke.id), existing = index >= 0 ? list[index] : null; const incomingRevision = Number(p.stroke._whiteboard_revision) || 0, existingRevision = Number(existing?._whiteboard_revision) || 0; if (!existing || incomingRevision >= existingRevision) { if (index >= 0) list[index] = p.stroke; else list.push(p.stroke); strokesByPageRef.current.set(pageId, list); committedRef.current.add(p.stroke.id); liveRef.current.delete(p.stroke.id); if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); } }
           if (p.kind === "stroke" && p.stroke) {
             const pageNumber = Number(p.page_number) || 1; const pageId = p.page_id || currentPageId(pageNumber);
             const list = strokesByPageRef.current.get(pageId) || [];
@@ -590,13 +598,13 @@ export default function Classroom() {
             strokesByPageRef.current.set(pageId, list);
             committedRef.current.add(p.stroke.id);
             liveRef.current.delete(p.stroke.id);
-            if (pageNumber === slideRef.current) redraw();
+            if (pageId === currentPageId()) redraw();
           }
-          if (p.kind === "undo" && p.page_number === slideRef.current) {
+          if (p.kind === "undo" && (p.page_id || currentPageId(p.page_number || 1)) === currentPageId()) {
             currentStrokes().pop();
             redraw();
           }
-          if (p.kind === "clear" && p.page_number === slideRef.current) {
+          if (p.kind === "clear" && (p.page_id || currentPageId(p.page_number || 1)) === currentPageId()) {
             strokesByPageRef.current.set(currentPageId(), []);
             redraw();
           }
@@ -753,7 +761,8 @@ export default function Classroom() {
             const pageNumber = Number(p.page_number) || 1;
             const pageId = p.page_id || currentPageId(pageNumber);
             const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
-            if (committed && Number(committed._whiteboard_revision) > 0 && Number(committed._whiteboard_revision) >= Number(p.revision || 0)) return;
+            const committedRevision = Number(committed?._whiteboard_revision) || 0;
+            if (p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) : (committedRevision > 0 && committedRevision >= Number(p.revision || 0))) return;
             let live = liveRef.current.get(stroke.id);
             if (!live) {
               live = { ...stroke, points: [], page_number: pageNumber, page_id: pageId };
@@ -762,9 +771,9 @@ export default function Classroom() {
             const fresh = Array.isArray(stroke.points) ? stroke.points : [];
             if (fresh.length) {
               if (p.replace) {
-                const revision = Number(p.revision) || 0;
-                if (revision && revision <= (Number(live._whiteboard_revision) || 0)) return;
-                if (revision) live._whiteboard_revision = revision;
+                const revision = Number(p.preview_revision ?? p.revision) || 0;
+                if (revision && revision <= (Number(live._preview_revision) || 0)) return;
+                if (revision) live._preview_revision = revision;
                 live.points = fresh;
               } else if (["line", "arrow", "rect", "circle", "text"].includes(stroke.tool)) {
                 live.points = fresh.slice(-2);
@@ -772,7 +781,7 @@ export default function Classroom() {
                 const previous = live.points.length ? live.points[live.points.length - 1] : null;
                 live.points.push(...(previous ? fresh.filter((point) => point.x !== previous.x || point.y !== previous.y) : fresh));
               }
-              if (pageNumber === slideRef.current) redraw();
+              if (pageId === currentPageId()) redraw();
             }
             if (p.final) {
               // Keep the preview until the committed WebSocket action replaces it.
@@ -787,7 +796,7 @@ export default function Classroom() {
               const pageId = control.page_id || currentPageId(pageNumber);
               strokesByPageRef.current.set(pageId, []);
               liveRef.current.forEach((stroke, id) => { if (stroke.page_id === pageId || Number(stroke.page_number) === pageNumber) liveRef.current.delete(id); });
-              if (pageNumber === slideRef.current) redraw();
+              if (pageId === currentPageId()) redraw();
               setThumbnailVersion((version) => version + 1);
               return;
             }
@@ -861,7 +870,7 @@ export default function Classroom() {
               setSlides(next);
               slideRef.current = 1;
               setSlide(1);
-              strokesByPageRef.current = new Map(next.map((x) => [x.page_number, []]));
+              strokesByPageRef.current = new Map(next.map((x) => [x.page_id, []]));
               setTimeout(redraw, 0);
             }
             return;
