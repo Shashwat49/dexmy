@@ -267,7 +267,7 @@ export default function Classroom() {
         replace,
         revision: stroke._whiteboard_revision || Date.now(),
         preview_revision: ++whiteboardPreviewRevisionRef.current,
-        base_revision: Number(stroke._whiteboard_revision) || 0
+        base_revision: Number(stroke._whiteboard_base_revision ?? stroke._whiteboard_revision) || 0
       }
     };
     const encoded = encoder.encode(JSON.stringify(packet));
@@ -289,12 +289,13 @@ export default function Classroom() {
     if (pending?.id === stroke.id) {
       pending.points = replace ? [...points] : (isShape ? [points[0], points[points.length - 1]] : [...pending.points, ...points]);
       pending.stroke._whiteboard_revision = stroke._whiteboard_revision || Date.now();
+      pending.stroke._whiteboard_base_revision = Number(stroke._whiteboard_revision) || pending.stroke._whiteboard_base_revision || 0;
       pending.replace = replace;
       pending.final = final;
     } else {
       pendingLiveRef.current = {
         id: stroke.id,
-        stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, text: stroke.text, _whiteboard_revision: stroke._whiteboard_revision || Date.now() },
+        stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, text: stroke.text, _whiteboard_revision: stroke._whiteboard_revision || Date.now(), _whiteboard_base_revision: Number(stroke._whiteboard_revision) || 0 },
         points: replace ? [...points] : (isShape ? [points[0], points[points.length - 1]] : [...points]),
         replace,
         page_number: slideRef.current,
@@ -589,7 +590,7 @@ export default function Classroom() {
           if (p.action_id) { if (seenWhiteboardActionIdsRef.current.has(p.action_id)) return; seenWhiteboardActionIdsRef.current.add(p.action_id); if (seenWhiteboardActionIdsRef.current.size > 500) seenWhiteboardActionIdsRef.current.delete(seenWhiteboardActionIdsRef.current.values().next().value); }
           if (p.kind === "page" || p.kind === "slides" || p.kind === "pdf") return;
           if (p.kind === "stroke_delete" && p.stroke_id) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter(s => s.id !== p.stroke_id)); if (selectedStrokeRef.current === p.stroke_id) selectedStrokeRef.current = null; if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); }
-          if (p.kind === "stroke_update" && p.stroke) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || [], index = list.findIndex(s => s.id === p.stroke.id), existing = index >= 0 ? list[index] : null; const incomingRevision = Number(p.stroke._whiteboard_revision) || 0, existingRevision = Number(existing?._whiteboard_revision) || 0; if (!existing || incomingRevision >= existingRevision) { if (index >= 0) list[index] = p.stroke; else list.push(p.stroke); strokesByPageRef.current.set(pageId, list); committedRef.current.add(p.stroke.id); liveRef.current.delete(p.stroke.id); if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); } }
+          if (p.kind === "stroke_update" && p.stroke) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || [], index = list.findIndex(s => s.id === p.stroke.id), existing = index >= 0 ? list[index] : null; const incomingRevision = Number(p.stroke._whiteboard_revision) || 0, existingRevision = Number(existing?._whiteboard_revision) || 0; if (!existing || !incomingRevision || incomingRevision >= existingRevision) { if (index >= 0) list[index] = p.stroke; else list.push(p.stroke); strokesByPageRef.current.set(pageId, list); committedRef.current.add(p.stroke.id); liveRef.current.delete(p.stroke.id); if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); } }
           if (p.kind === "stroke" && p.stroke) {
             const pageNumber = Number(p.page_number) || 1; const pageId = p.page_id || currentPageId(pageNumber);
             const list = strokesByPageRef.current.get(pageId) || [];
