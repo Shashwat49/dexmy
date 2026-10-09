@@ -58,20 +58,11 @@ def teacher_class_students(
     current_user: User = Depends(require_role(UserRole.teacher)),
     db: Session = Depends(get_db),
 ):
-    """Return active student packages for students assigned to this teacher.
+    """Return all active students with an active package for class recording.
 
-    A student is considered associated with the teacher when they have a booking
-    assigned to the teacher or an existing Meet class record with the teacher.
-    This avoids exposing unrelated students' package details to teachers.
+    The selector is intentionally not limited to students previously assigned
+    to this teacher; teachers may need to record historical Meet classes.
     """
-    associated_student_ids = (
-        select(Booking.student_id).where(Booking.teacher_id == current_user.id)
-        .union(
-            select(ExternalClassRecord.student_id).where(
-                ExternalClassRecord.teacher_id == current_user.id
-            )
-        )
-    )
     rows = db.execute(
         select(StudentPackage, PackagePlan, User)
         .join(PackagePlan, PackagePlan.id == StudentPackage.package_plan_id)
@@ -80,32 +71,37 @@ def teacher_class_students(
             StudentPackage.status == "active",
             User.role == UserRole.student,
             User.is_active.is_(True),
-            StudentPackage.student_id.in_(associated_student_ids),
         )
         .order_by(User.full_name.asc(), StudentPackage.purchased_at.desc())
     ).all()
 
-    return [
-        ExternalStudentPackageRead(
-            id=package.id,
-            student_id=student.id,
-            student_name=student.full_name,
-            student_email=student.email,
-            total_classes=package.total_classes,
-            completed_classes=package.classes_used,
-            remaining_classes=(
-                package.total_classes
-                if package.is_unlimited
-                else max(0, package.total_classes - package.classes_used)
-            ),
-            status=package.status,
-            package_name=plan.name,
-            currency=plan.currency,
-            price=float(plan.price),
+    # Show each student once, choosing their most recently purchased active package.
+    result = []
+    seen_student_ids = set()
+    for package, plan, student in rows:
+        if student.id in seen_student_ids:
+            continue
+        seen_student_ids.add(student.id)
+        result.append(
+            ExternalStudentPackageRead(
+                id=package.id,
+                student_id=student.id,
+                student_name=student.full_name,
+                student_email=student.email,
+                total_classes=package.total_classes,
+                completed_classes=package.classes_used,
+                remaining_classes=(
+                    package.total_classes
+                    if package.is_unlimited
+                    else max(0, package.total_classes - package.classes_used)
+                ),
+                status=package.status,
+                package_name=plan.name,
+                currency=plan.currency,
+                price=float(plan.price),
+            )
         )
-        for package, plan, student in rows
-    ]
-
+    return result
 
 @router.get("/teacher", response_model=list[ExternalClassRecordRead])
 def teacher_records(
