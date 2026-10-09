@@ -392,7 +392,7 @@ export default function Classroom() {
     }
   };
   const undo = () => { if (!isTeacher) return; const list = currentStrokes(); if (!list.length) return; list.pop(); redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "undo", page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(payload); saveSnapshot(); };
-  const clearBoard = () => { if (!isTeacher) return; strokesByPageRef.current.set(currentPageId(), []); redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "clear", page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(payload); saveSnapshot(); };
+  const clearBoard = () => { if (!isTeacher) return; const pageId = currentPageId(), pageNumber = slideRef.current; strokesByPageRef.current.set(pageId, []); liveRef.current.forEach((stroke, id) => { if (stroke.page_id === pageId || Number(stroke.page_number) === pageNumber) liveRef.current.delete(id); }); redraw(); setThumbnailVersion((version) => version + 1); publishControl({ kind: "whiteboard_clear", page_id: pageId, page_number: pageNumber }); const payload = { kind: "clear", page_number: pageNumber, page_id: pageId }; queueWhiteboardAction(payload); saveSnapshot(); };
   const uploadChatFile = async (file) => { if (!file) return; if (file.size > 20 * 1024 * 1024) return setNotice("Chat files are limited to 20 MB."); try { const form = new FormData(); form.append("file", file); const { data } = await api.post(`/classroom/sessions/${sessionId}/chat-file`, form); send({ type: "chat", file_url: data.file_url, file_name: data.file_name, message_text: "" }); setChat((items) => [...items, { mine: true, file_url: data.file_url, file_name: data.file_name }]); } catch (error) { setNotice(error.response?.data?.detail || "Upload failed."); } };
   const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant || mediaBusyRef.current) return; if (kind === "mic" && !isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); if (kind === "camera" && !isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); if (kind === "screen" && !isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); mediaBusyRef.current = true; try { if (kind === "mic") { const publication = participant.getTrackPublication?.(Track.Source.Microphone); const next = !(publication?.track && !publication.isMuted); await participant.setMicrophoneEnabled(next, selectedMicrophoneId ? { deviceId: selectedMicrophoneId } : undefined); micStateRef.current = next; setMic(next); } else if (kind === "camera") { const publication = participant.getTrackPublication?.(Track.Source.Camera); const next = !(publication?.track && !publication.isMuted); await participant.setCameraEnabled(next, selectedCameraId ? { deviceId: selectedCameraId } : undefined); cameraStateRef.current = next; setCamera(next); } else if (kind === "screen") { const publication = participant.getTrackPublication?.(Track.Source.ScreenShare); const next = !(publication?.track && !publication.isMuted); await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" }); setScreen(next); } } catch (error) { if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") setNotice("Camera/microphone access was blocked. Please allow the device permission in your browser and try again."); else setNotice(error?.message || "Could not change media."); } finally { mediaBusyRef.current = false; } };
   useEffect(() => {
@@ -759,6 +759,16 @@ export default function Classroom() {
             return;
           }
           if (msg.type === "classroom_control" && topic === CONTROL_TOPIC) {
+            const control = msg.payload || {};
+            if (control.kind === "whiteboard_clear") {
+              const pageNumber = Number(control.page_number) || 1;
+              const pageId = control.page_id || currentPageId(pageNumber);
+              strokesByPageRef.current.set(pageId, []);
+              liveRef.current.forEach((stroke, id) => { if (stroke.page_id === pageId || Number(stroke.page_number) === pageNumber) liveRef.current.delete(id); });
+              if (pageNumber === slideRef.current) redraw();
+              setThumbnailVersion((version) => version + 1);
+              return;
+            }
             const p = msg.payload || {};
             if (p.kind === "grid") {
               setGrid(Boolean(p.enabled));
