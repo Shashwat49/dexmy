@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -21,6 +23,16 @@ from app.services.storage_service import save_base64_file, get_presigned_url
 from app.websockets.connection_manager import manager
 
 router = APIRouter()
+
+
+async def _relay_whiteboard_event(peer, payload):
+    if not peer:
+        return
+    try:
+        await peer.send_json({"type": "whiteboard_event", "payload": payload})
+    except Exception as exc:
+        if os.getenv("DEXMY_WHITEBOARD_DEBUG", "").lower() in {"1", "true", "yes", "on"}:
+            logging.getLogger(__name__).debug("Whiteboard relay failed: %r", exc)
 
 
 async def _heartbeat(websocket: WebSocket) -> None:
@@ -315,6 +327,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             ).first()
             if already_processed:
                 await websocket.send_json({"type": "whiteboard_event_ack", "action_id": str(action_id)})
+                await _relay_whiteboard_event(peer, payload)
                 return
         if kind in {"stroke", "stroke_update", "stroke_delete", "undo", "clear"}:
             page_number = max(1, int(payload.get("page_number", 1) or 1))
@@ -346,6 +359,12 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     strokes.append(stroke)
             elif kind == "stroke_update" and isinstance(stroke, dict) and stroke.get("id"):
                 index = next((i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == stroke["id"]), None)
+                previous_revision = strokes[index].get("_whiteboard_revision", 0) if index is not None else 0
+                try:
+                    previous_revision = int(previous_revision or 0)
+                except (TypeError, ValueError):
+                    previous_revision = 0
+                stroke["_whiteboard_revision"] = previous_revision + 1
                 if index is None:
                     strokes.append(stroke)
                 else:
@@ -367,13 +386,9 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 page_number=page_number,
                 page_id=page.id,
             ))
-            # Broadcast the committed whiteboard action immediately. Persistence
-            # remains authoritative, but database latency must never delay the
-            # other participant's classroom view.
             payload["page_id"] = str(page.id)
-            if peer:
-                await peer.send_json({"type": "whiteboard_event", "payload": payload})
             db.commit()
+            await _relay_whiteboard_event(peer, payload)
             if action_id:
                 await websocket.send_json({"type": "whiteboard_event_ack", "action_id": str(action_id)})
     elif msg_type == "whiteboard_live":
