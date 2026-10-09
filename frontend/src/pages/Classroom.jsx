@@ -281,6 +281,7 @@ export default function Classroom() {
     const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool);
     if (pending?.id === stroke.id) {
       pending.points = replace ? [...points] : (isShape ? [points[0], points[points.length - 1]] : [...pending.points, ...points]);
+      pending.stroke._whiteboard_revision = stroke._whiteboard_revision || Date.now();
       pending.replace = replace;
       pending.final = final;
     } else {
