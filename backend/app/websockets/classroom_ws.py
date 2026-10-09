@@ -481,7 +481,11 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 except (TypeError, ValueError):
                     continue
                 if committed_revision > incoming_revision:
-                    stroke["_whiteboard_revision"] = committed_revision
+                    # The stored stroke is a newer committed edit. Preserve its
+                    # complete geometry as well as its revision; copying only
+                    # the revision onto stale incoming coordinates lets a
+                    # delayed snapshot resurrect the old position.
+                    incoming_strokes[incoming_strokes.index(stroke)] = dict(committed)
         db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=snapshot_data,image_url=image_url,page_number=page_number,page_id=page.id))
         db.commit()
         await websocket.send_json({"type":"snapshot_saved","page_number":page_number,"page_id":str(page.id)})
