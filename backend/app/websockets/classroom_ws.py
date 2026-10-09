@@ -460,7 +460,29 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         elif data.get("image_base64"):
             image_url=save_base64_file(data["image_base64"],f"wb_{session_id}_p{page.id}","png")
             page.image_url=image_url
-        db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=data.get("canvas_json") or {},image_url=image_url,page_number=page_number,page_id=page.id))
+        snapshot_data = data.get("canvas_json") or {}
+        incoming_strokes = snapshot_data.get("strokes") if isinstance(snapshot_data, dict) else None
+        existing_strokes = ((existing.snapshot_data or {}).get("strokes") or []) if existing else []
+        if isinstance(incoming_strokes, list) and isinstance(existing_strokes, list):
+            existing_by_id = {
+                item.get("id"): item
+                for item in existing_strokes
+                if isinstance(item, dict) and item.get("id")
+            }
+            for stroke in incoming_strokes:
+                if not isinstance(stroke, dict) or not stroke.get("id"):
+                    continue
+                committed = existing_by_id.get(stroke["id"])
+                if not committed:
+                    continue
+                try:
+                    committed_revision = int(committed.get("_whiteboard_revision") or 0)
+                    incoming_revision = int(stroke.get("_whiteboard_revision") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if committed_revision > incoming_revision:
+                    stroke["_whiteboard_revision"] = committed_revision
+        db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=snapshot_data,image_url=image_url,page_number=page_number,page_id=page.id))
         db.commit()
         await websocket.send_json({"type":"snapshot_saved","page_number":page_number,"page_id":str(page.id)})
     elif msg_type == "remove_pdf" and is_teacher:
