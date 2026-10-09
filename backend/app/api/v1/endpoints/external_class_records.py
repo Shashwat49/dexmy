@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, aliased
 
 from app.core.dependencies import require_role
 from app.db.session import get_db
+from app.models.booking import Booking
 from app.models.external_class_record import ExternalClassRecord
 from app.models.package import PackagePlan, StudentPackage
 from app.models.user import User, UserRole
@@ -50,6 +51,60 @@ def _record_read_with_users(record, student, teacher, admin):
         created_by_admin_name=admin.full_name if admin else None,
         created_at=record.created_at,
     )
+
+
+@router.get("/teacher/students", response_model=list[ExternalStudentPackageRead])
+def teacher_class_students(
+    current_user: User = Depends(require_role(UserRole.teacher)),
+    db: Session = Depends(get_db),
+):
+    """Return active student packages for students assigned to this teacher.
+
+    A student is considered associated with the teacher when they have a booking
+    assigned to the teacher or an existing Meet class record with the teacher.
+    This avoids exposing unrelated students' package details to teachers.
+    """
+    associated_student_ids = (
+        select(Booking.student_id).where(Booking.teacher_id == current_user.id)
+        .union(
+            select(ExternalClassRecord.student_id).where(
+                ExternalClassRecord.teacher_id == current_user.id
+            )
+        )
+    )
+    rows = db.execute(
+        select(StudentPackage, PackagePlan, User)
+        .join(PackagePlan, PackagePlan.id == StudentPackage.package_plan_id)
+        .join(User, User.id == StudentPackage.student_id)
+        .where(
+            StudentPackage.status == "active",
+            User.role == UserRole.student,
+            User.is_active.is_(True),
+            StudentPackage.student_id.in_(associated_student_ids),
+        )
+        .order_by(User.full_name.asc(), StudentPackage.purchased_at.desc())
+    ).all()
+
+    return [
+        ExternalStudentPackageRead(
+            id=package.id,
+            student_id=student.id,
+            student_name=student.full_name,
+            student_email=student.email,
+            total_classes=package.total_classes,
+            completed_classes=package.classes_used,
+            remaining_classes=(
+                package.total_classes
+                if package.is_unlimited
+                else max(0, package.total_classes - package.classes_used)
+            ),
+            status=package.status,
+            package_name=plan.name,
+            currency=plan.currency,
+            price=float(plan.price),
+        )
+        for package, plan, student in rows
+    ]
 
 
 @router.get("/teacher", response_model=list[ExternalClassRecordRead])
