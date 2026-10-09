@@ -278,13 +278,13 @@ export default function Classroom() {
     const pending = pendingLiveRef.current;
     const isShape = ["line", "arrow", "rect", "circle", "text"].includes(stroke.tool);
     if (pending?.id === stroke.id) {
-      pending.points = isShape ? points.slice(-2) : [...pending.points, ...points];
+      pending.points = isShape ? [points[0], points[points.length - 1]] : [...pending.points, ...points];
       pending.final = final;
     } else {
       pendingLiveRef.current = {
         id: stroke.id,
         stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, text: stroke.text },
-        points: [...points],
+        points: isShape ? [points[0], points[points.length - 1]] : [...points],
         page_number: slideRef.current,
         page_id: currentPageId(),
         final
