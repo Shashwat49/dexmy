@@ -448,13 +448,26 @@ export default function Classroom() {
               liveRef.current.delete(incoming.id);
               if (pageId === currentPageId()) redraw();
               setThumbnailVersion((version) => version + 1);
-            } else if (!revision || revision >= existingRevision) {
+            } else if (!revision || revision > existingRevision) {
               list[index] = incoming;
               strokesByPageRef.current.set(pageId, list);
               committedRef.current.add(incoming.id);
               liveRef.current.delete(incoming.id);
               if (pageId === currentPageId()) redraw();
               setThumbnailVersion((version) => version + 1);
+            } else if (revision > 0 && revision === existingRevision) {
+              // Same revision means the geometry is already current locally.
+              // Refresh only the revision metadata so a late ack cannot snap
+              // an object back while the next drag is already in progress.
+              list[index] = {
+                ...list[index],
+                _whiteboard_revision: revision,
+                _whiteboard_base_revision: Math.max(
+                  Number(list[index]._whiteboard_base_revision) || 0,
+                  revision,
+                ),
+              };
+              strokesByPageRef.current.set(pageId, list);
             }
           }
           if (actionId) {
