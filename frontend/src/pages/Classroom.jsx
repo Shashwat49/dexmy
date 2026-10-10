@@ -683,12 +683,25 @@ export default function Classroom() {
             const existing = index >= 0 ? list[index] : null;
             const incomingRevision = Number(p.stroke._whiteboard_revision) || 0;
             const existingRevision = Number(existing?._whiteboard_revision) || 0;
-            const applyIncoming = !existing || (incomingRevision > 0 ? incomingRevision > existingRevision : existingRevision === 0);
+            const incomingGeneration = Number(p.stroke._whiteboard_edit_generation) || 0;
+            const existingGeneration = Number(existing?._whiteboard_edit_generation) || 0;
+            const incomingEditor = String(p.stroke._whiteboard_editor_id || "");
+            const existingEditor = String(existing?._whiteboard_editor_id || "");
+            const sameEditorOrLegacyUpdate = incomingEditor === existingEditor || !incomingEditor || !existingEditor;
+            // A server revision can be newer even when its payload is an older,
+            // delayed drag commit. Prefer the already-present geometry when its
+            // edit generation proves that it came from a newer edit.
+            const preserveNewerCommittedGeometry = !!existing && sameEditorOrLegacyUpdate &&
+              existingGeneration > incomingGeneration;
+            const applyIncoming = !existing || (
+              !preserveNewerCommittedGeometry &&
+              (incomingRevision > 0 ? incomingRevision > existingRevision : existingRevision === 0)
+            );
             const activeLive = liveRef.current.get(p.stroke.id);
             const preserveNewerPreview = !!activeLive &&
               String(activeLive._whiteboard_editor_id || "") === String(p.stroke._whiteboard_editor_id || "") &&
-              Number(activeLive._whiteboard_edit_generation || 0) > Number(p.stroke._whiteboard_edit_generation || 0);
-            whiteboardTrace("ws-committed-event", { transport: "websocket", kind: p.kind, actionId: p.action_id || null, pageId, incoming: whiteboardGeometry(p.stroke), current: whiteboardGeometry(existing), incomingRevision, existingRevision, preserveNewerPreview, decision: !applyIncoming ? "ignore-equal-or-stale-revision" : preserveNewerPreview ? "apply-commit-preserve-newer-live-preview" : "apply-committed-geometry" });
+              Number(activeLive._whiteboard_edit_generation || 0) > incomingGeneration;
+            whiteboardTrace("ws-committed-event", { transport: "websocket", kind: p.kind, actionId: p.action_id || null, pageId, incoming: whiteboardGeometry(p.stroke), current: whiteboardGeometry(existing), incomingRevision, existingRevision, incomingGeneration, existingGeneration, incomingEditor: incomingEditor || null, existingEditor: existingEditor || null, preserveNewerCommittedGeometry, preserveNewerPreview, decision: preserveNewerCommittedGeometry ? "ignore-older-edit-generation" : !applyIncoming ? "ignore-equal-or-stale-revision" : preserveNewerPreview ? "apply-commit-preserve-newer-live-preview" : "apply-committed-geometry" });
             if (applyIncoming) {
               if (index >= 0) list[index] = p.stroke; else list.push(p.stroke);
               strokesByPageRef.current.set(pageId, list);
