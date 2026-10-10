@@ -431,6 +431,32 @@ export default function Classroom() {
         if (msg.type === "heartbeat") return;
         if (msg.type === "whiteboard_event_ack") {
           const actionId = msg.action_id;
+          const canonical = msg.payload;
+          if (canonical?.stroke?.id && ["stroke", "stroke_update"].includes(canonical.kind)) {
+            const pageNumber = Number(canonical.page_number) || 1;
+            const pageId = canonical.page_id || currentPageId(pageNumber);
+            const incoming = { ...canonical.stroke };
+            const revision = Number(incoming._whiteboard_revision) || 0;
+            if (revision > 0) incoming._whiteboard_base_revision = revision;
+            const list = strokesByPageRef.current.get(pageId) || [];
+            const index = list.findIndex((stroke) => stroke.id === incoming.id);
+            const existingRevision = Number(index >= 0 ? list[index]._whiteboard_revision : 0) || 0;
+            if (index < 0) {
+              list.push(incoming);
+              strokesByPageRef.current.set(pageId, list);
+              committedRef.current.add(incoming.id);
+              liveRef.current.delete(incoming.id);
+              if (pageId === currentPageId()) redraw();
+              setThumbnailVersion((version) => version + 1);
+            } else if (!revision || revision >= existingRevision) {
+              list[index] = incoming;
+              strokesByPageRef.current.set(pageId, list);
+              committedRef.current.add(incoming.id);
+              liveRef.current.delete(incoming.id);
+              if (pageId === currentPageId()) redraw();
+              setThumbnailVersion((version) => version + 1);
+            }
+          }
           if (actionId) {
             whiteboardQueueRef.current.delete(actionId);
             whiteboardSentOnSocketRef.current.delete(actionId);
