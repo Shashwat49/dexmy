@@ -37,6 +37,15 @@ const CONTROL_TOPIC = "dexmy-classroom-control";
 const LIVE_TOPIC = "dexmy-whiteboard-live";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const whiteboardGeometry = (stroke) => {
+  if (!stroke) return null;
+  const points = Array.isArray(stroke.points) ? stroke.points : [];
+  return { id: stroke.id, tool: stroke.tool, pointCount: points.length, first: points[0] || null, last: points.length ? points[points.length - 1] : null, revision: Number(stroke._whiteboard_revision) || 0, baseRevision: Number(stroke._whiteboard_base_revision) || 0 };
+};
+const whiteboardTrace = (event, details = {}) => {
+  if (typeof window === "undefined" || new URLSearchParams(window.location.search).get("debugWhiteboard") !== "1") return;
+  console.debug("[Dexmy whiteboard trace]", { at: Date.now(), event, ...details });
+};
 const TOOLS = [["select", "Select"], ["pen", "Pen"], ["highlighter", "Highlight"], ["line", "Line"], ["arrow", "Arrow"], ["rect", "Rectangle"], ["circle", "Circle"], ["text", "Text"], ["eraser", "Eraser"]];
 const ToolIcon = ({ id, size = 17 }) => {
   const props = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
@@ -279,6 +288,7 @@ export default function Classroom() {
         base_revision: Number(stroke._whiteboard_base_revision ?? stroke._whiteboard_revision) || 0
       }
     };
+    whiteboardTrace("preview-send", { transport: "livekit", replace, final, pageId: packet.payload.page_id, previewRevision: packet.payload.preview_revision, baseRevision: packet.payload.base_revision, stroke: whiteboardGeometry(stroke), packetPoints: points.length ? { first: points[0], last: points[points.length - 1], count: points.length } : null });
     const encoded = encoder.encode(JSON.stringify(packet));
     if (encoded.byteLength > 12 * 1024) {
       if (import.meta.env.VITE_WHITEBOARD_DEBUG === "1") console.debug("Skipped oversized whiteboard preview", encoded.byteLength);
@@ -338,7 +348,7 @@ export default function Classroom() {
   }, [flushLive]);
   const point = (event, allowOutside = false) => { const r = canvasRef.current.getBoundingClientRect(); if (!r.width || !r.height) return null; const boardX = (event.clientX - r.left) * W / r.width; const boardY = (event.clientY - r.top) * H / r.height; const content = getSlideContentRect(); if (!allowOutside && (boardX < content.x || boardX > content.x + content.width || boardY < content.y || boardY > content.y + content.height)) return null; return { x: clamp((boardX - content.x) * W / content.width, 0, W), y: clamp((boardY - content.y) * H / content.height, 0, H) }; };
   const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (!p) return; if (tool === "text") { const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p)); if (hit) { selectedStrokeRef.current = hit.id; setTextDraft(hit.text || ""); setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id }); } else { setTextDraft(""); setTextModal({ x: p.x, y: p.y, strokeId: null }); } redraw(); return; } if (tool === "eraser") { const list = currentStrokes(); const hit = [...list].reverse().find(s => strokeHit(s, p)); if (!hit) return; strokesByPageRef.current.set(currentPageId(), list.filter(s => s.id !== hit.id)); if (selectedStrokeRef.current === hit.id) selectedStrokeRef.current = null; const action = { kind: "stroke_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); redraw(); setThumbnailVersion(v => v + 1); saveSnapshot(); return; } if (tool === "select") { const list = currentStrokes(), selected = list.find(s => s.id === selectedStrokeRef.current), bounds = strokeBounds(selected); if (bounds && p.x >= bounds.maxX - 10 && p.x <= bounds.maxX + 24 && p.y >= bounds.maxY - 10 && p.y <= bounds.maxY + 24) { selectInteractionRef.current = { mode: "resize", start: p, original: JSON.parse(JSON.stringify(selected)) }; } else { const hit = [...list].reverse().find(s => strokeHit(s, p)); selectedStrokeRef.current = hit?.id || null; selectInteractionRef.current = hit ? { mode: hit.tool === "text" ? "maybe-text" : "move", start: p, original: JSON.parse(JSON.stringify(hit)) } : null; } canvasRef.current.setPointerCapture(event.pointerId); redraw(); return; } if (!DRAW_TOOLS.has(tool)) return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p] }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
-  const onPointerMove = (event) => { const interaction = selectInteractionRef.current; if (interaction) { const p = point(event, true); if (!p) return; if (interaction.mode === "maybe-text") { if (Math.hypot(p.x - interaction.start.x, p.y - interaction.start.y) < 6) return; interaction.mode = "move"; } const list = currentStrokes(), index = list.findIndex(s => s.id === interaction.original.id); if (index < 0) return; list[index] = transformStroke(interaction.original, interaction.start, p, interaction.mode); localStrokeEditGenerationRef.current.set(list[index].id, (localStrokeEditGenerationRef.current.get(list[index].id) || 0) + 1); queueLive(list[index], list[index].points, false, true); redraw(); return; } const d = drawRef.current; if (!d) return; const nextPoint = point(event, true); if (!nextPoint) return; d.points.push(nextPoint); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
+  const onPointerMove = (event) => { const interaction = selectInteractionRef.current; if (interaction) { const p = point(event, true); if (!p) return; if (interaction.mode === "maybe-text") { if (Math.hypot(p.x - interaction.start.x, p.y - interaction.start.y) < 6) return; interaction.mode = "move"; } const list = currentStrokes(), index = list.findIndex(s => s.id === interaction.original.id); if (index < 0) return; const before = whiteboardGeometry(list[index]); list[index] = transformStroke(interaction.original, interaction.start, p, interaction.mode); const generation = (localStrokeEditGenerationRef.current.get(list[index].id) || 0) + 1; localStrokeEditGenerationRef.current.set(list[index].id, generation); whiteboardTrace("local-transform", { mode: interaction.mode, pageId: currentPageId(), generation, before, after: whiteboardGeometry(list[index]) }); queueLive(list[index], list[index].points, false, true); redraw(); return; } const d = drawRef.current; if (!d) return; const nextPoint = point(event, true); if (!nextPoint) return; d.points.push(nextPoint); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
   const onPointerUp = (event) => { canvasRef.current?.releasePointerCapture?.(event.pointerId); const interaction = selectInteractionRef.current; if (interaction) { selectInteractionRef.current = null; if (interaction.mode === "maybe-text") { setTextDraft(interaction.original.text || ""); setTextModal({ x: interaction.original.points[0].x, y: interaction.original.points[0].y, strokeId: interaction.original.id }); redraw(); return; } const list = currentStrokes(), index = list.findIndex(s => s.id === interaction.original.id); if (index >= 0) { const updated = { ...list[index], _whiteboard_base_revision: Number(list[index]._whiteboard_revision) || 0 }; list[index] = updated; queueLive(updated, updated.points, true, true); flushLive(true); strokesByPageRef.current.set(currentPageId(), list); liveRef.current.delete(updated.id); committedRef.current.add(updated.id); const action = { kind: "stroke_update", stroke: updated, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); setThumbnailVersion(v => v + 1); saveSnapshot(); } redraw(); return; } const d = drawRef.current; drawRef.current = null; if (!d) return; const pageNumber = slideRef.current; const pageId = currentPageId(pageNumber); if (!["pen", "highlighter", "eraser"].includes(d.tool)) { if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0); queueLive(d, d.points, true); flushLive(true); } else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); drawBaseRef.current = null; queueWhiteboardAction({ kind: "stroke", stroke: d, page_number: pageNumber, page_id: pageId }); setThumbnailVersion((version) => version + 1); saveSnapshot(); };
   const saveTextModal = () => { if (!textModal) return; const text = textDraft.trim(); if (!text) { setTextModal(null); setTextDraft(""); redraw(); return; } const list = currentStrokes(); let stroke; if (textModal.strokeId) { const index = list.findIndex((item) => item.id === textModal.strokeId); if (index >= 0) { stroke = { ...list[index], text }; list[index] = stroke; } } if (!stroke) { stroke = { id: newId(), tool: "text", color, width, text, points: [{ x: textModal.x, y: textModal.y }] }; list.push(stroke); } selectedStrokeRef.current = stroke.id; const action = { kind: textModal.strokeId ? "stroke_update" : "stroke", stroke, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); setTextModal(null); setTextDraft(""); setThumbnailVersion((version) => version + 1); redraw(); saveSnapshot(); };
   const changeSlide = (target) => { if (!isTeacher) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(currentPageId(next), strokesByPageRef.current.get(currentPageId(next)) || []); publishControl({ kind: "page", page_number: next, page_id: currentPageId(next) }); };
@@ -453,6 +463,7 @@ export default function Classroom() {
             const existingRevision = Number(index >= 0 ? list[index]._whiteboard_revision : 0) || 0;
             const hasNewerLocalEdit = index >= 0 && actionEdit?.strokeId === incoming.id &&
               (localStrokeEditGenerationRef.current.get(incoming.id) || 0) > actionEdit.generation;
+            whiteboardTrace("ws-ack-received", { actionId, kind: canonical.kind, pageId, incoming: whiteboardGeometry(incoming), current: index >= 0 ? whiteboardGeometry(list[index]) : null, incomingRevision: revision, existingRevision, hasNewerLocalEdit, decision: index < 0 ? "insert" : hasNewerLocalEdit ? "keep-newer-local-geometry" : (!revision || revision > existingRevision) ? "apply-ack-geometry" : revision === existingRevision ? "keep-same-revision-geometry" : "keep-current-geometry" });
             if (index < 0) {
               list.push(incoming);
               strokesByPageRef.current.set(pageId, list);
@@ -617,7 +628,10 @@ export default function Classroom() {
           const pageId = p.page_id || currentPageId(pageNumber);
           const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
           const committedRevision = Number(committed?._whiteboard_revision) || 0;
-          if (p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) : (committedRevision > 0 && committedRevision >= Number(p.revision || 0))) return;
+          const priorLive = liveRef.current.get(stroke.id);
+          const staleAgainstCommit = p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) : (committedRevision > 0 && committedRevision >= Number(p.revision || 0));
+          whiteboardTrace("ws-preview-received", { transport: "websocket", pageId, replace: !!p.replace, final: !!p.final, previewRevision: Number(p.preview_revision) || 0, packetRevision: Number(p.revision) || 0, baseRevision: Number(p.base_revision) || 0, committedRevision, incoming: whiteboardGeometry(stroke), currentCommitted: whiteboardGeometry(committed), currentLive: whiteboardGeometry(priorLive), decision: staleAgainstCommit ? "ignore-stale-against-commit" : "consider-preview" });
+          if (staleAgainstCommit) return;
           let live = liveRef.current.get(stroke.id);
           if (!live) {
             live = {
@@ -636,9 +650,13 @@ export default function Classroom() {
           if (fresh.length) {
             if (p.replace) {
               const revision = Number(p.preview_revision ?? p.revision) || 0;
-              if (revision && revision <= (Number(live._preview_revision) || 0)) return;
+              if (revision && revision <= (Number(live._preview_revision) || 0)) {
+                whiteboardTrace("live-preview-rejected-by-sequence", { transport: "websocket-preview-handler", strokeId: stroke.id, incomingPreviewRevision: revision, currentPreviewRevision: Number(live._preview_revision) || 0, incoming: whiteboardGeometry(stroke), currentLive: whiteboardGeometry(live) });
+                return;
+              }
               if (revision) live._preview_revision = revision;
               live.points = fresh;
+              whiteboardTrace("live-preview-applied", { transport: "websocket-preview-handler", strokeId: stroke.id, previewRevision: revision, incoming: whiteboardGeometry(stroke), resultingLive: whiteboardGeometry(live) });
             } else if (["line", "arrow", "rect", "circle", "text"].includes(stroke.tool)) {
               live.points = fresh.slice(-2);
             } else {
@@ -654,7 +672,24 @@ export default function Classroom() {
           if (p.action_id) { if (seenWhiteboardActionIdsRef.current.has(p.action_id)) return; seenWhiteboardActionIdsRef.current.add(p.action_id); if (seenWhiteboardActionIdsRef.current.size > 500) seenWhiteboardActionIdsRef.current.delete(seenWhiteboardActionIdsRef.current.values().next().value); }
           if (p.kind === "page" || p.kind === "slides" || p.kind === "pdf") return;
           if (p.kind === "stroke_delete" && p.stroke_id) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter(s => s.id !== p.stroke_id)); if (selectedStrokeRef.current === p.stroke_id) selectedStrokeRef.current = null; if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); }
-          if (p.kind === "stroke_update" && p.stroke) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || [], index = list.findIndex(s => s.id === p.stroke.id), existing = index >= 0 ? list[index] : null; const incomingRevision = Number(p.stroke._whiteboard_revision) || 0, existingRevision = Number(existing?._whiteboard_revision) || 0; if (!existing || (incomingRevision > 0 ? incomingRevision > existingRevision : existingRevision === 0)) { if (index >= 0) list[index] = p.stroke; else list.push(p.stroke); strokesByPageRef.current.set(pageId, list); committedRef.current.add(p.stroke.id); liveRef.current.delete(p.stroke.id); if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); } }
+          if (p.kind === "stroke_update" && p.stroke) {
+            const pageId = p.page_id || currentPageId(p.page_number || 1);
+            const list = strokesByPageRef.current.get(pageId) || [];
+            const index = list.findIndex((s) => s.id === p.stroke.id);
+            const existing = index >= 0 ? list[index] : null;
+            const incomingRevision = Number(p.stroke._whiteboard_revision) || 0;
+            const existingRevision = Number(existing?._whiteboard_revision) || 0;
+            const applyIncoming = !existing || (incomingRevision > 0 ? incomingRevision > existingRevision : existingRevision === 0);
+            whiteboardTrace("ws-committed-event", { transport: "websocket", kind: p.kind, actionId: p.action_id || null, pageId, incoming: whiteboardGeometry(p.stroke), current: whiteboardGeometry(existing), incomingRevision, existingRevision, decision: applyIncoming ? "apply-committed-geometry" : "ignore-equal-or-stale-revision" });
+            if (applyIncoming) {
+              if (index >= 0) list[index] = p.stroke; else list.push(p.stroke);
+              strokesByPageRef.current.set(pageId, list);
+              committedRef.current.add(p.stroke.id);
+              liveRef.current.delete(p.stroke.id);
+              if (pageId === currentPageId()) redraw();
+              setThumbnailVersion(v => v + 1);
+            }
+          }
           if (p.kind === "stroke" && p.stroke) {
             const pageNumber = Number(p.page_number) || 1; const pageId = p.page_id || currentPageId(pageNumber);
             const list = strokesByPageRef.current.get(pageId) || [];
@@ -827,7 +862,10 @@ export default function Classroom() {
             const pageId = p.page_id || currentPageId(pageNumber);
             const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
             const committedRevision = Number(committed?._whiteboard_revision) || 0;
-            if (p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) : (committedRevision > 0 && committedRevision >= Number(p.revision || 0))) return;
+            const priorLive = liveRef.current.get(stroke.id);
+            const staleAgainstCommit = p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) : (committedRevision > 0 && committedRevision >= Number(p.revision || 0));
+            whiteboardTrace("livekit-preview-received", { transport: "livekit", sender: participant.identity || null, pageId, replace: !!p.replace, final: !!p.final, previewRevision: Number(p.preview_revision) || 0, packetRevision: Number(p.revision) || 0, baseRevision: Number(p.base_revision) || 0, committedRevision, incoming: whiteboardGeometry(stroke), currentCommitted: whiteboardGeometry(committed), currentLive: whiteboardGeometry(priorLive), decision: staleAgainstCommit ? "ignore-stale-against-commit" : "consider-preview" });
+            if (staleAgainstCommit) return;
             let live = liveRef.current.get(stroke.id);
             if (!live) {
               live = { ...stroke, points: [], page_number: pageNumber, page_id: pageId };
@@ -837,9 +875,13 @@ export default function Classroom() {
             if (fresh.length) {
               if (p.replace) {
                 const revision = Number(p.preview_revision ?? p.revision) || 0;
-                if (revision && revision <= (Number(live._preview_revision) || 0)) return;
+                if (revision && revision <= (Number(live._preview_revision) || 0)) {
+                  whiteboardTrace("live-preview-rejected-by-sequence", { transport: "livekit-preview-handler", strokeId: stroke.id, incomingPreviewRevision: revision, currentPreviewRevision: Number(live._preview_revision) || 0, incoming: whiteboardGeometry(stroke), currentLive: whiteboardGeometry(live) });
+                  return;
+                }
                 if (revision) live._preview_revision = revision;
                 live.points = fresh;
+                whiteboardTrace("live-preview-applied", { transport: "livekit-preview-handler", strokeId: stroke.id, previewRevision: revision, incoming: whiteboardGeometry(stroke), resultingLive: whiteboardGeometry(live) });
               } else if (["line", "arrow", "rect", "circle", "text"].includes(stroke.tool)) {
                 live.points = fresh.slice(-2);
               } else {
