@@ -430,15 +430,15 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             ))
             payload["page_id"] = str(page.id)
             db.commit()
-            await _relay_whiteboard_event(peer, payload)
             if action_id:
-                # Return the canonical committed object/revision to the sender
-                # as well as relaying it to the peer.
+                # Return the canonical committed object/revision immediately so
+                # the sender can base the next live preview on the new revision.
                 await websocket.send_json({
                     "type": "whiteboard_event_ack",
                     "action_id": str(action_id),
                     "payload": payload,
                 })
+            await _relay_whiteboard_event(peer, payload)
     elif msg_type == "whiteboard_live":
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
