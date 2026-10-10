@@ -296,8 +296,13 @@ export default function Classroom() {
       if (import.meta.env.VITE_WHITEBOARD_DEBUG === "1") console.debug("Skipped oversized whiteboard preview", encoded.byteLength);
       return;
     }
+    // While a shape is being dragged, intermediate replacement previews are
+    // disposable: prefer the newest position over queueing every old position.
+    // Keep the final preview and all non-replacement drawing previews reliable.
+    const reliablePreview = final || !replace;
+    whiteboardTrace("preview-delivery-mode", { strokeId: stroke.id, final, replace, reliable: reliablePreview });
     participant.publishData(encoded, {
-      reliable: true,
+      reliable: reliablePreview,
       topic: LIVE_TOPIC
     }).catch((error) => {
       if (import.meta.env.VITE_WHITEBOARD_DEBUG === "1") console.debug("Whiteboard preview publish failed", error);
