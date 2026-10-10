@@ -422,9 +422,13 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                         incoming_generation = current_generation = 0
                     incoming_editor = str(stroke.get("_whiteboard_editor_id") or "")
                     current_editor = str(current_stroke.get("_whiteboard_editor_id") or "")
+                    same_editor_or_legacy_update = (
+                        incoming_editor == current_editor
+                        or not incoming_editor
+                        or not current_editor
+                    )
                     if (
-                        incoming_editor
-                        and incoming_editor == current_editor
+                        same_editor_or_legacy_update
                         and incoming_generation < current_generation
                     ):
                         # Record the action idempotently without changing the
