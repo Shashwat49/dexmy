@@ -155,6 +155,9 @@ export default function Classroom() {
   const whiteboardStateInitializedRef = useRef(false);
   const whiteboardQueueRef = useRef(new Map());
   const whiteboardSentOnSocketRef = useRef(new Set());
+  // Track local edits so a delayed acknowledgement cannot roll a newer drag back.
+  const localStrokeEditGenerationRef = useRef(new Map());
+  const whiteboardActionEditVersionRef = useRef(new Map());
   const selectedStrokeRef = useRef(null), selectInteractionRef = useRef(null), seenWhiteboardActionIdsRef = useRef(new Set());
   const micStateRef = useRef(false);
   const cameraStateRef = useRef(false);
@@ -226,6 +229,12 @@ export default function Classroom() {
   const queueWhiteboardAction = useCallback((payload) => {
     const action = { ...payload, action_id: payload.action_id || newId() };
     whiteboardQueueRef.current.set(action.action_id, action);
+    if (["stroke", "stroke_update"].includes(action.kind) && action.stroke?.id) {
+      whiteboardActionEditVersionRef.current.set(action.action_id, {
+        strokeId: action.stroke.id,
+        generation: localStrokeEditGenerationRef.current.get(action.stroke.id) || 0,
+      });
+    }
     sendWhiteboardQueue();
     return action;
   }, [sendWhiteboardQueue]);
@@ -329,7 +338,7 @@ export default function Classroom() {
   }, [flushLive]);
   const point = (event, allowOutside = false) => { const r = canvasRef.current.getBoundingClientRect(); if (!r.width || !r.height) return null; const boardX = (event.clientX - r.left) * W / r.width; const boardY = (event.clientY - r.top) * H / r.height; const content = getSlideContentRect(); if (!allowOutside && (boardX < content.x || boardX > content.x + content.width || boardY < content.y || boardY > content.y + content.height)) return null; return { x: clamp((boardX - content.x) * W / content.width, 0, W), y: clamp((boardY - content.y) * H / content.height, 0, H) }; };
   const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (!p) return; if (tool === "text") { const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p)); if (hit) { selectedStrokeRef.current = hit.id; setTextDraft(hit.text || ""); setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id }); } else { setTextDraft(""); setTextModal({ x: p.x, y: p.y, strokeId: null }); } redraw(); return; } if (tool === "eraser") { const list = currentStrokes(); const hit = [...list].reverse().find(s => strokeHit(s, p)); if (!hit) return; strokesByPageRef.current.set(currentPageId(), list.filter(s => s.id !== hit.id)); if (selectedStrokeRef.current === hit.id) selectedStrokeRef.current = null; const action = { kind: "stroke_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); redraw(); setThumbnailVersion(v => v + 1); saveSnapshot(); return; } if (tool === "select") { const list = currentStrokes(), selected = list.find(s => s.id === selectedStrokeRef.current), bounds = strokeBounds(selected); if (bounds && p.x >= bounds.maxX - 10 && p.x <= bounds.maxX + 24 && p.y >= bounds.maxY - 10 && p.y <= bounds.maxY + 24) { selectInteractionRef.current = { mode: "resize", start: p, original: JSON.parse(JSON.stringify(selected)) }; } else { const hit = [...list].reverse().find(s => strokeHit(s, p)); selectedStrokeRef.current = hit?.id || null; selectInteractionRef.current = hit ? { mode: hit.tool === "text" ? "maybe-text" : "move", start: p, original: JSON.parse(JSON.stringify(hit)) } : null; } canvasRef.current.setPointerCapture(event.pointerId); redraw(); return; } if (!DRAW_TOOLS.has(tool)) return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p] }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
-  const onPointerMove = (event) => { const interaction = selectInteractionRef.current; if (interaction) { const p = point(event, true); if (!p) return; if (interaction.mode === "maybe-text") { if (Math.hypot(p.x - interaction.start.x, p.y - interaction.start.y) < 6) return; interaction.mode = "move"; } const list = currentStrokes(), index = list.findIndex(s => s.id === interaction.original.id); if (index < 0) return; list[index] = transformStroke(interaction.original, interaction.start, p, interaction.mode); queueLive(list[index], list[index].points, false, true); redraw(); return; } const d = drawRef.current; if (!d) return; const nextPoint = point(event, true); if (!nextPoint) return; d.points.push(nextPoint); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
+  const onPointerMove = (event) => { const interaction = selectInteractionRef.current; if (interaction) { const p = point(event, true); if (!p) return; if (interaction.mode === "maybe-text") { if (Math.hypot(p.x - interaction.start.x, p.y - interaction.start.y) < 6) return; interaction.mode = "move"; } const list = currentStrokes(), index = list.findIndex(s => s.id === interaction.original.id); if (index < 0) return; list[index] = transformStroke(interaction.original, interaction.start, p, interaction.mode); localStrokeEditGenerationRef.current.set(list[index].id, (localStrokeEditGenerationRef.current.get(list[index].id) || 0) + 1); queueLive(list[index], list[index].points, false, true); redraw(); return; } const d = drawRef.current; if (!d) return; const nextPoint = point(event, true); if (!nextPoint) return; d.points.push(nextPoint); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
   const onPointerUp = (event) => { canvasRef.current?.releasePointerCapture?.(event.pointerId); const interaction = selectInteractionRef.current; if (interaction) { selectInteractionRef.current = null; if (interaction.mode === "maybe-text") { setTextDraft(interaction.original.text || ""); setTextModal({ x: interaction.original.points[0].x, y: interaction.original.points[0].y, strokeId: interaction.original.id }); redraw(); return; } const list = currentStrokes(), index = list.findIndex(s => s.id === interaction.original.id); if (index >= 0) { const updated = { ...list[index], _whiteboard_base_revision: Number(list[index]._whiteboard_revision) || 0 }; list[index] = updated; queueLive(updated, updated.points, true, true); flushLive(true); strokesByPageRef.current.set(currentPageId(), list); liveRef.current.delete(updated.id); committedRef.current.add(updated.id); const action = { kind: "stroke_update", stroke: updated, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); setThumbnailVersion(v => v + 1); saveSnapshot(); } redraw(); return; } const d = drawRef.current; drawRef.current = null; if (!d) return; const pageNumber = slideRef.current; const pageId = currentPageId(pageNumber); if (!["pen", "highlighter", "eraser"].includes(d.tool)) { if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0); queueLive(d, d.points, true); flushLive(true); } else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); drawBaseRef.current = null; queueWhiteboardAction({ kind: "stroke", stroke: d, page_number: pageNumber, page_id: pageId }); setThumbnailVersion((version) => version + 1); saveSnapshot(); };
   const saveTextModal = () => { if (!textModal) return; const text = textDraft.trim(); if (!text) { setTextModal(null); setTextDraft(""); redraw(); return; } const list = currentStrokes(); let stroke; if (textModal.strokeId) { const index = list.findIndex((item) => item.id === textModal.strokeId); if (index >= 0) { stroke = { ...list[index], text }; list[index] = stroke; } } if (!stroke) { stroke = { id: newId(), tool: "text", color, width, text, points: [{ x: textModal.x, y: textModal.y }] }; list.push(stroke); } selectedStrokeRef.current = stroke.id; const action = { kind: textModal.strokeId ? "stroke_update" : "stroke", stroke, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); setTextModal(null); setTextDraft(""); setThumbnailVersion((version) => version + 1); redraw(); saveSnapshot(); };
   const changeSlide = (target) => { if (!isTeacher) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(currentPageId(next), strokesByPageRef.current.get(currentPageId(next)) || []); publishControl({ kind: "page", page_number: next, page_id: currentPageId(next) }); };
@@ -431,6 +440,7 @@ export default function Classroom() {
         if (msg.type === "heartbeat") return;
         if (msg.type === "whiteboard_event_ack") {
           const actionId = msg.action_id;
+          const actionEdit = actionId ? whiteboardActionEditVersionRef.current.get(actionId) : null;
           const canonical = msg.payload;
           if (canonical?.stroke?.id && ["stroke", "stroke_update"].includes(canonical.kind)) {
             const pageNumber = Number(canonical.page_number) || 1;
@@ -441,6 +451,8 @@ export default function Classroom() {
             const list = strokesByPageRef.current.get(pageId) || [];
             const index = list.findIndex((stroke) => stroke.id === incoming.id);
             const existingRevision = Number(index >= 0 ? list[index]._whiteboard_revision : 0) || 0;
+            const hasNewerLocalEdit = index >= 0 && actionEdit?.strokeId === incoming.id &&
+              (localStrokeEditGenerationRef.current.get(incoming.id) || 0) > actionEdit.generation;
             if (index < 0) {
               list.push(incoming);
               strokesByPageRef.current.set(pageId, list);
@@ -448,6 +460,18 @@ export default function Classroom() {
               liveRef.current.delete(incoming.id);
               if (pageId === currentPageId()) redraw();
               setThumbnailVersion((version) => version + 1);
+            } else if (hasNewerLocalEdit) {
+              // Keep the newer optimistic geometry; only advance its committed base.
+              // Replacing points here makes a shape jump back until the next ack arrives.
+              list[index] = {
+                ...list[index],
+                ...(revision > 0 ? { _whiteboard_revision: Math.max(existingRevision, revision) } : {}),
+                _whiteboard_base_revision: Math.max(
+                  Number(list[index]._whiteboard_base_revision) || 0,
+                  revision,
+                ),
+              };
+              strokesByPageRef.current.set(pageId, list);
             } else if (!revision || revision > existingRevision) {
               list[index] = incoming;
               strokesByPageRef.current.set(pageId, list);
@@ -473,6 +497,7 @@ export default function Classroom() {
           if (actionId) {
             whiteboardQueueRef.current.delete(actionId);
             whiteboardSentOnSocketRef.current.delete(actionId);
+            whiteboardActionEditVersionRef.current.delete(actionId);
             sendWhiteboardQueue();
           }
           return;
