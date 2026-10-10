@@ -326,8 +326,34 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 WhiteboardSnapshot.snapshot_data.contains({"action_id": str(action_id)}),
             ).first()
             if already_processed:
-                await websocket.send_json({"type": "whiteboard_event_ack", "action_id": str(action_id)})
-                await _relay_whiteboard_event(peer, payload)
+                # A retried move must never relay its old coordinates after a
+                # newer move (or delete) has already been committed.
+                canonical_payload = dict(payload)
+                should_relay = True
+                if payload.get("kind") in {"stroke", "stroke_update"} and isinstance(payload.get("stroke"), dict):
+                    stroke_id = payload["stroke"].get("id")
+                    latest = db.query(WhiteboardSnapshot).filter(
+                        WhiteboardSnapshot.session_id == session_id,
+                        WhiteboardSnapshot.page_id == already_processed.page_id,
+                    ).order_by(desc(WhiteboardSnapshot.created_at)).first() if already_processed.page_id else already_processed
+                    latest_strokes = ((latest.snapshot_data or {}).get("strokes") or []) if latest else []
+                    current_stroke = next(
+                        (item for item in latest_strokes if isinstance(item, dict) and item.get("id") == stroke_id),
+                        None,
+                    )
+                    if current_stroke:
+                        canonical_payload["stroke"] = dict(current_stroke)
+                        canonical_payload["page_id"] = str(already_processed.page_id)
+                    else:
+                        # The stroke may have been deleted after this action.
+                        should_relay = False
+                await websocket.send_json({
+                    "type": "whiteboard_event_ack",
+                    "action_id": str(action_id),
+                    "payload": canonical_payload if should_relay else None,
+                })
+                if should_relay:
+                    await _relay_whiteboard_event(peer, canonical_payload)
                 return
         if kind in {"stroke", "stroke_update", "stroke_delete", "undo", "clear"}:
             page_number = max(1, int(payload.get("page_number", 1) or 1))
@@ -355,8 +381,20 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             strokes = list(((latest.snapshot_data or {}).get("strokes") or []) if latest else [])
             stroke = payload.get("stroke")
             if kind == "stroke" and isinstance(stroke, dict) and stroke.get("id"):
-                if not any(item.get("id") == stroke["id"] for item in strokes if isinstance(item, dict)):
+                existing_index = next(
+                    (i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == stroke["id"]),
+                    None,
+                )
+                if existing_index is None:
+                    # Revisions are server-owned so both peers can use the
+                    # same committed base revision for future live previews.
+                    stroke["_whiteboard_revision"] = 1
                     strokes.append(stroke)
+                else:
+                    # Duplicate creation must return the already committed
+                    # object, not a stale client copy.
+                    payload["stroke"] = dict(strokes[existing_index])
+                    stroke = payload["stroke"]
             elif kind == "stroke_update" and isinstance(stroke, dict) and stroke.get("id"):
                 index = next((i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == stroke["id"]), None)
                 previous_revision = strokes[index].get("_whiteboard_revision", 0) if index is not None else 0
@@ -390,7 +428,13 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             db.commit()
             await _relay_whiteboard_event(peer, payload)
             if action_id:
-                await websocket.send_json({"type": "whiteboard_event_ack", "action_id": str(action_id)})
+                # Return the canonical committed object/revision to the sender
+                # as well as relaying it to the peer.
+                await websocket.send_json({
+                    "type": "whiteboard_event_ack",
+                    "action_id": str(action_id),
+                    "payload": payload,
+                })
     elif msg_type == "whiteboard_live":
         if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
             await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
