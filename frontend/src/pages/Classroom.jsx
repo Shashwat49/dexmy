@@ -160,6 +160,10 @@ export default function Classroom() {
   const slidesRef = useRef([makeWhiteboardPage(1)]), strokesByPageRef = useRef(new Map()), slideRef = useRef(1);
   const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false), imageCacheRef = useRef(new Map()), reliableStrokeTimerRef = useRef(null), slideControlActiveRef = useRef(false);
   const whiteboardPreviewRevisionRef = useRef(0);
+  // Selected-shape drags replace the entire preview on every pointer event. Cap
+  // reliable replacement previews to 30 FPS so the channel cannot build a long
+  // queue of obsolete positions when pointer events arrive faster than delivery.
+  const lastShapePreviewPublishedAtRef = useRef(0);
   const mediaBusyRef = useRef(false);
   const whiteboardStateInitializedRef = useRef(false);
   const whiteboardQueueRef = useRef(new Map());
@@ -329,8 +333,17 @@ export default function Classroom() {
   const flushLive = useCallback((force = false) => {
     const pending = pendingLiveRef.current;
     if (!pending || (!force && !pending.points.length)) return;
+    const isReplacementPreview = !!pending.replace;
+    const now = Date.now();
+    const minimumShapePreviewIntervalMs = 1000 / 30;
+    // Keep only the newest replacement geometry while waiting; queueLive
+    // overwrites pending.points for replacement previews, so skipped frames do
+    // not accumulate and cannot replay old drag positions later.
+    if (!force && isReplacementPreview &&
+        now - lastShapePreviewPublishedAtRef.current < minimumShapePreviewIntervalMs) return;
     const points = pending.points.splice(0, pending.replace ? pending.points.length : 32);
     if (!points.length) return;
+    if (isReplacementPreview) lastShapePreviewPublishedAtRef.current = now;
     publishLive(pending.stroke, points, pending.page_number, pending.final && pending.points.length === 0, pending.replace);
     if (!pending.points.length) pendingLiveRef.current = null;
   }, [publishLive]);
