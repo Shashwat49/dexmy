@@ -344,6 +344,10 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     if current_stroke:
                         canonical_payload["stroke"] = dict(current_stroke)
                         canonical_payload["page_id"] = str(already_processed.page_id)
+                        # A retried create can refer to an object that has since
+                        # moved; relay it as an update so peers replace geometry.
+                        if canonical_payload.get("kind") == "stroke":
+                            canonical_payload["kind"] = "stroke_update"
                     else:
                         # The stroke may have been deleted after this action.
                         should_relay = False
