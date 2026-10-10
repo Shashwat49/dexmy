@@ -406,6 +406,51 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     previous_revision = int(previous_revision or 0)
                 except (TypeError, ValueError):
                     previous_revision = 0
+
+                # WebSocket actions can arrive after a newer drag commit has
+                # already been persisted. Server revisions alone cannot detect
+                # this: an old payload would otherwise receive a newer revision
+                # and overwrite the latest geometry. For the same editor, reject
+                # updates whose client edit generation is older than the stored
+                # stroke generation.
+                if index is not None:
+                    current_stroke = strokes[index]
+                    try:
+                        incoming_generation = int(stroke.get("_whiteboard_edit_generation") or 0)
+                        current_generation = int(current_stroke.get("_whiteboard_edit_generation") or 0)
+                    except (TypeError, ValueError):
+                        incoming_generation = current_generation = 0
+                    incoming_editor = str(stroke.get("_whiteboard_editor_id") or "")
+                    current_editor = str(current_stroke.get("_whiteboard_editor_id") or "")
+                    if (
+                        incoming_editor
+                        and incoming_editor == current_editor
+                        and incoming_generation < current_generation
+                    ):
+                        # Record the action idempotently without changing the
+                        # canonical stroke or relaying stale coordinates.
+                        snapshot_data = {"strokes": strokes}
+                        if action_id:
+                            snapshot_data["action_id"] = str(action_id)
+                        db.add(WhiteboardSnapshot(
+                            session_id=session_id,
+                            snapshot_data=snapshot_data,
+                            image_url=latest.image_url if latest else page.image_url,
+                            page_number=page_number,
+                            page_id=page.id,
+                        ))
+                        db.commit()
+                        canonical_payload = dict(payload)
+                        canonical_payload["stroke"] = dict(current_stroke)
+                        canonical_payload["page_id"] = str(page.id)
+                        if action_id:
+                            await websocket.send_json({
+                                "type": "whiteboard_event_ack",
+                                "action_id": str(action_id),
+                                "payload": canonical_payload,
+                            })
+                        return
+
                 stroke["_whiteboard_revision"] = previous_revision + 1
                 if index is None:
                     strokes.append(stroke)
