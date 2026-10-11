@@ -703,12 +703,45 @@ export default function Classroom() {
             const existingRevision = Number(existing?._whiteboard_revision) || 0;
             const applyIncoming = !existing || (incomingRevision > 0 ? incomingRevision > existingRevision : existingRevision === 0);
             const activeLive = liveRef.current.get(p.stroke.id);
-            const preserveNewerPreview = !!activeLive &&
-              String(activeLive._whiteboard_editor_id || "") === String(p.stroke._whiteboard_editor_id || "") &&
-              Number(activeLive._whiteboard_edit_generation || 0) > Number(p.stroke._whiteboard_edit_generation || 0);
-            whiteboardTrace("ws-committed-event", { transport: "websocket", kind: p.kind, actionId: p.action_id || null, pageId, incoming: whiteboardGeometry(p.stroke), current: whiteboardGeometry(existing), incomingRevision, existingRevision, preserveNewerPreview, decision: !applyIncoming ? "ignore-equal-or-stale-revision" : preserveNewerPreview ? "apply-commit-preserve-newer-live-preview" : "apply-committed-geometry" });
+            const activeLiveGeneration = Number(activeLive?._whiteboard_edit_generation) || 0;
+            const incomingGeneration = Number(p.stroke._whiteboard_edit_generation) || 0;
+            const incomingEditor = String(p.stroke._whiteboard_editor_id || "");
+            const activeLiveEditor = String(activeLive?._whiteboard_editor_id || "");
+            const sameEditor = !!incomingEditor && incomingEditor === activeLiveEditor;
+            const liveGeometryMatchesCommit = !!activeLive &&
+              activeLive.tool === p.stroke.tool &&
+              JSON.stringify(activeLive.points || []) === JSON.stringify(p.stroke.points || []);
+            // The WebSocket commit can overtake a final preview on the separate
+            // WebSocket/LiveKit transports. Keep the newest drag geometry if the
+            // commit carries an older generation or conflicting coordinates.
+            const preserveNewerPreview = !!activeLive && sameEditor && (
+              activeLiveGeneration > incomingGeneration ||
+              (activeLiveGeneration === incomingGeneration && !liveGeometryMatchesCommit)
+            );
+            whiteboardTrace("ws-committed-event", { transport: "websocket", kind: p.kind, actionId: p.action_id || null, pageId, incoming: whiteboardGeometry(p.stroke), current: whiteboardGeometry(existing), incomingRevision, existingRevision, activeLiveGeneration, incomingGeneration, liveGeometryMatchesCommit, preserveNewerPreview, decision: !applyIncoming ? "ignore-equal-or-stale-revision" : preserveNewerPreview ? "keep-newer-live-geometry-and-advance-revision" : "apply-committed-geometry" });
             if (applyIncoming) {
-              if (index >= 0) list[index] = p.stroke; else list.push(p.stroke);
+              if (preserveNewerPreview && index >= 0) {
+                // Advance revision metadata without replacing the committed points.
+                // Otherwise the canvas snaps back as soon as the live overlay clears.
+                list[index] = {
+                  ...list[index],
+                  _whiteboard_revision: Math.max(existingRevision, incomingRevision),
+                  _whiteboard_base_revision: Math.max(
+                    Number(list[index]._whiteboard_base_revision) || 0,
+                    incomingRevision,
+                  ),
+                  _whiteboard_edit_generation: Math.max(
+                    Number(list[index]._whiteboard_edit_generation) || 0,
+                    activeLiveGeneration,
+                    incomingGeneration,
+                  ),
+                  _whiteboard_editor_id: incomingEditor || list[index]._whiteboard_editor_id,
+                };
+              } else if (index >= 0) {
+                list[index] = p.stroke;
+              } else {
+                list.push(p.stroke);
+              }
               strokesByPageRef.current.set(pageId, list);
               committedRef.current.add(p.stroke.id);
               if (!preserveNewerPreview) liveRef.current.delete(p.stroke.id);
