@@ -628,24 +628,54 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         if target_user_id != booking.student_id:
             await websocket.send_json({"type": "permission_denied", "reason": "Invalid classroom participant"})
             return
-        db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=granted, granted_by=user.id))
-        db.commit()
         key = str(target_user_id)
-        room.permissions.setdefault(key, _default_student_permissions())
+        previous_permissions = set(room.permissions.get(key, _default_student_permissions()))
+        next_permissions = set(previous_permissions)
         if granted:
-            room.permissions[key].add(permission.value)
+            next_permissions.add(permission.value)
         else:
-            room.permissions[key].discard(permission.value)
+            next_permissions.discard(permission.value)
+        room.permissions[key] = next_permissions
+
+        # Apply LiveKit publish permissions before telling either client that a
+        # camera/mic/screen-share change succeeded. Otherwise the student UI can
+        # say "allowed" while LiveKit still rejects publishing.
+        if permission != PermissionType.annotate:
+            try:
+                await _sync_livekit_permissions(class_session, target_user_id, room)
+            except Exception as exc:
+                room.permissions[key] = previous_permissions
+                await websocket.send_json({
+                    "type": "permission_sync_failed",
+                    "permission": permission.value,
+                    "granted": granted,
+                    "reason": str(exc)[:300],
+                })
+                return
+
+        try:
+            db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=granted, granted_by=user.id))
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            room.permissions[key] = previous_permissions
+            if permission != PermissionType.annotate:
+                try:
+                    await _sync_livekit_permissions(class_session, target_user_id, room)
+                except Exception:
+                    logging.getLogger(__name__).warning("Failed to restore LiveKit permissions after DB commit failure", exc_info=True)
+            await websocket.send_json({
+                "type": "permission_sync_failed",
+                "permission": permission.value,
+                "granted": granted,
+                "reason": "Could not save the permission change. Please try again.",
+            })
+            return
+
         event = {"type": "permission_update", "permission": permission.value, "granted": granted}
         if peer:
             await peer.send_json(event)
         await websocket.send_json(event)
-        if permission == PermissionType.annotate:
-            return
-        try:
-            await _sync_livekit_permissions(class_session, target_user_id, room)
-        except Exception as exc:
-            await websocket.send_json({"type": "permission_sync_failed", "permission": permission.value, "reason": str(exc)[:300]})
     elif msg_type == "toggle_av":
         if peer:
             await peer.send_json({"type": "toggle_av", "user_id": str(user.id), "kind": data.get("kind"), "enabled": bool(data.get("enabled"))})
