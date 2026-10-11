@@ -731,7 +731,17 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             return
         room.no_show_decided = True
         if bool(data.get("accepted")):
-            mark_student_no_show(session_id, db)
+            try:
+                mark_student_no_show(session_id, db)
+            except Exception:
+                db.rollback()
+                room.no_show_decided = False
+                logging.getLogger(__name__).exception(
+                    "Could not record student no-show for session %s",
+                    session_id,
+                )
+                await websocket.send_json({"type": "no_show_decision_failed"})
+                return
             out = {"type": "session_ended", "reason": "student_no_show"}
             for ws in (room.teacher_ws, room.student_ws):
                 if ws:
