@@ -663,20 +663,56 @@ export default function Classroom() {
           setThumbnailVersion((version) => version + 1);
         }
         if (msg.type === "whiteboard_state") {
-          // A WebSocket snapshot can lag behind newer LiveKit previews and committed
-          // edits. Apply it only for the initial board bootstrap; subsequent page and
-          // stroke changes arrive as ordered classroom events. Reapplying a stale
-          // snapshot makes moved objects jump back to their old positions.
-          if (whiteboardStateInitializedRef.current) return;
+          // Reconcile every socket bootstrap, including reconnects. The server
+          // snapshot is authoritative for committed state, while local queued
+          // actions are overlaid so an in-flight edit is not lost during recovery.
+          const wasInitialized = whiteboardStateInitializedRef.current;
           whiteboardStateInitializedRef.current = true;
           slideControlActiveRef.current = false;
-          const p = msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }];
-          slidesRef.current = p;
-          setSlides(p);
-          slideRef.current = msg.page_number || 1;
-          setSlide(msg.page_number || 1);
-          strokesByPageRef.current = new Map(normalizePages(p).map((x) => [x.page_id, Array.isArray(x.strokes) ? x.strokes : []]));
-          strokesByPageRef.current.set(msg.page_id || currentPageId(msg.page_number || 1), msg.canvas_json?.strokes || strokesByPageRef.current.get(msg.page_id || currentPageId(msg.page_number || 1)) || []);
+          const incomingPages = normalizePages(msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }]);
+          const pendingStrokes = new Map();
+          const pendingDeletes = new Set(deletedStrokeIdsRef.current);
+          for (const action of whiteboardQueueRef.current.values()) {
+            if (["stroke", "stroke_update"].includes(action.kind) && action.stroke?.id) {
+              pendingStrokes.set(action.stroke.id, { ...action.stroke });
+            } else if (action.kind === "stroke_delete" && action.stroke_id) {
+              pendingDeletes.add(action.stroke_id);
+            } else if (action.kind === "undo" && action.stroke_id) {
+              pendingDeletes.add(action.stroke_id);
+            } else if (action.kind === "clear") {
+              (action.stroke_ids || []).forEach((id) => pendingDeletes.add(id));
+            }
+          }
+          const previousPageId = slidesRef.current[slideRef.current - 1]?.page_id;
+          const reconciledStrokes = new Map();
+          const reconciledPages = incomingPages.map((page) => {
+            const serverStrokes = Array.isArray(page.strokes) ? page.strokes : [];
+            const byId = new Map();
+            serverStrokes.forEach((stroke) => {
+              if (stroke?.id && !pendingDeletes.has(stroke.id)) byId.set(stroke.id, stroke);
+            });
+            for (const [strokeId, stroke] of pendingStrokes) {
+              if (!pendingDeletes.has(strokeId) && (stroke.page_id === page.page_id || (!stroke.page_id && Number(stroke.page_number || 1) === page.page_number))) {
+                byId.set(strokeId, stroke);
+              }
+            }
+            const strokes = Array.from(byId.values());
+            reconciledStrokes.set(page.page_id, strokes);
+            return { ...page, strokes };
+          });
+          // Never retain a local-only object merely because it was present before
+          // disconnect: it may be a stale preview or a deletion already committed.
+          // Only edits still in the reliable action queue are overlaid above.
+          strokesByPageRef.current = reconciledStrokes;
+          liveRef.current.clear();
+          pendingLiveRef.current = null;
+          slidesRef.current = reconciledPages;
+          setSlides(reconciledPages);
+          const selectedPage = wasInitialized ? reconciledPages.findIndex((page) => page.page_id === previousPageId) : -1;
+          const nextPage = selectedPage >= 0 ? selectedPage + 1 : clamp(Number(msg.page_number) || 1, 1, reconciledPages.length);
+          slideRef.current = nextPage;
+          setSlide(nextPage);
+          setThumbnailVersion((version) => version + 1);
           setTimeout(redraw, 0);
         }
         if (msg.type === "whiteboard_live") {
