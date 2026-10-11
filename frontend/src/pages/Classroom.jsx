@@ -599,6 +599,12 @@ export default function Classroom() {
         if (msg.type === "participant_info") setPeerName(msg.name || "Participant");
         if (msg.type === "chat") setChat((items) => [...items, { mine: msg.sender_id === String(user.id), text: msg.message_text || "", file_url: msg.file_url, file_name: msg.file_name }]);
         if (msg.type === "permissions_state") setPermissions((p) => ({ ...p, ...(msg.permissions || {}) }));
+        if (msg.type === "permission_sync_failed") {
+          setNotice(`Could not apply the ${msg.permission || "classroom"} permission. Please try again.`);
+        }
+        if (msg.type === "permission_denied") {
+          setNotice(msg.reason || `Permission request rejected${msg.permission ? `: ${msg.permission}` : ""}.`);
+        }
         if (msg.type === "permission_update") {
           setPermissions((p) => ({ ...p, [msg.permission]: msg.granted }));
           if (!isTeacher && !msg.granted && msg.permission === "mic") {
@@ -1219,7 +1225,17 @@ export default function Classroom() {
     };
   }, [hasEntered, sessionId, user, wsUrl, isTeacher, navigate, redraw, renderStroke, currentStrokes]);
   const sendMessage = (event) => { event.preventDefault(); const text = message.trim(); if (!text) return; if (!send({ type: "chat", message_text: text })) { setNotice("Chat is reconnecting. Please try again in a moment."); return; } setChat((items) => [...items, { mine: true, text }]); setMessage(""); };
-  const setPermission = (permission, granted) => { if (!studentId) return setNotice("Waiting for the student to join."); send({ type: "permission_update", target_user_id: studentId, permission, granted }); };
+  const setPermission = (permission, granted) => {
+    if (!studentId) {
+      setNotice("Waiting for the student to join.");
+      return;
+    }
+    if (!send({ type: "permission_update", target_user_id: studentId, permission, granted })) {
+      setNotice("Classroom connection is reconnecting. Permission was not changed; please try again.");
+      return;
+    }
+    setNotice(`${permission === "screen_share" ? "Screen sharing" : permission === "annotate" ? "Whiteboard annotation" : permission === "mic" ? "Microphone" : "Camera"} permission request sent…`);
+  };
   const endClass = async () => {
     if (!isTeacher || ending) return;
     setConfirmEnd(false);
