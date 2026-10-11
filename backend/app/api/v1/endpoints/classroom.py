@@ -65,8 +65,12 @@ async def end_session(session_id: uuid.UUID, current_user: User = Depends(get_cu
     if cs is None: raise HTTPException(status_code=404, detail="Session not found")
     booking = db.get(Booking, cs.booking_id)
     if current_user.id != booking.teacher_id: raise HTTPException(status_code=403, detail="Only the teacher can end the session")
-    notes = end_class_session(session_id, db)
     room = manager.rooms.get(session_id)
+    if room and room.timer_running and room.deadline:
+        remaining = (room.deadline - datetime.now(timezone.utc)).total_seconds()
+        if remaining > 300:
+            raise HTTPException(status_code=409, detail="End class is available only in the last 5 minutes")
+    notes = end_class_session(session_id, db)
     if room:
         if room.timer_task and room.timer_task is not asyncio.current_task() and not room.timer_task.done():
             room.timer_task.cancel()
