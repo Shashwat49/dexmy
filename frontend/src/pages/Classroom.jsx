@@ -644,9 +644,13 @@ export default function Classroom() {
           const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
           const committedRevision = Number(committed?._whiteboard_revision) || 0;
           const priorLive = liveRef.current.get(stroke.id);
+          const previewGeneration = Number(p.edit_generation || 0);
+          const committedGeneration = Number(committed?._whiteboard_edit_generation || 0);
           const previewIsNewerThanCommit = !!committed &&
-            String(p.editor_id || "") === String(committed._whiteboard_editor_id || "") &&
-            Number(p.edit_generation || 0) > Number(committed._whiteboard_edit_generation || 0);
+            !!p.editor_id &&
+            String(p.editor_id) === String(committed._whiteboard_editor_id || "") &&
+            (previewGeneration > committedGeneration ||
+              (p.final && previewGeneration === committedGeneration));
           const staleAgainstCommit = !previewIsNewerThanCommit &&
             (p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) :
               (committedRevision > 0 && committedRevision >= Number(p.revision || 0)));
@@ -922,9 +926,13 @@ export default function Classroom() {
             const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
             const committedRevision = Number(committed?._whiteboard_revision) || 0;
             const priorLive = liveRef.current.get(stroke.id);
+            const previewGeneration = Number(p.edit_generation || 0);
+            const committedGeneration = Number(committed?._whiteboard_edit_generation || 0);
             const previewIsNewerThanCommit = !!committed &&
-              String(p.editor_id || "") === String(committed._whiteboard_editor_id || "") &&
-              Number(p.edit_generation || 0) > Number(committed._whiteboard_edit_generation || 0);
+              !!p.editor_id &&
+              String(p.editor_id) === String(committed._whiteboard_editor_id || "") &&
+              (previewGeneration > committedGeneration ||
+                (p.final && previewGeneration === committedGeneration));
             const staleAgainstCommit = !previewIsNewerThanCommit &&
               (p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) :
                 (committedRevision > 0 && committedRevision >= Number(p.revision || 0)));
