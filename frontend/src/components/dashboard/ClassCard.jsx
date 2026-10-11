@@ -44,8 +44,8 @@ export default function ClassCard({ booking, otherPartyName, onJoin, onDownloadN
 
       {booking.status === "no_show" ? (
         <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-center">
-          <div className="text-sm font-semibold text-amber-300">Student did not join</div>
-          <p className="mt-1 text-xs text-chalk-muted">One class was deducted from your package. This session was not counted as a completed teacher class.</p>
+          <div className="text-sm font-semibold text-amber-300">Student did not join this class</div>
+          <p className="mt-1 text-xs text-chalk-muted">This session was recorded as a no-show and one class was deducted from the package. The teacher was not credited for a completed class.</p>
         </div>
       ) : isPast ? (
         <button
