@@ -14,7 +14,7 @@ from app.schemas.classroom import JoinTokenRequest, JoinTokenResponse, ClassSess
 from app.services.livekit_service import create_join_token
 from app.models.classroom_content import ClassNotes, WhiteboardSnapshot, ClassroomPage
 from app.services.storage_service import save_bytes_file, get_presigned_url, delete_file
-from app.services.session_lifecycle import end_class_session
+from app.services.session_lifecycle import end_class_session, mark_student_no_show
 from app.websockets.connection_manager import manager
 from pydantic import BaseModel
 from sqlalchemy import desc
@@ -70,14 +70,16 @@ async def end_session(session_id: uuid.UUID, current_user: User = Depends(get_cu
         remaining = (room.deadline - datetime.now(timezone.utc)).total_seconds()
         if remaining > 300:
             raise HTTPException(status_code=409, detail="End class is available only in the last 5 minutes")
-    notes = end_class_session(session_id, db)
+    no_show = bool(room and not room.student_ever_joined)
+    notes = mark_student_no_show(session_id, db) if no_show else end_class_session(session_id, db)
     if room:
         if room.timer_task and room.timer_task is not asyncio.current_task() and not room.timer_task.done():
             room.timer_task.cancel()
+        reason = "student_no_show" if no_show else "teacher_ended"
         for ws in (room.teacher_ws, room.student_ws):
             if ws:
                 try:
-                    await ws.send_json({"type": "session_ended", "reason": "teacher_ended"})
+                    await ws.send_json({"type": "session_ended", "reason": reason})
                 except Exception:
                     pass
         manager.rooms.pop(session_id, None)
