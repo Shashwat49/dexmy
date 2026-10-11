@@ -382,8 +382,20 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 WhiteboardSnapshot.session_id == session_id,
                 WhiteboardSnapshot.page_id == page.id,
             ).order_by(desc(WhiteboardSnapshot.created_at)).first()
-            strokes = list(((latest.snapshot_data or {}).get("strokes") or []) if latest else [])
+            latest_snapshot_data = latest.snapshot_data if latest and isinstance(latest.snapshot_data, dict) else {}
+            strokes = list((latest_snapshot_data.get("strokes") or []) if latest else [])
+            # Keep deletion tombstones in the canonical snapshot. Delayed stroke
+            # commits or stale canvas snapshots must never resurrect an undone ID.
+            deleted_stroke_ids = set(latest_snapshot_data.get("deleted_stroke_ids") or [])
             stroke = payload.get("stroke")
+            if kind in {"stroke", "stroke_update"} and isinstance(stroke, dict) and stroke.get("id") and str(stroke["id"]) in deleted_stroke_ids:
+                if action_id:
+                    await websocket.send_json({
+                        "type": "whiteboard_event_ack",
+                        "action_id": str(action_id),
+                        "payload": None,
+                    })
+                return
             if kind == "stroke" and isinstance(stroke, dict) and stroke.get("id"):
                 existing_index = next(
                     (i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == stroke["id"]),
@@ -454,7 +466,10 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                         # canonical stroke or relaying stale coordinates. Equal
                         # generations from the same editor must also not restore
                         # older geometry after a newer move has been committed.
-                        snapshot_data = {"strokes": strokes}
+                        snapshot_data = {
+                            "strokes": strokes,
+                            "deleted_stroke_ids": sorted(deleted_stroke_ids),
+                        }
                         if action_id:
                             snapshot_data["action_id"] = str(action_id)
                         db.add(WhiteboardSnapshot(
@@ -482,13 +497,23 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 else:
                     strokes[index] = stroke
             elif kind == "stroke_delete" and payload.get("stroke_id"):
+                deleted_stroke_ids.add(str(payload["stroke_id"]))
                 strokes = [item for item in strokes if not isinstance(item, dict) or item.get("id") != payload["stroke_id"]]
             elif kind == "undo":
                 if strokes:
-                    strokes.pop()
+                    removed = strokes.pop()
+                    if isinstance(removed, dict) and removed.get("id"):
+                        deleted_stroke_ids.add(str(removed["id"]))
             elif kind == "clear":
+                deleted_stroke_ids.update(
+                    str(item["id"]) for item in strokes
+                    if isinstance(item, dict) and item.get("id")
+                )
                 strokes = []
-            snapshot_data = {"strokes": strokes}
+            snapshot_data = {
+                "strokes": strokes,
+                "deleted_stroke_ids": sorted(deleted_stroke_ids),
+            }
             if action_id:
                 snapshot_data["action_id"] = str(action_id)
             db.add(WhiteboardSnapshot(
@@ -579,8 +604,22 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             image_url=save_base64_file(data["image_base64"],f"wb_{session_id}_p{page.id}","png")
             page.image_url=image_url
         snapshot_data = data.get("canvas_json") or {}
-        incoming_strokes = snapshot_data.get("strokes") if isinstance(snapshot_data, dict) else None
-        existing_strokes = ((existing.snapshot_data or {}).get("strokes") or []) if existing else []
+        if not isinstance(snapshot_data, dict):
+            snapshot_data = {}
+        existing_snapshot_data = existing.snapshot_data if existing and isinstance(existing.snapshot_data, dict) else {}
+        deleted_stroke_ids = set(existing_snapshot_data.get("deleted_stroke_ids") or [])
+        incoming_strokes = snapshot_data.get("strokes")
+        existing_strokes = existing_snapshot_data.get("strokes") or []
+        if isinstance(incoming_strokes, list):
+            # Snapshots are debounced and may arrive after Undo. Filter every
+            # tombstoned ID before persisting so an old canvas image cannot undo
+            # a committed deletion.
+            incoming_strokes[:] = [
+                stroke for stroke in incoming_strokes
+                if not isinstance(stroke, dict)
+                or not stroke.get("id")
+                or str(stroke["id"]) not in deleted_stroke_ids
+            ]
         if isinstance(incoming_strokes, list) and isinstance(existing_strokes, list):
             existing_by_id = {
                 item.get("id"): item
@@ -605,6 +644,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     # points, so preserve the complete committed stroke unless
                     # the snapshot explicitly has a newer revision.
                     incoming_strokes[incoming_strokes.index(stroke)] = dict(committed)
+        snapshot_data["deleted_stroke_ids"] = sorted(deleted_stroke_ids)
         db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=snapshot_data,image_url=image_url,page_number=page_number,page_id=page.id))
         db.commit()
         await websocket.send_json({"type":"snapshot_saved","page_number":page_number,"page_id":str(page.id)})
