@@ -186,7 +186,8 @@ export default function Classroom() {
   backgroundSizeRef.current = backgroundSize;
   const [mic, setMic] = useState(false), [camera, setCamera] = useState(false), [screen, setScreen] = useState(false), [studentId, setStudentId] = useState(null), [peerName, setPeerName] = useState("");
   const [permissions, setPermissions] = useState({ mic: true, camera: true, annotate: false, screen_share: false }), [ending, setEnding] = useState(false), [notesUrl, setNotesUrl] = useState(null), [timer, setTimer] = useState(null), [deadline, setDeadline] = useState(null);
-  const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [backPrompt, setBackPrompt] = useState(false), [showReview, setShowReview] = useState(false);
+  const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [backPrompt, setBackPrompt] = useState(false), [confirmEnd, setConfirmEnd] = useState(false), [showNoShowPrompt, setShowNoShowPrompt] = useState(false), [showReview, setShowReview] = useState(false);
+  const classFinalizedRef = useRef(false);
   const [hasEntered, setHasEntered] = useState(false), [cameraDevices, setCameraDevices] = useState([]), [microphoneDevices, setMicrophoneDevices] = useState([]), [selectedCameraId, setSelectedCameraId] = useState(""), [selectedMicrophoneId, setSelectedMicrophoneId] = useState(""), [deviceError, setDeviceError] = useState("");
   const previewRef = useRef(null), previewStreamRef = useRef(null);
   useEffect(() => { let cancelled = false; const prepareDevices = async () => { try { let stream; try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); previewStreamRef.current = stream; if (previewRef.current) previewRef.current.srcObject = stream; } catch (error) { setDeviceError(error?.message || "Allow camera and microphone access to choose devices."); } const devices = await navigator.mediaDevices.enumerateDevices(); if (cancelled) { stream?.getTracks().forEach((track) => track.stop()); return; } const cameras = devices.filter((device) => device.kind === "videoinput"); const microphones = devices.filter((device) => device.kind === "audioinput"); setCameraDevices(cameras); setMicrophoneDevices(microphones); setSelectedCameraId((current) => current || cameras[0]?.deviceId || ""); setSelectedMicrophoneId((current) => current || microphones[0]?.deviceId || ""); } catch (error) { if (!cancelled) setDeviceError(error?.message || "Unable to list media devices."); } }; prepareDevices(); return () => { cancelled = true; previewStreamRef.current?.getTracks().forEach((track) => track.stop()); previewStreamRef.current = null; }; }, []);
@@ -222,8 +223,36 @@ export default function Classroom() {
     return { x: (W - width) / 2, y: (H - height) / 2, width, height };
   }, []);
   useEffect(() => { if (!deadline) return; const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))); tick(); const id = setInterval(tick, 1000); return () => clearInterval(id); }, [deadline]);
-  useEffect(() => { let active = true; api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => { if (active) setClassTitle(data.subject_name || "Class"); }).catch(() => { }); return () => { active = false; }; }, [sessionId]);
-  useEffect(() => { if (!sessionId) return; const state = { dexmyClassroom: true, sessionId }; window.history.pushState(state, "", window.location.href); const onPopState = () => { window.history.pushState(state, "", window.location.href); if (isTeacher) setBackPrompt(true); else setNotice("You cannot go back while a class is in progress."); }; window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, [sessionId, isTeacher]);
+  useEffect(() => { let active = true; api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => { if (!active) return; if (["ended", "cancelled"].includes(String(data.status || "").toLowerCase())) { classFinalizedRef.current = true; navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"); return; } setClassTitle(data.subject_name || "Class"); }).catch(() => { }); return () => { active = false; }; }, [sessionId, isTeacher, navigate]);
+  useEffect(() => { if (!sessionId) return; const state = { dexmyClassroom: true, sessionId }; window.history.pushState(state, "", window.location.href); const onPopState = () => { if (classFinalizedRef.current) return; window.history.pushState(state, "", window.location.href); setNotice("You cannot go back while a class is in progress."); }; window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, [sessionId, isTeacher]);
+  useEffect(() => {
+    if (!hasEntered || !sessionId) return;
+    const warnBeforeExit = (event) => {
+      if (classFinalizedRef.current) return;
+      event.preventDefault();
+      event.returnValue = "Refreshing or closing this tab will end the classroom for both participants.";
+      return event.returnValue;
+    };
+    const endOnConfirmedExit = () => {
+      if (classFinalizedRef.current) return;
+      classFinalizedRef.current = true;
+      const token = localStorage.getItem("dexmy_token");
+      const base = import.meta.env.VITE_API_BASE_URL;
+      if (!base || !token) return;
+      fetch(`${base.replace(/\\/$/, "")}/classroom/sessions/${sessionId}/leave`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: "{}",
+        keepalive: true,
+      }).catch(() => {});
+    };
+    window.addEventListener("beforeunload", warnBeforeExit);
+    window.addEventListener("pagehide", endOnConfirmedExit);
+    return () => {
+      window.removeEventListener("beforeunload", warnBeforeExit);
+      window.removeEventListener("pagehide", endOnConfirmedExit);
+    };
+  }, [hasEntered, sessionId]);
   useEffect(() => { const root = document.querySelector(".dexmy-classroom-shell"); const toolbar = root?.querySelector("main section > div:first-child"); if (!toolbar) return; toolbar.classList.add("classroom-toolbar"); let dragging = false, startX = 0, startY = 0, originX = 0, originY = 0; const onDown = (event) => { if (event.target.closest("button,input,label")) return; dragging = true; toolbar.classList.add("is-dragging"); startX = event.clientX; startY = event.clientY; const r = toolbar.getBoundingClientRect(); originX = r.left; originY = r.top; toolbar.setPointerCapture?.(event.pointerId); }; const onMove = (event) => { if (!dragging) return; const x = clamp(originX + event.clientX - startX, 8, window.innerWidth - toolbar.offsetWidth - 8); const y = clamp(originY + event.clientY - startY, 58, window.innerHeight - toolbar.offsetHeight - 8); toolbar.style.left = `${x}px`; toolbar.style.top = `${y}px`; }; const onUp = () => { dragging = false; toolbar.classList.remove("is-dragging"); }; toolbar.addEventListener("pointerdown", onDown); toolbar.addEventListener("pointermove", onMove); toolbar.addEventListener("pointerup", onUp); toolbar.addEventListener("pointercancel", onUp); return () => { toolbar.removeEventListener("pointerdown", onDown); toolbar.removeEventListener("pointermove", onMove); toolbar.removeEventListener("pointerup", onUp); toolbar.removeEventListener("pointercancel", onUp); }; }, []);
   const send = useCallback((payload) => { if (wsRef.current?.readyState !== WebSocket.OPEN) return false; try { wsRef.current.send(JSON.stringify(payload)); return true; } catch { return false; } }, []);
   const sendWhiteboardQueue = useCallback(() => {
@@ -534,6 +563,12 @@ export default function Classroom() {
           if (msg.deadline) setDeadline(msg.deadline);
           if (msg.student_id) setStudentId(msg.student_id);
         }
+        if (msg.type === "timer_state") {
+          setTimer(Math.max(0, Number(msg.remaining_seconds) || 0));
+          setDeadline(msg.running && msg.deadline ? msg.deadline : null);
+        }
+        if (msg.type === "student_no_show_prompt" && isTeacher) setShowNoShowPrompt(true);
+        if (msg.type === "no_show_prompt_dismissed") setShowNoShowPrompt(false);
         if (msg.type === "student_joined") {
           setStudentId(msg.user_id);
           setPeerName(msg.name || "Student");
@@ -816,7 +851,13 @@ export default function Classroom() {
         if (msg.type === "extend_prompt") setNotice(`Class ends in about ${Math.ceil(msg.seconds_remaining / 60)} minutes.`);
         if (msg.type === "class_extended") setDeadline(msg.new_deadline);
         if (msg.type === "session_ended") {
+          classFinalizedRef.current = true;
           setEnding(true);
+          setShowNoShowPrompt(false);
+          if (msg.reason === "student_no_show") {
+            navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student");
+            return;
+          }
           setShowReview(true);
           api.get(`/classroom/sessions/${sessionId}/notes`).then((r) => setNotesUrl(r.data.pdf_url)).catch(() => { });
         }
@@ -825,7 +866,12 @@ export default function Classroom() {
       nextSocket.onclose = (event) => {
         whiteboardSentOnSocketRef.current.clear();
         if (disposedRef.current) return;
-        if (![4401, 4403, 4404, 4409].includes(event.code)) {
+        if (event.code === 4409) {
+          classFinalizedRef.current = true;
+          navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student");
+          return;
+        }
+        if (![4401, 4403, 4404].includes(event.code)) {
           reconnectTimer = setTimeout(connectWebSocket, 2500);
         }
       };
@@ -1113,19 +1159,19 @@ export default function Classroom() {
   const setPermission = (permission, granted) => { if (!studentId) return setNotice("Waiting for the student to join."); send({ type: "permission_update", target_user_id: studentId, permission, granted }); };
   const endClass = async () => {
     if (!isTeacher || ending) return;
+    setConfirmEnd(false);
     setEnding(true);
     try {
       const { data } = await api.post(`/classroom/sessions/${sessionId}/end`);
+      classFinalizedRef.current = true;
       if (data?.pdf_url) setNotesUrl(data.pdf_url);
-      // Do not depend solely on the classroom WebSocket echo to leave the
-      // active class screen; the end API response is the authoritative success.
       setShowReview(true);
     } catch (error) {
       setEnding(false);
       setNotice(error.response?.data?.detail || "Could not end class.");
     }
   };
-  const controlsAllowed = timer !== null && timer <= 300;
+  const controlsAllowed = timer !== null && timer > 0 && timer <= 300;
   const localVideoName = user?.name || user?.full_name || user?.display_name || user?.email || (isTeacher ? "Teacher" : "Student");
   const remoteVideoName = peerName || (isTeacher ? "Student" : "Teacher");
   const videoControl = (kind, active, label) => <button type="button" title={label} aria-label={label} onClick={() => media(kind)} className={`classroom-video-control ${active ? "active" : ""}`}>{kind === "mic" ? (active ? "🎙" : "🔇") : kind === "camera" ? (active ? "▣" : "▢") : "↗"}</button>;
