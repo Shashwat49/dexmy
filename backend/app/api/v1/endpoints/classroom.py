@@ -65,12 +65,17 @@ async def end_session(session_id: uuid.UUID, current_user: User = Depends(get_cu
     booking = db.get(Booking, cs.booking_id)
     if current_user.id != booking.teacher_id: raise HTTPException(status_code=403, detail="Only the teacher can end the session")
     notes = end_class_session(session_id, db)
-    room = manager.rooms.pop(session_id, None)
+    room = manager.rooms.get(session_id)
     if room:
+        if room.timer_task and room.timer_task is not asyncio.current_task() and not room.timer_task.done():
+            room.timer_task.cancel()
         for ws in (room.teacher_ws, room.student_ws):
             if ws:
-                try: await ws.send_json({"type": "session_ended", "reason": "teacher_ended"})
-                except Exception: pass
+                try:
+                    await ws.send_json({"type": "session_ended", "reason": "teacher_ended"})
+                except Exception:
+                    pass
+        manager.rooms.pop(session_id, None)
     if notes is None: return ClassNotesRead(session_id=session_id, pdf_url=None, generated_at=None)
     return ClassNotesRead(session_id=notes.session_id, pdf_url=get_presigned_url(notes.pdf_url, expires_in=3600), generated_at=notes.generated_at)
 
