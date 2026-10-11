@@ -239,7 +239,8 @@ export default function Classroom() {
       const token = localStorage.getItem("dexmy_token");
       const base = import.meta.env.VITE_API_BASE_URL;
       if (!base || !token) return;
-      fetch(`${base.replace(/\\/$/, "")}/classroom/sessions/${sessionId}/leave`, {
+      const apiBase = base.endsWith("/") ? base.slice(0, -1) : base;
+      fetch(`${apiBase}/classroom/sessions/${sessionId}/leave`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: "{}",
