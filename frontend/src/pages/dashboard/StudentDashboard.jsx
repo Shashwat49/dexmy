@@ -48,7 +48,7 @@ export default function StudentDashboard() {
 
   const now = new Date();
   const upcoming = bookings.filter((b) => new Date(b.scheduled_at) >= now && b.status === "confirmed").sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
-  const past = bookings.filter((b) => b.status === "completed" || b.status === "cancelled" || new Date(b.scheduled_at) < now).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
+  const past = bookings.filter((b) => b.status === "completed" || b.status === "cancelled" || b.status === "no_show" || new Date(b.scheduled_at) < now).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
 
   async function handleJoin(booking) {
     if (joiningBookingId) return;
