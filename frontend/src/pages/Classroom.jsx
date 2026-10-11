@@ -861,7 +861,7 @@ export default function Classroom() {
           classFinalizedRef.current = true;
           setEnding(true);
           setShowNoShowPrompt(false);
-          if (msg.reason === "student_no_show") {
+          if (msg.reason === "student_no_show" || msg.reason === "class_cancelled") {
             navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student");
             return;
           }
