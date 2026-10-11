@@ -46,7 +46,7 @@ const whiteboardTrace = (event, details = {}) => {
   if (typeof window === "undefined" || new URLSearchParams(window.location.search).get("debugWhiteboard") !== "1") return;
   console.debug("[Dexmy whiteboard trace]", { at: Date.now(), event, ...details });
 };
-const TOOLS = [["select", "Select"], ["pen", "Pen"], ["highlighter", "Highlight"], ["line", "Line"], ["arrow", "Arrow"], ["rect", "Rectangle"], ["circle", "Circle"], ["text", "Text"], ["eraser", "Eraser"]];
+const TOOLS = [["pen", "Pen"], ["highlighter", "Highlight"], ["line", "Line"], ["arrow", "Arrow"], ["rect", "Rectangle"], ["circle", "Circle"], ["eraser", "Eraser"]];
 const ToolIcon = ({ id, size = 17 }) => {
   const props = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true };
   if (id === "select") return <svg {...props}><path d="m5 3 12.5 12.5-5.5 1.2 3.2 4.8-2.1 1.2-3.2-4.8-3.5 4.2L5 3Z" /></svg>;
