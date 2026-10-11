@@ -17,7 +17,14 @@ class RoomState:
     student_ws: WebSocket | None = None
     pending_student: WebSocket | None = None
     permissions: dict[str, set[str]] = field(default_factory=dict)
-    deadline: datetime | None = None       # wall-clock time this class must end by
+    deadline: datetime | None = None       # active wall-clock deadline while timer is running
+    remaining_seconds: float | None = None
+    timer_started: bool = False
+    timer_running: bool = False
+    student_ever_joined: bool = False
+    no_show_deadline: datetime | None = None
+    no_show_remaining_seconds: float = 900.0
+    no_show_prompted: bool = False
     extended: bool = False                  # whether the one-time 5-min extension has been used
     warned: bool = False                    # whether the 2-min extend-prompt has already fired
     timer_task: "asyncio.Task | None" = None  # keeps the background timer alive / referenced
