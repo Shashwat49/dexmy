@@ -66,8 +66,12 @@ async def end_session(session_id: uuid.UUID, current_user: User = Depends(get_cu
     booking = db.get(Booking, cs.booking_id)
     if current_user.id != booking.teacher_id: raise HTTPException(status_code=403, detail="Only the teacher can end the session")
     room = manager.rooms.get(session_id)
-    if room and room.timer_running and room.deadline:
-        remaining = (room.deadline - datetime.now(timezone.utc)).total_seconds()
+    if room and room.timer_started:
+        remaining = (
+            (room.deadline - datetime.now(timezone.utc)).total_seconds()
+            if room.timer_running and room.deadline
+            else float(room.remaining_seconds or 0)
+        )
         if remaining > 300:
             raise HTTPException(status_code=409, detail="End class is available only in the last 5 minutes")
     no_show = bool(room and not room.student_ever_joined)
