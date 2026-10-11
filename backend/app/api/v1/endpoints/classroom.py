@@ -105,10 +105,11 @@ async def leave_session(session_id: uuid.UUID, current_user: User = Depends(get_
         raise HTTPException(status_code=403, detail="You are not part of this classroom")
 
     room = manager.rooms.get(session_id)
+    cancelled_before_student_joined = room is None or not room.student_ever_joined
     if cs.status not in (SessionStatus.ended, SessionStatus.cancelled):
         # If the student never entered the classroom, do not charge either
         # side for a class that never took place.
-        if room is None or not room.student_ever_joined:
+        if cancelled_before_student_joined:
             cs.status = SessionStatus.ended
             cs.ended_at = datetime.now(timezone.utc)
             if booking.status not in (BookingStatus.cancelled, BookingStatus.no_show):
@@ -120,10 +121,11 @@ async def leave_session(session_id: uuid.UUID, current_user: User = Depends(get_
     if room:
         if room.timer_task and room.timer_task is not asyncio.current_task() and not room.timer_task.done():
             room.timer_task.cancel()
-        for ws in (room.teacher_ws, room.student_ws):
+        reason = "class_cancelled" if cancelled_before_student_joined else "participant_left"
+        for ws in (room.teacher_ws, room.student_ws, room.pending_student):
             if ws:
                 try:
-                    await ws.send_json({"type": "session_ended", "reason": "participant_left"})
+                    await ws.send_json({"type": "session_ended", "reason": reason})
                 except Exception:
                     pass
         manager.rooms.pop(session_id, None)
