@@ -25,6 +25,7 @@ class RoomState:
     no_show_deadline: datetime | None = None
     no_show_remaining_seconds: float = 900.0
     no_show_prompted: bool = False
+    no_show_decided: bool = False
     extended: bool = False                  # whether the one-time 5-min extension has been used
     warned: bool = False                    # whether the 2-min extend-prompt has already fired
     timer_task: "asyncio.Task | None" = None  # keeps the background timer alive / referenced
