@@ -1111,7 +1111,20 @@ export default function Classroom() {
   }, [hasEntered, sessionId, user, wsUrl, isTeacher, navigate, redraw, renderStroke, currentStrokes]);
   const sendMessage = (event) => { event.preventDefault(); const text = message.trim(); if (!text) return; if (!send({ type: "chat", message_text: text })) { setNotice("Chat is reconnecting. Please try again in a moment."); return; } setChat((items) => [...items, { mine: true, text }]); setMessage(""); };
   const setPermission = (permission, granted) => { if (!studentId) return setNotice("Waiting for the student to join."); send({ type: "permission_update", target_user_id: studentId, permission, granted }); };
-  const endClass = async () => { if (!isTeacher || ending) return; setEnding(true); try { const { data } = await api.post(`/classroom/sessions/${sessionId}/end`); if (data?.pdf_url) setNotesUrl(data.pdf_url); } catch (error) { setEnding(false); setNotice(error.response?.data?.detail || "Could not end class."); } };
+  const endClass = async () => {
+    if (!isTeacher || ending) return;
+    setEnding(true);
+    try {
+      const { data } = await api.post(`/classroom/sessions/${sessionId}/end`);
+      if (data?.pdf_url) setNotesUrl(data.pdf_url);
+      // Do not depend solely on the classroom WebSocket echo to leave the
+      // active class screen; the end API response is the authoritative success.
+      setShowReview(true);
+    } catch (error) {
+      setEnding(false);
+      setNotice(error.response?.data?.detail || "Could not end class.");
+    }
+  };
   const controlsAllowed = timer !== null && timer <= 300;
   const localVideoName = user?.name || user?.full_name || user?.display_name || user?.email || (isTeacher ? "Teacher" : "Student");
   const remoteVideoName = peerName || (isTeacher ? "Student" : "Teacher");
