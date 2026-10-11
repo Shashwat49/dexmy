@@ -62,6 +62,7 @@ def _timer_state(room) -> dict:
     return {
         "type": "timer_state",
         "running": room.timer_running,
+        "extension_used": room.extended,
         "remaining_seconds": max(0, int(room.remaining_seconds or 0)) if not room.timer_running else max(
             0, int((room.deadline - datetime.now(timezone.utc)).total_seconds())
         ),
