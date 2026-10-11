@@ -821,9 +821,13 @@ async def session_timer(session_id):
 
 
 async def _auto_end_session(session_id, room):
+    reason = "student_no_show" if not room.student_ever_joined else "time_up"
     db = SessionLocal()
     try:
-        end_class_session(session_id, db)
+        if room.student_ever_joined:
+            end_class_session(session_id, db)
+        else:
+            mark_student_no_show(session_id, db)
     except Exception:
         db.rollback()
         logging.getLogger(__name__).exception(
@@ -834,7 +838,7 @@ async def _auto_end_session(session_id, room):
     finally:
         db.close()
 
-    out = {"type": "session_ended", "reason": "time_up"}
+    out = {"type": "session_ended", "reason": reason}
     for ws in (room.teacher_ws, room.student_ws):
         if ws:
             try:
