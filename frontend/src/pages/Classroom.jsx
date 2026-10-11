@@ -1171,6 +1171,10 @@ export default function Classroom() {
     try {
       const { data } = await api.post(`/classroom/sessions/${sessionId}/end`);
       classFinalizedRef.current = true;
+      if (data?.reason === "student_no_show") {
+        navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student");
+        return;
+      }
       if (data?.pdf_url) setNotesUrl(data.pdf_url);
       setShowReview(true);
     } catch (error) {
