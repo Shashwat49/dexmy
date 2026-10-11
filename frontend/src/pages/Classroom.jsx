@@ -186,7 +186,7 @@ export default function Classroom() {
   backgroundSizeRef.current = backgroundSize;
   const [mic, setMic] = useState(false), [camera, setCamera] = useState(false), [screen, setScreen] = useState(false), [studentId, setStudentId] = useState(null), [peerName, setPeerName] = useState("");
   const [permissions, setPermissions] = useState({ mic: true, camera: true, annotate: false, screen_share: false }), [ending, setEnding] = useState(false), [notesUrl, setNotesUrl] = useState(null), [timer, setTimer] = useState(null), [deadline, setDeadline] = useState(null);
-  const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [backPrompt, setBackPrompt] = useState(false), [confirmEnd, setConfirmEnd] = useState(false), [showNoShowPrompt, setShowNoShowPrompt] = useState(false), [showReview, setShowReview] = useState(false);
+  const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [confirmEnd, setConfirmEnd] = useState(false), [showNoShowPrompt, setShowNoShowPrompt] = useState(false), [showReview, setShowReview] = useState(false);
   const classFinalizedRef = useRef(false);
   const [hasEntered, setHasEntered] = useState(false), [cameraDevices, setCameraDevices] = useState([]), [microphoneDevices, setMicrophoneDevices] = useState([]), [selectedCameraId, setSelectedCameraId] = useState(""), [selectedMicrophoneId, setSelectedMicrophoneId] = useState(""), [deviceError, setDeviceError] = useState("");
   const previewRef = useRef(null), previewStreamRef = useRef(null);
@@ -224,7 +224,7 @@ export default function Classroom() {
   }, []);
   useEffect(() => { if (!deadline) return; const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))); tick(); const id = setInterval(tick, 1000); return () => clearInterval(id); }, [deadline]);
   useEffect(() => { let active = true; api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => { if (!active) return; if (["ended", "cancelled"].includes(String(data.status || "").toLowerCase())) { classFinalizedRef.current = true; navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"); return; } setClassTitle(data.subject_name || "Class"); }).catch(() => { }); return () => { active = false; }; }, [sessionId, isTeacher, navigate]);
-  useEffect(() => { if (!sessionId) return; const state = { dexmyClassroom: true, sessionId }; window.history.pushState(state, "", window.location.href); const onPopState = () => { if (classFinalizedRef.current) return; window.history.pushState(state, "", window.location.href); setNotice("You cannot go back while a class is in progress."); }; window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, [sessionId, isTeacher]);
+  useEffect(() => { if (!sessionId) return; const state = { dexmyClassroom: true, sessionId }; window.history.pushState(state, "", window.location.href); const onPopState = () => { window.history.pushState(state, "", window.location.href); setNotice("Browser Back is disabled in the classroom. Use the class review to return to your dashboard."); }; window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, [sessionId, isTeacher]);
   useEffect(() => {
     if (!hasEntered || !sessionId) return;
     const warnBeforeExit = (event) => {
