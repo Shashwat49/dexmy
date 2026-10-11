@@ -290,6 +290,20 @@ export default function Classroom() {
   const redraw = useCallback(async () => { const canvas = canvasRef.current; if (!canvas) return; const pageAtStart = slideRef.current; const ctx = canvas.getContext("2d"); const bg = slidesRef.current[pageAtStart - 1]?.image_url; ctx.clearRect(0, 0, W, H); if (!bg) { ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H); } if (pageAtStart !== slideRef.current) return; if (gridRef.current) { const content = getSlideContentRect(); ctx.save(); ctx.beginPath(); ctx.rect(content.x, content.y, content.width, content.height); ctx.clip(); ctx.translate(content.x, content.y); ctx.scale(content.width / W, content.height / H); ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1; for (let x = 0; x <= W; x += 40) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } for (let y = 0; y <= H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } ctx.restore(); } const pageStrokes = strokesByPageRef.current.get(currentPageId(pageAtStart)) || []; const activePageId = currentPageId(pageAtStart); const belongsToPage = (stroke) => stroke.page_id ? stroke.page_id === activePageId : Number(stroke.page_number) === pageAtStart; const activeLocalStroke = drawRef.current && (drawRef.current.page_id ? drawRef.current.page_id === activePageId : Number(drawRef.current.page_number || pageAtStart) === pageAtStart) ? drawRef.current : null; const liveIds = new Set(Array.from(liveRef.current.values()).filter(belongsToPage).map((s) => s.id)); if (activeLocalStroke) liveIds.add(activeLocalStroke.id); pageStrokes.forEach((s) => { if (!liveIds.has(s.id)) renderStroke(s); }); liveRef.current.forEach((s) => { if (belongsToPage(s)) renderStroke(s); }); if (activeLocalStroke) renderStroke(activeLocalStroke); const selected = (strokesByPageRef.current.get(currentPageId(pageAtStart)) || []).find(s => s.id === selectedStrokeRef.current); const bounds = strokeBounds(selected); if (bounds) { ctx.save(); ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 3; ctx.setLineDash([8, 5]); ctx.strokeRect(bounds.minX - 8, bounds.minY - 8, Math.max(16, bounds.maxX - bounds.minX + 16), Math.max(16, bounds.maxY - bounds.minY + 16)); ctx.setLineDash([]); ctx.fillStyle = "#fff"; ctx.strokeStyle = "#2563eb"; ctx.lineWidth = 3; ctx.fillRect(bounds.maxX + 1, bounds.maxY + 1, 14, 14); ctx.strokeRect(bounds.maxX + 1, bounds.maxY + 1, 14, 14); ctx.restore(); } }, [renderStroke, currentPageId]);
   useEffect(() => { redraw(); }, [slide, slides, grid, redraw]);
   useEffect(() => { redraw(); }, [backgroundSize, redraw]);
+  // Screen-share teardown can race with LiveKit track cleanup and browser layout.
+  // Repaint the existing in-memory page more than once; never clear board state or reload the page.
+  const restoreWhiteboardAfterScreenShare = useCallback(() => {
+    const repaint = () => {
+      const canvas = canvasRef.current;
+      const context = canvas?.getContext("2d");
+      if (!canvas || !context) return;
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      void redraw();
+    };
+    requestAnimationFrame(() => requestAnimationFrame(repaint));
+    window.setTimeout(repaint, 120);
+    window.setTimeout(repaint, 350);
+  }, [redraw]);
   useEffect(() => {
     const id = requestAnimationFrame(() => { redraw(); });
     return () => cancelAnimationFrame(id);
@@ -1004,15 +1018,19 @@ export default function Classroom() {
           else if (publication.source === Track.Source.Microphone) setMic(false);
           else if (publication.source === Track.Source.ScreenShare) {
             setScreen(false);
-            // Restore the existing whiteboard canvas after the local share is removed.
-            requestAnimationFrame(() => redraw());
+            restoreWhiteboardAfterScreenShare();
+          }
+        });
+        room.on(RoomEvent.TrackUnpublished, (publication) => {
+          if (publication?.source === Track.Source.ScreenShare) {
+            // Remote share can be unpublished before the subscribed track is fully detached.
+            restoreWhiteboardAfterScreenShare();
           }
         });
         room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
           detachMedia(track);
           if (publication?.source === Track.Source.ScreenShare) {
-            // Remote screen sharing can end without changing this client's local screen state.
-            requestAnimationFrame(() => redraw());
+            restoreWhiteboardAfterScreenShare();
           }
         });
         room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
