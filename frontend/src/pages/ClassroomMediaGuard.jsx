@@ -4,6 +4,10 @@ import { LocalParticipant, Room, RoomEvent, Track, TrackEvent } from "livekit-cl
 const desiredMedia = new WeakMap();
 const PATCHED = Symbol("dexmyMediaGuardPatched");
 
+// The LiveKit room the classroom is currently using. Set whenever Room.connect
+// runs, cleared when the classroom unmounts.
+let activeRoom = null;
+
 function remember(participant, kind, enabled) {
   const state = desiredMedia.get(participant) || { camera: false, microphone: false };
   state[kind] = enabled;
@@ -13,6 +17,62 @@ function remember(participant, kind, enabled) {
 function getDesired(participant) {
   return desiredMedia.get(participant) || { camera: false, microphone: false };
 }
+
+// --- Remote screen-share overlay -------------------------------------------
+// Classroom.css turns #remote-screen into a full-board black overlay for as
+// long as it contains a <video>. If a <video> is ever left behind after the
+// other person stops sharing (event ordering, reconnects, a muted/ended track),
+// that black layer stays on top of the whiteboard. LiveKit's real track state is
+// the source of truth, so this keeps the overlay in sync with it.
+function inspectRemoteScreenShares(room) {
+  const result = { present: false, live: false };
+  if (!room) return result;
+  room.remoteParticipants?.forEach((participant) => {
+    participant.trackPublications?.forEach((publication) => {
+      if (publication.source !== Track.Source.ScreenShare) return;
+      const track = publication.track;
+      if (!track) return;
+      if (track.mediaStreamTrack?.readyState === "ended") return;
+      result.present = true;
+      if (!publication.isMuted) result.live = true;
+    });
+  });
+  return result;
+}
+
+function syncRemoteScreenOverlay() {
+  const box = document.getElementById("remote-screen");
+  if (!box) return;
+  const { present, live } = inspectRemoteScreenShares(activeRoom);
+
+  // No screen-share track exists any more: drop any leftover media elements.
+  if (!present) {
+    box.querySelectorAll("video, audio").forEach((element) => {
+      try { element.pause?.(); } catch { /* ignore */ }
+      element.remove();
+    });
+  }
+
+  // Only show the overlay while a screen share is actually live. An inline
+  // !important wins over the stylesheet's !important, so the whiteboard is
+  // guaranteed to be visible whenever nothing is being shared.
+  if (live) {
+    if (box.style.getPropertyValue("display")) box.style.removeProperty("display");
+  } else if (box.style.getPropertyValue("display") !== "none") {
+    box.style.setProperty("display", "none", "important");
+  }
+}
+
+const OVERLAY_SYNC_EVENTS = [
+  RoomEvent.TrackSubscribed,
+  RoomEvent.TrackUnsubscribed,
+  RoomEvent.TrackUnpublished,
+  RoomEvent.TrackMuted,
+  RoomEvent.TrackUnmuted,
+  RoomEvent.ParticipantDisconnected,
+  RoomEvent.Disconnected,
+  RoomEvent.Reconnected,
+];
 
 function installMediaGuard() {
   if (LocalParticipant.prototype[PATCHED]) return;
@@ -33,6 +93,7 @@ function installMediaGuard() {
   };
 
   Room.prototype.connect = async function connect(...args) {
+    activeRoom = this;
     const result = await originalConnect.apply(this, args);
     const room = this;
     const participant = room.localParticipant;
@@ -78,6 +139,14 @@ function installMediaGuard() {
       setTimeout(restoreMedia, 150);
     });
 
+    // Keep the remote screen-share overlay in step with the real track state.
+    // These listeners are added after the classroom's own, so its handlers
+    // (attach/detach) run first and this only cleans up what they missed.
+    const syncOverlay = () => {
+      if (activeRoom === room) syncRemoteScreenOverlay();
+    };
+    OVERLAY_SYNC_EVENTS.forEach((event) => room.on(event, syncOverlay));
+
     return result;
   };
 }
@@ -98,9 +167,13 @@ export default function ClassroomMediaGuard() {
         if (hasLiveTrack && video.paused) video.play?.().catch(() => {});
       });
     }, 1000);
+    // Safety net in case a LiveKit event is missed or arrives out of order.
+    const overlayWatch = setInterval(syncRemoteScreenOverlay, 500);
     return () => {
       active = false;
       clearInterval(playbackWatch);
+      clearInterval(overlayWatch);
+      activeRoom = null;
     };
   }, []);
 
