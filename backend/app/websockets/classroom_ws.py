@@ -427,12 +427,33 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                         or not incoming_editor
                         or not current_editor
                     )
+                    incoming_geometry = (
+                        stroke.get("tool"),
+                        stroke.get("points"),
+                        stroke.get("text"),
+                    )
+                    current_geometry = (
+                        current_stroke.get("tool"),
+                        current_stroke.get("points"),
+                        current_stroke.get("text"),
+                    )
+                    same_editor_same_generation_conflict = (
+                        bool(incoming_editor)
+                        and incoming_editor == current_editor
+                        and incoming_generation == current_generation
+                        and incoming_geometry != current_geometry
+                    )
                     if (
                         same_editor_or_legacy_update
-                        and incoming_generation < current_generation
+                        and (
+                            incoming_generation < current_generation
+                            or same_editor_same_generation_conflict
+                        )
                     ):
                         # Record the action idempotently without changing the
-                        # canonical stroke or relaying stale coordinates.
+                        # canonical stroke or relaying stale coordinates. Equal
+                        # generations from the same editor must also not restore
+                        # older geometry after a newer move has been committed.
                         snapshot_data = {"strokes": strokes}
                         if action_id:
                             snapshot_data["action_id"] = str(action_id)
