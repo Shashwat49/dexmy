@@ -645,11 +645,11 @@ export default function Classroom() {
           const committedRevision = Number(committed?._whiteboard_revision) || 0;
           const priorLive = liveRef.current.get(stroke.id);
           const previewIsNewerThanCommit = !!committed &&
-              String(p.editor_id || "") === String(committed._whiteboard_editor_id || "") &&
-              Number(p.edit_generation || 0) > Number(committed._whiteboard_edit_generation || 0);
-            const staleAgainstCommit = !previewIsNewerThanCommit &&
-              (p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) :
-                (committedRevision > 0 && committedRevision >= Number(p.revision || 0)));
+            String(p.editor_id || "") === String(committed._whiteboard_editor_id || "") &&
+            Number(p.edit_generation || 0) > Number(committed._whiteboard_edit_generation || 0);
+          const staleAgainstCommit = !previewIsNewerThanCommit &&
+            (p.base_revision !== undefined ? committedRevision > Number(p.base_revision || 0) :
+              (committedRevision > 0 && committedRevision >= Number(p.revision || 0)));
           whiteboardTrace("ws-preview-received", { transport: "websocket", pageId, replace: !!p.replace, final: !!p.final, previewRevision: Number(p.preview_revision) || 0, packetRevision: Number(p.revision) || 0, baseRevision: Number(p.base_revision) || 0, committedRevision, incoming: whiteboardGeometry(stroke), currentCommitted: whiteboardGeometry(committed), currentLive: whiteboardGeometry(priorLive), decision: staleAgainstCommit ? "ignore-stale-against-commit" : "consider-preview" });
           if (staleAgainstCommit) return;
           let live = liveRef.current.get(stroke.id);
