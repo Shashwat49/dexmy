@@ -34,8 +34,14 @@ class ClassroomConnectionManager:
 
     def drop_room_if_empty(self, session_id: uuid.UUID) -> None:
         room = self.rooms.get(session_id)
-        if room and not room.teacher_ws and not room.student_ws and not room.pending_student:
-            del self.rooms[session_id]
+        if not room or room.teacher_ws or room.student_ws or room.pending_student:
+            return
+        # Keep the room state alive while its deadline timer is running. If both
+        # participants disconnect, deleting the room makes session_timer exit
+        # early and leaves the database session stuck in "live".
+        if room.timer_task and not room.timer_task.done():
+            return
+        del self.rooms[session_id]
 
 
 manager = ClassroomConnectionManager()
