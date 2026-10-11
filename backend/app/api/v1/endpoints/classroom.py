@@ -1,12 +1,13 @@
 import asyncio
 import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
-from app.models.booking import Booking
-from app.models.classroom import ClassSession, PermissionEvent, PermissionType
+from app.models.booking import Booking, BookingStatus
+from app.models.classroom import ClassSession, PermissionEvent, PermissionType, SessionStatus
 from app.models.user import User
 from app.models.teacher import Subject
 from app.schemas.classroom import JoinTokenRequest, JoinTokenResponse, ClassSessionRead, ClassNotesRead
@@ -78,6 +79,42 @@ async def end_session(session_id: uuid.UUID, current_user: User = Depends(get_cu
         manager.rooms.pop(session_id, None)
     if notes is None: return ClassNotesRead(session_id=session_id, pdf_url=None, generated_at=None)
     return ClassNotesRead(session_id=notes.session_id, pdf_url=get_presigned_url(notes.pdf_url, expires_in=3600), generated_at=notes.generated_at)
+
+@router.post("/sessions/{session_id}/leave")
+async def leave_session(session_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """End the classroom when a participant confirms a browser refresh/close."""
+    cs = db.get(ClassSession, session_id)
+    if cs is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    booking = db.get(Booking, cs.booking_id)
+    if booking is None or current_user.id not in (booking.teacher_id, booking.student_id):
+        raise HTTPException(status_code=403, detail="You are not part of this classroom")
+
+    room = manager.rooms.get(session_id)
+    if cs.status not in (SessionStatus.ended, SessionStatus.cancelled):
+        # If the student never entered the classroom, do not charge either
+        # side for a class that never took place.
+        if room is not None and not room.student_ever_joined:
+            cs.status = SessionStatus.ended
+            cs.ended_at = datetime.now(timezone.utc)
+            if booking.status not in (BookingStatus.cancelled, BookingStatus.no_show):
+                booking.status = BookingStatus.cancelled
+            db.commit()
+        else:
+            end_class_session(session_id, db)
+
+    if room:
+        if room.timer_task and room.timer_task is not asyncio.current_task() and not room.timer_task.done():
+            room.timer_task.cancel()
+        for ws in (room.teacher_ws, room.student_ws):
+            if ws:
+                try:
+                    await ws.send_json({"type": "session_ended", "reason": "participant_left"})
+                except Exception:
+                    pass
+        manager.rooms.pop(session_id, None)
+    return {"status": "ended"}
+
 
 @router.get("/sessions/{session_id}/notes", response_model=ClassNotesRead)
 def get_notes(session_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
