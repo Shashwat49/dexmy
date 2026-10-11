@@ -91,8 +91,10 @@ async def end_session(session_id: uuid.UUID, current_user: User = Depends(get_cu
                 except Exception:
                     pass
         manager.rooms.pop(session_id, None)
-    if notes is None: return ClassNotesRead(session_id=session_id, pdf_url=None, generated_at=None)
-    return ClassNotesRead(session_id=notes.session_id, pdf_url=get_presigned_url(notes.pdf_url, expires_in=3600), generated_at=notes.generated_at)
+    reason = "student_no_show" if no_show else "teacher_ended"
+    if notes is None:
+        return ClassNotesRead(session_id=session_id, pdf_url=None, generated_at=None, reason=reason)
+    return ClassNotesRead(session_id=notes.session_id, pdf_url=get_presigned_url(notes.pdf_url, expires_in=3600), generated_at=notes.generated_at, reason=reason)
 
 @router.post("/sessions/{session_id}/leave")
 async def leave_session(session_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
