@@ -61,6 +61,7 @@ class ClassNotesRead(BaseModel):
     session_id: uuid.UUID
     pdf_url: str | None
     generated_at: datetime | None
+    reason: str | None = None
 
 @router.post("/sessions/{session_id}/end", response_model=ClassNotesRead)
 def end_session(
