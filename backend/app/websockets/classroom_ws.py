@@ -682,26 +682,51 @@ async def session_timer(session_id):
         db = SessionLocal()
         try:
             cs = db.get(ClassSession, session_id)
-            if cs is None or cs.status == SessionStatus.ended:
+            if cs is None or cs.status in (SessionStatus.ended, SessionStatus.cancelled):
                 return
         finally:
             db.close()
+
         remaining = (room.deadline - datetime.now(timezone.utc)).total_seconds()
+        # Expiration takes priority over the optional extension warning. A stale
+        # WebSocket must never be able to crash the timer before class end.
+        if remaining <= 0:
+            if await _auto_end_session(session_id, room):
+                return
+            # A transient database error should not permanently disable auto-end.
+            await asyncio.sleep(2)
+            continue
+
         if not room.warned and remaining <= 120:
             room.warned = True
             if room.teacher_ws:
-                await room.teacher_ws.send_json({"type": "extend_prompt", "seconds_remaining": max(0, int(remaining))})
-        if remaining <= 0:
-            await _auto_end_session(session_id, room)
-            return
+                try:
+                    await room.teacher_ws.send_json({
+                        "type": "extend_prompt",
+                        "seconds_remaining": max(0, int(remaining)),
+                    })
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        "Could not send class extension warning for session %s",
+                        session_id,
+                        exc_info=True,
+                    )
 
 
 async def _auto_end_session(session_id, room):
     db = SessionLocal()
     try:
         end_class_session(session_id, db)
+    except Exception:
+        db.rollback()
+        logging.getLogger(__name__).exception(
+            "Automatic class end failed for session %s; will retry",
+            session_id,
+        )
+        return False
     finally:
         db.close()
+
     out = {"type": "session_ended", "reason": "time_up"}
     for ws in (room.teacher_ws, room.student_ws):
         if ws:
@@ -709,6 +734,7 @@ async def _auto_end_session(session_id, room):
                 await ws.send_json(out)
             except Exception:
                 pass
-    if room.timer_task and not room.timer_task.done():
+    if room.timer_task and room.timer_task is not asyncio.current_task() and not room.timer_task.done():
         room.timer_task.cancel()
     manager.rooms.pop(session_id, None)
+    return True
