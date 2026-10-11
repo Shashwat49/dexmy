@@ -94,7 +94,7 @@ async def leave_session(session_id: uuid.UUID, current_user: User = Depends(get_
     if cs.status not in (SessionStatus.ended, SessionStatus.cancelled):
         # If the student never entered the classroom, do not charge either
         # side for a class that never took place.
-        if room is not None and not room.student_ever_joined:
+        if room is None or not room.student_ever_joined:
             cs.status = SessionStatus.ended
             cs.ended_at = datetime.now(timezone.utc)
             if booking.status not in (BookingStatus.cancelled, BookingStatus.no_show):
