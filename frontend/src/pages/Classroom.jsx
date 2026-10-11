@@ -572,6 +572,10 @@ export default function Classroom() {
         }
         if (msg.type === "student_no_show_prompt" && isTeacher) setShowNoShowPrompt(true);
         if (msg.type === "no_show_prompt_dismissed") setShowNoShowPrompt(false);
+        if (msg.type === "no_show_decision_failed") {
+          setShowNoShowPrompt(true);
+          setNotice("Could not record the no-show. Please retry or choose No to continue.");
+        }
         if (msg.type === "student_joined") {
           setStudentId(msg.user_id);
           setPeerName(msg.name || "Student");
