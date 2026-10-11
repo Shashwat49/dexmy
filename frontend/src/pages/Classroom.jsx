@@ -497,7 +497,9 @@ export default function Classroom() {
           const actionId = msg.action_id;
           const actionEdit = actionId ? whiteboardActionEditVersionRef.current.get(actionId) : null;
           const canonical = msg.payload;
-          // An acknowledgement can arrive after the teacher has already undone this stroke.\n          // Never let that late ACK reinsert an ID locally tombstoned by Undo/Clear.\n          if (canonical?.stroke?.id && !deletedStrokeIdsRef.current.has(canonical.stroke.id) && ["stroke", "stroke_update"].includes(canonical.kind)) {
+          // An acknowledgement can arrive after the teacher has already undone this stroke.
+          // Never let that late ACK reinsert an ID locally tombstoned by Undo/Clear.
+          if (canonical?.stroke?.id && !deletedStrokeIdsRef.current.has(canonical.stroke.id) && ["stroke", "stroke_update"].includes(canonical.kind)) {
             const pageNumber = Number(canonical.page_number) || 1;
             const pageId = canonical.page_id || currentPageId(pageNumber);
             const incoming = { ...canonical.stroke };
