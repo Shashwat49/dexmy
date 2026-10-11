@@ -451,9 +451,19 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             ).order_by(desc(WhiteboardSnapshot.created_at)).first()
             latest_snapshot_data = latest.snapshot_data if latest and isinstance(latest.snapshot_data, dict) else {}
             strokes = list((latest_snapshot_data.get("strokes") or []) if latest else [])
-            # Keep deletion tombstones in the canonical snapshot. Delayed stroke
-            # commits or stale canvas snapshots must never resurrect an undone ID.
-            deleted_stroke_ids = set(latest_snapshot_data.get("deleted_stroke_ids") or [])
+            # A later snapshot can be stale, and created_at timestamps can tie.
+            # Collect tombstones across this page's history so a stale "latest"
+            # row can never forget an Undo/Clear and resurrect deleted elements.
+            page_snapshot_data = db.query(WhiteboardSnapshot.snapshot_data).filter(
+                WhiteboardSnapshot.session_id == session_id,
+                WhiteboardSnapshot.page_id == page.id,
+            ).all()
+            deleted_stroke_ids = {
+                str(stroke_id)
+                for (snapshot_data,) in page_snapshot_data
+                if isinstance(snapshot_data, dict)
+                for stroke_id in (snapshot_data.get("deleted_stroke_ids") or [])
+            }
             stroke = payload.get("stroke")
             if kind in {"stroke", "stroke_update"} and isinstance(stroke, dict) and stroke.get("id") and str(stroke["id"]) in deleted_stroke_ids:
                 if action_id:
@@ -674,7 +684,19 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         if not isinstance(snapshot_data, dict):
             snapshot_data = {}
         existing_snapshot_data = existing.snapshot_data if existing and isinstance(existing.snapshot_data, dict) else {}
-        deleted_stroke_ids = set(existing_snapshot_data.get("deleted_stroke_ids") or [])
+        # Never derive deletion history from only one "latest" row: timestamp
+        # ties or a delayed snapshot can otherwise drop tombstones and restore
+        # every stroke removed by Undo/Clear.
+        page_snapshot_data = db.query(WhiteboardSnapshot.snapshot_data).filter(
+            WhiteboardSnapshot.session_id == session_id,
+            WhiteboardSnapshot.page_id == page.id,
+        ).all()
+        deleted_stroke_ids = {
+            str(stroke_id)
+            for (historical_data,) in page_snapshot_data
+            if isinstance(historical_data, dict)
+            for stroke_id in (historical_data.get("deleted_stroke_ids") or [])
+        }
         incoming_strokes = snapshot_data.get("strokes")
         existing_strokes = existing_snapshot_data.get("strokes") or []
         if isinstance(incoming_strokes, list):
