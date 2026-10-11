@@ -42,7 +42,12 @@ export default function ClassCard({ booking, otherPartyName, onJoin, onDownloadN
 
       <div className="text-[13px] text-chalk-muted mb-4">{formatDateTime(booking.scheduled_at)}</div>
 
-      {isPast ? (
+      {booking.status === "no_show" ? (
+        <div className="rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-3 text-center">
+          <div className="text-sm font-semibold text-amber-300">Student did not join</div>
+          <p className="mt-1 text-xs text-chalk-muted">One class was deducted from your package. This session was not counted as a completed teacher class.</p>
+        </div>
+      ) : isPast ? (
         <button
           onClick={() => onDownloadNotes?.(booking)}
           className="w-full border border-chalk-muted hover:border-brand-gold hover:text-brand-gold transition-colors text-sm font-semibold py-2.5 rounded-lg"
