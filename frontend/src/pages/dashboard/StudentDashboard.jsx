@@ -32,6 +32,7 @@ export default function StudentDashboard() {
   const [recordError, setRecordError] = useState("");
   const [tab, setTab] = useState("upcoming");
   const [joiningBookingId, setJoiningBookingId] = useState(null);
+  const [dismissNoShowNotice, setDismissNoShowNotice] = useState(false);
 
   const load = async () => {
     setLoading(true); setRecordLoading(true); setError(""); setRecordError("");
@@ -49,6 +50,7 @@ export default function StudentDashboard() {
   const now = new Date();
   const upcoming = bookings.filter((b) => new Date(b.scheduled_at) >= now && b.status === "confirmed").sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
   const past = bookings.filter((b) => b.status === "completed" || b.status === "cancelled" || b.status === "no_show" || new Date(b.scheduled_at) < now).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
+  const noShowCount = bookings.filter((b) => b.status === "no_show").length;
 
   async function handleJoin(booking) {
     if (joiningBookingId) return;
@@ -80,6 +82,7 @@ export default function StudentDashboard() {
     <div className="relative flex-1 overflow-auto px-8 py-7">
       {joiningBookingId && <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm"><div className="rounded-2xl border border-chalk-faint bg-panel px-8 py-7 text-center shadow-2xl"><div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-chalk-muted border-t-brand-gold"/><h3 className="text-base font-semibold">Opening classroom…</h3><p className="mt-1 text-sm text-chalk-muted">Connecting you securely. Please wait.</p></div></div>}
       {error && <div className="mb-5 rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">{error}<button onClick={load} className="ml-3 underline">Retry</button></div>}
+      {!dismissNoShowNotice && noShowCount > 0 && <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100"><div><strong>No-show notice:</strong> {noShowCount === 1 ? "One class was marked as a no-show" : `${noShowCount} classes were marked as no-shows`} because the student did not join within 15 minutes. The package has been charged for {noShowCount === 1 ? "one class" : `${noShowCount} classes`}; the teacher was not credited for a completed class. See Past classes for details.</div><button type="button" aria-label="Dismiss no-show notice" onClick={() => setDismissNoShowNotice(true)} className="shrink-0 rounded px-2 py-1 text-amber-200 hover:bg-amber-400/10">×</button></div>}
 
       {tab === "upcoming" && nextClass && <div className="bg-gradient-to-r from-panel-2 to-panel-3 border border-chalk-faint border-l-[3px] border-l-brand-gold rounded-xl px-6 py-5 flex items-center justify-between mb-7"><div><h3 className="text-base font-semibold mb-1">Your next class</h3><p className="text-[13.5px] text-chalk-muted">{nextClass.subject_name} with {nextClass.teacher_name}</p></div><button disabled={!!joiningBookingId} onClick={() => handleJoin(nextClass)} className="bg-brand-gold text-[#2C1E04] text-sm font-bold px-5 py-2.5 rounded-lg disabled:opacity-60">{joiningBookingId === nextClass.id ? "Opening…" : "Join classroom"}</button></div>}
 
