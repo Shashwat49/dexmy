@@ -346,6 +346,7 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                         pass
             if room.pending_student is websocket:
                 room.pending_student = None
+            await _update_timer_for_presence(room)
             manager.drop_room_if_empty(session_id)
         db.close()
 
@@ -710,16 +711,43 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     await ws.send_json({"type": "pdf_removed"})
                 except Exception:
                     pass
+    elif msg_type == "no_show_decision" and is_teacher:
+        if not room.no_show_prompted or room.no_show_decided or room.student_ever_joined:
+            return
+        room.no_show_decided = True
+        if bool(data.get("accepted")):
+            mark_student_no_show(session_id, db)
+            out = {"type": "session_ended", "reason": "student_no_show"}
+            for ws in (room.teacher_ws, room.student_ws):
+                if ws:
+                    try:
+                        await ws.send_json(out)
+                    except Exception:
+                        pass
+            if room.timer_task and room.timer_task is not asyncio.current_task() and not room.timer_task.done():
+                room.timer_task.cancel()
+            manager.rooms.pop(session_id, None)
+        else:
+            await websocket.send_json({"type": "no_show_prompt_dismissed"})
     elif msg_type == "extend_class" and is_teacher:
+        remaining = (room.deadline - datetime.now(timezone.utc)).total_seconds() if room.timer_running and room.deadline else None
+        if not room.timer_running or remaining is None or remaining > 300:
+            await websocket.send_json({"type": "extend_denied", "reason": "Available only in the last 5 minutes"})
+            return
         if room.extended:
             await websocket.send_json({"type": "extend_denied", "reason": "Already extended once"})
             return
         room.extended = True
-        room.deadline = (room.deadline or datetime.now(timezone.utc)) + timedelta(minutes=5)
+        room.deadline = room.deadline + timedelta(minutes=5)
+        room.remaining_seconds = max(0, (room.deadline - datetime.now(timezone.utc)).total_seconds())
         out = {"type": "class_extended", "new_deadline": room.deadline.isoformat()}
         for ws in (room.teacher_ws, room.student_ws):
             if ws:
-                await ws.send_json(out)
+                try:
+                    await ws.send_json(out)
+                except Exception:
+                    pass
+        await _broadcast_timer_state(room)
     elif msg_type == "leave":
         await websocket.close(code=1000)
 
@@ -728,7 +756,7 @@ async def session_timer(session_id):
     while True:
         await asyncio.sleep(1)
         room = manager.rooms.get(session_id)
-        if room is None or room.deadline is None:
+        if room is None:
             return
         db = SessionLocal()
         try:
@@ -738,13 +766,29 @@ async def session_timer(session_id):
         finally:
             db.close()
 
-        remaining = (room.deadline - datetime.now(timezone.utc)).total_seconds()
-        # Expiration takes priority over the optional extension warning. A stale
-        # WebSocket must never be able to crash the timer before class end.
+        now = datetime.now(timezone.utc)
+        if room.no_show_deadline and now >= room.no_show_deadline and not room.student_ever_joined and not room.no_show_prompted:
+            room.no_show_deadline = None
+            room.no_show_remaining_seconds = 0
+            room.no_show_prompted = True
+            if room.teacher_ws:
+                try:
+                    await room.teacher_ws.send_json({"type": "student_no_show_prompt"})
+                except Exception:
+                    logging.getLogger(__name__).warning(
+                        "Could not send student no-show prompt for session %s",
+                        session_id,
+                        exc_info=True,
+                    )
+
+        if not room.timer_running or room.deadline is None:
+            continue
+
+        remaining = (room.deadline - now).total_seconds()
+        room.remaining_seconds = max(0, remaining)
         if remaining <= 0:
             if await _auto_end_session(session_id, room):
                 return
-            # A transient database error should not permanently disable auto-end.
             await asyncio.sleep(2)
             continue
 
