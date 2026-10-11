@@ -197,8 +197,7 @@ export default function Classroom() {
   useEffect(() => { slidesRef.current = slides; }, [slides]); useEffect(() => { slideRef.current = slide; }, [slide]);
   useEffect(() => { gridRef.current = grid; }, [grid]);
   useEffect(() => {
-    if (!activeBackground) { setBackgroundSize(null); return; }
-    let cancelled = false;
+    if (!activeBackground) { setBackgroundSize(null); return; }    let cancelled = false;
     let image = imageCacheRef.current.get(activeBackground);
     if (!image) { image = new Image(); imageCacheRef.current.set(activeBackground, image); }
     const updateSize = () => {
@@ -397,8 +396,7 @@ export default function Classroom() {
       slidesRef.current = beforePages;
       slideRef.current = current;
       setSlides(beforePages);
-      setSlide(current);
-      publishControl({ kind: "slides", pages: beforePages, page_number: current, page_id: beforePages[current - 1]?.page_id });
+      setSlide(current);      publishControl({ kind: "slides", pages: beforePages, page_number: current, page_id: beforePages[current - 1]?.page_id });
       setThumbnailVersion((version) => version + 1);
       setNotice(error.response?.data?.detail || error.message || "Could not add slide.");
     }
@@ -597,8 +595,7 @@ export default function Classroom() {
             setThumbnailVersion((version) => version + 1);
             setTimeout(redraw, 0);
           }
-          slideControlActiveRef.current = true;
-          return;
+          slideControlActiveRef.current = true;          return;
         }
         if (msg.type === "whiteboard_pages_updated") {
           const p = normalizePages(msg.pages);
@@ -703,12 +700,46 @@ export default function Classroom() {
             const existingRevision = Number(existing?._whiteboard_revision) || 0;
             const applyIncoming = !existing || (incomingRevision > 0 ? incomingRevision > existingRevision : existingRevision === 0);
             const activeLive = liveRef.current.get(p.stroke.id);
-            const preserveNewerPreview = !!activeLive &&
-              String(activeLive._whiteboard_editor_id || "") === String(p.stroke._whiteboard_editor_id || "") &&
-              Number(activeLive._whiteboard_edit_generation || 0) > Number(p.stroke._whiteboard_edit_generation || 0);
-            whiteboardTrace("ws-committed-event", { transport: "websocket", kind: p.kind, actionId: p.action_id || null, pageId, incoming: whiteboardGeometry(p.stroke), current: whiteboardGeometry(existing), incomingRevision, existingRevision, preserveNewerPreview, decision: !applyIncoming ? "ignore-equal-or-stale-revision" : preserveNewerPreview ? "apply-commit-preserve-newer-live-preview" : "apply-committed-geometry" });
+            const activeLiveGeneration = Number(activeLive?._whiteboard_edit_generation) || 0;
+            const incomingGeneration = Number(p.stroke._whiteboard_edit_generation) || 0;
+            const incomingEditor = String(p.stroke._whiteboard_editor_id || "");
+            const activeLiveEditor = String(activeLive?._whiteboard_editor_id || "");
+            const sameEditor = !!incomingEditor && incomingEditor === activeLiveEditor;
+            const liveGeometryMatchesCommit = !!activeLive &&
+              activeLive.tool === p.stroke.tool &&
+              JSON.stringify(activeLive.points || []) === JSON.stringify(p.stroke.points || []);
+            // A committed event can overtake the final preview on the separate
+            // WebSocket/LiveKit transports. Do not let its older geometry replace
+            // the latest drag position just because its server revision is newer.
+            const preserveNewerPreview = !!activeLive && sameEditor && (
+              activeLiveGeneration > incomingGeneration ||
+              (activeLiveGeneration === incomingGeneration && !liveGeometryMatchesCommit)
+            );
+            whiteboardTrace("ws-committed-event", { transport: "websocket", kind: p.kind, actionId: p.action_id || null, pageId, incoming: whiteboardGeometry(p.stroke), current: whiteboardGeometry(existing), incomingRevision, existingRevision, activeLiveGeneration, incomingGeneration, liveGeometryMatchesCommit, preserveNewerPreview, decision: !applyIncoming ? "ignore-equal-or-stale-revision" : preserveNewerPreview ? "keep-newer-live-geometry-and-advance-revision" : "apply-committed-geometry" });
             if (applyIncoming) {
-              if (index >= 0) list[index] = p.stroke; else list.push(p.stroke);
+              if (preserveNewerPreview && index >= 0) {
+                // Advance revision metadata but keep the committed points intact;
+                // replacing them here causes the student canvas to snap backwards
+                // as soon as the live preview is cleared.
+                list[index] = {
+                  ...list[index],
+                  _whiteboard_revision: Math.max(existingRevision, incomingRevision),
+                  _whiteboard_base_revision: Math.max(
+                    Number(list[index]._whiteboard_base_revision) || 0,
+                    incomingRevision,
+                  ),
+                  _whiteboard_edit_generation: Math.max(
+                    Number(list[index]._whiteboard_edit_generation) || 0,
+                    activeLiveGeneration,
+                    incomingGeneration,
+                  ),
+                  _whiteboard_editor_id: incomingEditor || list[index]._whiteboard_editor_id,
+                };
+              } else if (index >= 0) {
+                list[index] = p.stroke;
+              } else {
+                list.push(p.stroke);
+              }
               strokesByPageRef.current.set(pageId, list);
               committedRef.current.add(p.stroke.id);
               if (!preserveNewerPreview) liveRef.current.delete(p.stroke.id);
@@ -797,8 +828,7 @@ export default function Classroom() {
         const room = new Room({ adaptiveStream: true, dynacast: true });
         roomRef.current = room;
 
-        const localVideoTarget = isTeacher ? "local-video" : "remote-video";
-        const remoteVideoTarget = isTeacher ? "remote-video" : "local-video";
+        const localVideoTarget = isTeacher ? "local-video" : "remote-video";        const remoteVideoTarget = isTeacher ? "remote-video" : "local-video";
         const attachLocalPublication = (publication) => {
           const track = publication?.track;
           if (!track) return;
@@ -997,8 +1027,7 @@ export default function Classroom() {
               slideRef.current = nextPage;
               setSlide(nextPage);
               strokesByPageRef.current = new Map(next.map((x) => [x.page_id, strokesByPageRef.current.get(x.page_id) || []]));
-              setTimeout(redraw, 0);
-            } else if (p.kind === "page") {
+              setTimeout(redraw, 0);            } else if (p.kind === "page") {
               const next = clamp(Number(p.page_number) || 1, 1, slidesRef.current.length);
               slideRef.current = next;
               setSlide(next);
