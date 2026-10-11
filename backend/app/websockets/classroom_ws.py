@@ -295,6 +295,8 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 "student_present": room.student_ws is not None,
                 "student_id": str(booking.student_id) if room.student_ws else None,
             })
+            if room.no_show_prompted and not room.no_show_decided and not room.student_ever_joined:
+                await websocket.send_json({"type": "student_no_show_prompt"})
             if room.student_ws:
                 student = db.get(User, booking.student_id)
                 await websocket.send_json({"type": "student_joined", "user_id": str(booking.student_id), "name": student.full_name if student else "Student"})
