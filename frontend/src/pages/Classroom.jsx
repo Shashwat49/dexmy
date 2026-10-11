@@ -931,7 +931,7 @@ export default function Classroom() {
           if (msg.type === "whiteboard_live" && topic === LIVE_TOPIC) {
             const p = msg.payload || {};
             const stroke = p.stroke;
-            if (!stroke?.id) return;
+            if (!stroke?.id || deletedStrokeIdsRef.current.has(stroke.id)) return;
             const pageNumber = Number(p.page_number) || 1;
             const pageId = p.page_id || currentPageId(pageNumber);
             const committed = (strokesByPageRef.current.get(pageId) || []).find((item) => item.id === stroke.id);
