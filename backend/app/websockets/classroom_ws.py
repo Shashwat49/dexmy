@@ -263,6 +263,12 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 room.student_ever_joined = True
                 room.no_show_deadline = None
                 room.no_show_remaining_seconds = 0
+                if room.no_show_prompted and not room.no_show_decided:
+                    room.no_show_decided = True
+                    try:
+                        await websocket.send_json({"type": "no_show_prompt_dismissed"})
+                    except Exception:
+                        pass
                 student_id = booking.student_id
                 room.permissions[str(student_id)] = _restore_student_permissions(session_id, student_id, db)
                 permissions_state = _permission_payload(room, student_id)
@@ -304,6 +310,12 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 room.student_ever_joined = True
                 room.no_show_deadline = None
                 room.no_show_remaining_seconds = 0
+                if room.no_show_prompted and not room.no_show_decided:
+                    room.no_show_decided = True
+                    try:
+                        await room.teacher_ws.send_json({"type": "no_show_prompt_dismissed"})
+                    except Exception:
+                        pass
                 permissions_state = _permission_payload(room, user.id)
                 await websocket.send_json({"type": "admitted", "deadline": room.deadline.isoformat() if room.deadline else None})
                 teacher = db.get(User, booking.teacher_id)
