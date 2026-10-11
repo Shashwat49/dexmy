@@ -75,7 +75,11 @@ async def end_session(session_id: uuid.UUID, current_user: User = Depends(get_cu
         if remaining > 300:
             raise HTTPException(status_code=409, detail="End class is available only in the last 5 minutes")
     no_show = bool(room and not room.student_ever_joined)
-    notes = mark_student_no_show(session_id, db) if no_show else end_class_session(session_id, db)
+    if no_show:
+        mark_student_no_show(session_id, db)
+        notes = None
+    else:
+        notes = end_class_session(session_id, db)
     if room:
         if room.timer_task and room.timer_task is not asyncio.current_task() and not room.timer_task.done():
             room.timer_task.cancel()
