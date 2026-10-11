@@ -771,13 +771,16 @@ export default function Classroom() {
             if (removed) { strokesByPageRef.current.set(currentPageId(), list.filter((stroke) => stroke.id !== removed.id)); liveRef.current.delete(removed.id); committedRef.current.delete(removed.id); deletedStrokeIdsRef.current.add(removed.id); }
             redraw(); setThumbnailVersion((version) => version + 1);
           }
-          if (p.kind === "clear" && (p.page_id || currentPageId(p.page_number || 1)) === currentPageId()) {
-            const pageId = currentPageId(), pageNumber = Number(p.page_number) || slideRef.current;
+          if (p.kind === "clear") {
+            const pageNumber = Number(p.page_number) || 1;
+            const pageId = p.page_id || currentPageId(pageNumber);
             const ids = new Set([...(Array.isArray(p.stroke_ids) ? p.stroke_ids : []), ...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id)]);
             ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); });
             while (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value);
-            strokesByPageRef.current.set(pageId, []); if (selectedStrokeRef.current && ids.has(selectedStrokeRef.current)) selectedStrokeRef.current = null;
-            redraw(); setThumbnailVersion((version) => version + 1);
+            strokesByPageRef.current.set(pageId, []);
+            if (selectedStrokeRef.current && ids.has(selectedStrokeRef.current)) selectedStrokeRef.current = null;
+            if (pageId === currentPageId()) redraw();
+            setThumbnailVersion((version) => version + 1);
           }
           if (p.kind === "slides") {
             const next = normalizePages(p.pages);
