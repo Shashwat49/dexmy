@@ -57,6 +57,46 @@ def _queue_notes_generation(session_id: uuid.UUID) -> None:
         pass
 
 
+def mark_student_no_show(session_id: uuid.UUID, db: Session) -> bool:
+    """End a class when the student never joined, charging their package once.
+
+    A no-show is not a completed teaching session: do not mark the booking
+    completed and do not create teacher class/payout credit.
+    """
+    class_session = db.get(ClassSession, session_id)
+    if class_session is None or class_session.status == SessionStatus.ended:
+        return False
+
+    booking = db.get(Booking, class_session.booking_id)
+    if booking is None or booking.status in (BookingStatus.cancelled, BookingStatus.no_show):
+        class_session.status = SessionStatus.ended
+        class_session.ended_at = datetime.now(timezone.utc)
+        db.commit()
+        return False
+
+    class_session.status = SessionStatus.ended
+    class_session.ended_at = datetime.now(timezone.utc)
+    booking.status = BookingStatus.no_show
+
+    package = db.get(StudentPackage, booking.student_package_id) if booking.student_package_id else None
+    if package is not None:
+        already_charged = db.query(PackageCreditLedger).filter(
+            PackageCreditLedger.booking_id == booking.id,
+            PackageCreditLedger.reason == "student_no_show",
+        ).first()
+        if not already_charged:
+            package.classes_used += 1
+            db.add(PackageCreditLedger(
+                student_package_id=package.id,
+                booking_id=booking.id,
+                delta=1,
+                reason="student_no_show",
+            ))
+
+    db.commit()
+    return True
+
+
 def end_class_session(session_id: uuid.UUID, db: Session) -> ClassNotes | None:
     class_session = db.get(ClassSession, session_id)
     if class_session is None:
