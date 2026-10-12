@@ -551,20 +551,7 @@ export default function Classroom() {
     }
   };
   const isChatImage = (fileName = "") => /\.(apng|avif|gif|jpe?g|png|webp|bmp|svg)$/i.test(fileName.split("?")[0]);
-  const waitForScreenSharePublishPermission = async (participant, timeoutMs = 3000) => {
-    const canPublishScreenShare = () => {
-      const permission = participant?.permissions;
-      if (!permission || permission.canPublish === false) return false;
-      const sources = permission.canPublishSources;
-      return !Array.isArray(sources) || sources.length === 0 || sources.some((source) => source === Track.Source.ScreenShare || source === "screen_share");
-    };
-    const deadline = Date.now() + timeoutMs;
-    while (!canPublishScreenShare() && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    return canPublishScreenShare();
-  };
-  const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant || mediaBusyRef.current) return; if (kind === "mic" && !isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); if (kind === "camera" && !isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); if (kind === "screen" && !isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); mediaBusyRef.current = true; try { if (kind === "mic") { const publication = participant.getTrackPublication?.(Track.Source.Microphone); const next = !(publication?.track && !publication.isMuted); await participant.setMicrophoneEnabled(next, selectedMicrophoneId ? { deviceId: selectedMicrophoneId } : undefined); micStateRef.current = next; setMic(next); } else if (kind === "camera") { const publication = participant.getTrackPublication?.(Track.Source.Camera); const next = !(publication?.track && !publication.isMuted); await participant.setCameraEnabled(next, selectedCameraId ? { deviceId: selectedCameraId } : undefined); cameraStateRef.current = next; setCamera(next); } else if (kind === "screen") { const publication = participant.getTrackPublication?.(Track.Source.ScreenShare); const next = !(publication?.track && !publication.isMuted); if (next && !isTeacher && !(await waitForScreenSharePublishPermission(participant))) { setNotice("Your screen-share permission is still syncing with the classroom. Please wait a moment and try again."); return; } await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" }); setScreen(next); } } catch (error) { if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") setNotice("Camera/microphone access was blocked. Please allow the device permission in your browser and try again."); else setNotice(error?.message || "Could not change media."); } finally { mediaBusyRef.current = false; } };
+  const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant || mediaBusyRef.current) return; if (kind === "mic" && !isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); if (kind === "camera" && !isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); if (kind === "screen" && !isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); mediaBusyRef.current = true; try { if (kind === "mic") { const publication = participant.getTrackPublication?.(Track.Source.Microphone); const next = !(publication?.track && !publication.isMuted); await participant.setMicrophoneEnabled(next, selectedMicrophoneId ? { deviceId: selectedMicrophoneId } : undefined); micStateRef.current = next; setMic(next); } else if (kind === "camera") { const publication = participant.getTrackPublication?.(Track.Source.Camera); const next = !(publication?.track && !publication.isMuted); await participant.setCameraEnabled(next, selectedCameraId ? { deviceId: selectedCameraId } : undefined); cameraStateRef.current = next; setCamera(next); } else if (kind === "screen") { const publication = participant.getTrackPublication?.(Track.Source.ScreenShare); const next = !(publication?.track && !publication.isMuted); await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" }); setScreen(next); } } catch (error) { if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") setNotice("Camera/microphone access was blocked. Please allow the device permission in your browser and try again."); else setNotice(error?.message || "Could not change media."); } finally { mediaBusyRef.current = false; } };
   useEffect(() => {
     if (!hasEntered || !sessionId || !user || !wsUrl) return;
     disposedRef.current = false;
@@ -686,6 +673,8 @@ export default function Classroom() {
         }
         if (msg.type === "permission_update") {
           setPermissions((p) => ({ ...p, [msg.permission]: msg.granted }));
+          const permissionLabel = msg.permission === "screen_share" ? "Screen sharing" : msg.permission === "annotate" ? "Whiteboard annotation" : msg.permission === "mic" ? "Microphone" : "Camera";
+          setNotice(`${permissionLabel} ${msg.granted ? "enabled" : "disabled"}.`);
           if (!isTeacher && !msg.granted && msg.permission === "mic") {
             micStateRef.current = false;
             roomRef.current?.localParticipant.setMicrophoneEnabled(false).then(() => setMic(false)).catch(() => { });
@@ -1206,6 +1195,9 @@ export default function Classroom() {
         });
         room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
           if (!participant || !topic) return;
+          // LiveKit data is peer-to-peer; reject student previews unless the
+          // teacher-authorized permission state allows annotation.
+          if (isTeacher && String(participant.identity) === String(studentId) && !permissions.annotate) return;
           let msg;
           try { msg = JSON.parse(decoder.decode(payload)); } catch { return; }
           if (msg.type === "whiteboard_live" && topic === LIVE_TOPIC) {
@@ -1399,7 +1391,7 @@ export default function Classroom() {
       setNotice("Classroom connection is reconnecting. Permission was not changed; please try again.");
       return;
     }
-    setNotice(`${permission === "screen_share" ? "Screen sharing" : permission === "annotate" ? "Whiteboard annotation" : permission === "mic" ? "Microphone" : "Camera"} permission request sent…`);
+    setNotice(`${permission === "screen_share" ? "Screen sharing" : permission === "annotate" ? "Whiteboard annotation" : permission === "mic" ? "Microphone" : "Camera"} permission is being applied…`);
   };
   const endClass = async () => {
     if (!isTeacher || ending) return;
