@@ -650,27 +650,27 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             next_permissions.discard(permission.value)
         room.permissions[key] = next_permissions
 
-        # Apply LiveKit publish permissions before telling either client that a
-        # camera/mic/screen-share change succeeded. Otherwise the student UI can
-        # say "allowed" while LiveKit still rejects publishing.
+        # Annotation is enforced by the classroom WebSocket and the receiving
+        # client. Do not make an annotation click wait on a LiveKit admin API call.
+        # Media permissions still require LiveKit to apply publish-source changes.
         if permission != PermissionType.annotate:
             try:
                 await _sync_livekit_permissions(class_session, target_user_id, room)
             except Exception as exc:
-            room.permissions[key] = previous_permissions
-            # A timed-out LiveKit update may have applied despite the error.
-            # Explicitly restore the previous least-privilege state before returning.
-            try:
-                await _sync_livekit_permissions(class_session, target_user_id, room)
-            except Exception:
-                logging.getLogger(__name__).warning("Failed to restore LiveKit permissions after sync failure", exc_info=True)
-            await websocket.send_json({
-                "type": "permission_sync_failed",
-                "permission": permission.value,
-                "granted": granted,
-                "reason": str(exc)[:300],
-            })
-            return
+                room.permissions[key] = previous_permissions
+                # A timed-out LiveKit update may have applied despite the error.
+                # Explicitly restore the previous least-privilege state before returning.
+                try:
+                    await _sync_livekit_permissions(class_session, target_user_id, room)
+                except Exception:
+                    logging.getLogger(__name__).warning("Failed to restore LiveKit permissions after sync failure", exc_info=True)
+                await websocket.send_json({
+                    "type": "permission_sync_failed",
+                    "permission": permission.value,
+                    "granted": granted,
+                    "reason": str(exc)[:300],
+                })
+                return
 
         try:
             db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=granted, granted_by=user.id))
