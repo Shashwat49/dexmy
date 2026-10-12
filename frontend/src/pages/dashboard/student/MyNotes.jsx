@@ -102,6 +102,48 @@ export default function MyNotes() {
     return () => { cancelled = true; };
   }, []);
 
+  // Keep checking in the background while a completed class PDF is being
+  // generated. The card remains visible, and a successful PDF appears without
+  // requiring the student to reload the dashboard.
+  useEffect(() => {
+    const pending = classes.filter(({ booking, session, available }) =>
+      session &&
+      !available &&
+      (String(session.status || "").toLowerCase() === "ended" || booking.status === "completed")
+    );
+    if (!pending.length) return undefined;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 30; // 30 x 10 seconds = five minutes.
+    const intervalId = setInterval(async () => {
+      attempts += 1;
+      const updates = await Promise.all(pending.map(async ({ booking, session }) => {
+        try {
+          const { data: notes } = await api.get(`/classroom/sessions/${session.id}/notes`);
+          return notes?.pdf_url ? { bookingId: booking.id, notes } : null;
+        } catch {
+          return null;
+        }
+      }));
+
+      if (cancelled) return;
+      const ready = updates.filter(Boolean);
+      if (ready.length) {
+        setClasses((current) => current.map((item) => {
+          const result = ready.find((entry) => entry.bookingId === item.booking.id);
+          return result ? { ...item, notes: result.notes, available: true } : item;
+        }));
+      }
+      if (attempts >= maxAttempts) clearInterval(intervalId);
+    }, 10000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [classes]);
+
   const openNotes = (url) => {
     if (!url) return;
     window.open(url, "_blank", "noopener,noreferrer");
