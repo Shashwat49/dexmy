@@ -18,7 +18,8 @@ const attachMedia = (track, containerId, muted = false) => {
     sameTrack.muted = muted;
     sameTrack.autoplay = true;
     sameTrack.playsInline = true;
-    if (track.kind === Track.Kind.Video) sameTrack.play?.().catch(() => {});
+    // The existing element is already attached to this LiveKit track. Avoid
+    // issuing another play() during reattach/reconnect; it can race track cleanup.
     return sameTrack;
   }
   existing.forEach((el) => el.remove());
@@ -1018,12 +1019,9 @@ export default function Classroom() {
               source: publication.source,
               trackSid: track.sid || publication.trackSid || null,
             });
-            const video = attachMedia(track, "remote-screen", true);
-            // Explicitly restart playback after attachment; browsers may reject autoplay
-            // on a newly subscribed remote video even when the element has autoplay set.
-            video?.play?.().catch((error) => {
-              console.warn("[Dexmy screen share] Remote video playback was blocked", error);
-            });
+            // attachMedia owns attachment and playback. Calling play() again here
+            // races the initial play request and can abort playback in Chromium.
+            attachMedia(track, "remote-screen", true);
           }
         };
         const reattachTracks = () => {
