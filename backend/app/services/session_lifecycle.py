@@ -13,6 +13,7 @@ from app.models.booking import Booking, BookingStatus
 from app.models.classroom import ClassSession, SessionStatus
 from app.models.classroom_content import ClassNotes, WhiteboardSnapshot, ClassroomPage
 from app.models.package import PackageCreditLedger, StudentPackage
+from app.models.user import User
 from app.services.notes_service import compile_notes_pdf
 from app.services.storage_service import download_bytes, save_bytes_file
 
@@ -51,8 +52,16 @@ def _generate_notes(session_id: uuid.UUID) -> None:
                         image_keys.append(key)
 
                 if image_keys:
+                    booking_id = db.query(ClassSession.booking_id).filter(
+                        ClassSession.id == session_id
+                    ).scalar()
+                    booking = db.get(Booking, booking_id) if booking_id else None
+                    student = db.get(User, booking.student_id) if booking else None
+                    # Only the student's account email is eligible for PDF branding.
+                    # Never query or render the teacher's email here.
+                    student_email = student.email if student and student.email else ""
                     image_streams = [io.BytesIO(download_bytes(key)) for key in image_keys]
-                    pdf_bytes = compile_notes_pdf(image_streams)
+                    pdf_bytes = compile_notes_pdf(image_streams, student_email=student_email)
                     if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
                         raise RuntimeError("PDF renderer returned an invalid PDF")
                     pdf_key = save_bytes_file(pdf_bytes, f"notes_{session_id}", "pdf")
