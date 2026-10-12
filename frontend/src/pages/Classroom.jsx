@@ -243,6 +243,7 @@ export default function Classroom() {
   const [status, setStatus] = useState("Connecting…"), [notice, setNotice] = useState(""), [tool, setTool] = useState("pen"), [color, setColor] = useState("#111827"), [width, setWidth] = useState(3), [grid, setGrid] = useState(false);
   const [toolbarCollapsed, setToolbarCollapsed] = useState(false), [filmstripCollapsed, setFilmstripCollapsed] = useState(false);
   const [slides, setSlides] = useState(() => [makeWhiteboardPage(1)]), [slide, setSlide] = useState(1), [chat, setChat] = useState([]), [message, setMessage] = useState("");
+  const [chatImagePreview, setChatImagePreview] = useState(null), [chatImageZoom, setChatImageZoom] = useState(1), [chatUpload, setChatUpload] = useState(null);
   const [thumbnailVersion, setThumbnailVersion] = useState(0), [whiteboardCanvasEpoch, setWhiteboardCanvasEpoch] = useState(0);
   const [textModal, setTextModal] = useState(null), [textDraft, setTextDraft] = useState("");
   const activeBackground = slides[slide - 1]?.image_url || null;
@@ -527,7 +528,29 @@ export default function Classroom() {
   };
   const undo = () => { if (!canAnnotate) return; const list = currentStrokes(); if (!list.length) return; const removed = list[list.length - 1]; if (pendingLiveRef.current?.id === removed.id) pendingLiveRef.current = null; if (drawRef.current?.id === removed.id) { drawRef.current = null; drawBaseRef.current = null; } strokesByPageRef.current.set(currentPageId(), list.filter((stroke) => stroke.id !== removed.id)); liveRef.current.delete(removed.id); committedRef.current.delete(removed.id); deletedStrokeIdsRef.current.add(removed.id); if (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value); redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "stroke_delete", stroke_id: removed.id, page_number: slideRef.current, page_id: currentPageId() }; publishControl({ kind: "whiteboard_undo", stroke_id: removed.id, page_number: payload.page_number, page_id: payload.page_id }); queueWhiteboardAction(payload); saveSnapshot(); };
   const clearBoard = () => { if (!isTeacher) return; const pageId = currentPageId(), pageNumber = slideRef.current; const activeDraw = drawRef.current && (drawRef.current.page_id === pageId || Number(drawRef.current.page_number) === pageNumber) ? drawRef.current : null; const ids = new Set([...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id), ...(activeDraw?.id ? [activeDraw.id] : [])]); if (activeDraw) { drawRef.current = null; drawBaseRef.current = null; } if (pendingLiveRef.current && (pendingLiveRef.current.page_id === pageId || Number(pendingLiveRef.current.page_number) === pageNumber)) pendingLiveRef.current = null; clearTimeout(reliableStrokeTimerRef.current); ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); }); while (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value); strokesByPageRef.current.set(pageId, []); redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids) }; publishControl({ kind: "whiteboard_clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids) }); queueWhiteboardAction(payload); saveSnapshot(); };
-  const uploadChatFile = async (file) => { if (!file) return; if (file.size > 20 * 1024 * 1024) return setNotice("Chat files are limited to 20 MB."); try { const form = new FormData(); form.append("file", file); const { data } = await api.post(`/classroom/sessions/${sessionId}/chat-file`, form); send({ type: "chat", file_url: data.file_url, file_name: data.file_name, message_text: "" }); setChat((items) => [...items, { mine: true, file_url: data.file_url, file_name: data.file_name }]); } catch (error) { setNotice(error.response?.data?.detail || "Upload failed."); } };
+  const uploadChatFile = async (file) => {
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) return setNotice("Chat files are limited to 20 MB.");
+    const uploadId = newId();
+    setChatUpload({ id: uploadId, name: file.name, progress: 0, isImage: file.type.startsWith("image/") });
+    try {
+      const form = new FormData(); form.append("file", file);
+      const { data } = await api.post(`/classroom/sessions/${sessionId}/chat-file`, form, {
+        onUploadProgress: (event) => {
+          if (!event.total) return;
+          const progress = Math.round((event.loaded / event.total) * 100);
+          setChatUpload((current) => current?.id === uploadId ? { ...current, progress } : current);
+        },
+      });
+      send({ type: "chat", file_url: data.file_url, file_name: data.file_name, message_text: "" });
+      setChat((items) => [...items, { mine: true, file_url: data.file_url, file_name: data.file_name }]);
+    } catch (error) {
+      setNotice(error.response?.data?.detail || "Upload failed.");
+    } finally {
+      setChatUpload((current) => current?.id === uploadId ? null : current);
+    }
+  };
+  const isChatImage = (fileName = "") => /\\.(apng|avif|gif|jpe?g|png|webp|bmp|svg)$/i.test(fileName.split("?")[0]);
   const waitForScreenSharePublishPermission = async (participant, timeoutMs = 3000) => {
     const canPublishScreenShare = () => {
       const permission = participant?.permissions;
@@ -1474,10 +1497,26 @@ export default function Classroom() {
             {chat.map((item, i) => (
               <div key={i} className={`flex mb-2 ${item.mine ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[88%] rounded-2xl px-3 py-2 text-xs ${item.mine ? "bg-red-600" : "bg-white/10"}`}>
-                  {item.file_url ? <a href={item.file_url} target="_blank" rel="noreferrer" className="underline">{item.file_name || "Open file"}</a> : item.text}
+                  {item.file_url && isChatImage(item.file_name) ? (
+                    <button type="button" onClick={() => { setChatImagePreview({ url: item.file_url, name: item.file_name || "Shared image" }); setChatImageZoom(1); }} className="block max-w-full text-left" aria-label={`Preview ${item.file_name || "shared image"}`}>
+                      <img src={item.file_url} alt={item.file_name || "Image shared in chat"} loading="lazy" className="block max-w-full max-h-48 rounded-lg object-contain cursor-zoom-in" />
+                      <span className="mt-1 block text-[10px] underline">Click to enlarge</span>
+                    </button>
+                  ) : item.file_url ? <a href={item.file_url} target="_blank" rel="noreferrer" className="underline">{item.file_name || "Open file"}</a> : item.text}
                 </div>
               </div>
             ))}
+            {chatUpload && (
+              <div className="mb-2 flex justify-end" role="status" aria-live="polite">
+                <div className="max-w-[88%] rounded-2xl bg-white/10 px-3 py-2 text-xs">
+                  <div className="flex items-center gap-2"><span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    <span>{chatUpload.isImage ? "Uploading image" : "Uploading file"}…</span><span>{chatUpload.progress}%</span>
+                  </div>
+                  <div className="mt-2 h-1.5 w-44 max-w-full overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-red-400 transition-[width]" style={{ width: `${chatUpload.progress}%` }} /></div>
+                  <div className="mt-1 max-w-44 truncate text-[10px] text-white/70">{chatUpload.name}</div>
+                </div>
+              </div>
+            )}
           </div>
           <form onSubmit={sendMessage} className="classroom-chat-form p-2 border-t border-white/10 flex gap-2">
             <label className="h-9 w-9 grid place-items-center bg-white/5 rounded cursor-pointer">
@@ -1490,6 +1529,7 @@ export default function Classroom() {
         </div>
       </aside>
       </main>
+      {chatImagePreview && <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/85 p-4" role="dialog" aria-modal="true" aria-label="Image preview" onClick={() => setChatImagePreview(null)}><div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-white/15 bg-[#111827] shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-white"><div className="min-w-0 flex-1 truncate text-sm font-medium">{chatImagePreview.name}</div><button type="button" onClick={() => setChatImageZoom((zoom) => Math.min(3, Math.round((zoom + 0.25) * 100) / 100))} disabled={chatImageZoom >= 3} className="rounded-lg bg-white/10 px-3 py-2 text-sm disabled:opacity-40" aria-label="Zoom in" title="Zoom in">＋</button><button type="button" onClick={() => setChatImageZoom((zoom) => Math.max(0.5, Math.round((zoom - 0.25) * 100) / 100))} disabled={chatImageZoom <= 0.5} className="rounded-lg bg-white/10 px-3 py-2 text-sm disabled:opacity-40" aria-label="Zoom out" title="Zoom out">−</button><span className="w-12 text-center text-xs text-white/70">{Math.round(chatImageZoom * 100)}%</span><button type="button" onClick={() => setChatImagePreview(null)} className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold hover:bg-red-500" aria-label="Close image preview">Close ✕</button></div><div className="min-h-0 flex-1 overflow-auto p-3 text-center"><img src={chatImagePreview.url} alt={chatImagePreview.name} draggable="false" className="mx-auto max-h-[78vh] max-w-full origin-center object-contain" style={{ transform: `scale(${chatImageZoom})`, transition: "transform 150ms ease" }} /></div></div></div>}
       {textModal && <div className="fixed inset-0 z-[150] grid place-items-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="whiteboard-text-title"><div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111827] p-5 shadow-2xl" onPointerDown={(event) => event.stopPropagation()}><div id="whiteboard-text-title" className="text-lg font-semibold">{textModal.strokeId ? "Edit whiteboard text" : "Add whiteboard text"}</div><textarea autoFocus value={textDraft} onChange={(event) => setTextDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { setTextModal(null); setTextDraft(""); } }} placeholder="Enter text…" rows={4} className="mt-4 w-full resize-y rounded-lg border border-white/10 bg-[#0b1020] p-3 text-sm text-white outline-none focus:border-red-500" /><div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => { setTextModal(null); setTextDraft(""); redraw(); }} className="rounded-lg bg-white/10 px-4 py-2 text-sm">Cancel</button><button type="button" onClick={saveTextModal} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold hover:bg-red-500">Done</button></div></div></div>}
       {notice && <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-black/80 px-4 py-2 rounded-xl text-xs">{notice}</div>}
       {ending && <div className="fixed inset-0 z-[100] grid place-items-center bg-black/80"><div className="bg-[#111827] rounded-2xl p-8 text-center"><div className="text-lg font-semibold">Class ended</div>{notesUrl && <a href={notesUrl} target="_blank" rel="noreferrer" className="text-red-400 text-sm underline mt-2 inline-block">Download notes</a>}</div></div>}
