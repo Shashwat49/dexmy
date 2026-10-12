@@ -41,17 +41,34 @@ export default function MyNotes() {
       setError("");
       try {
         const bookings = await bookingsApi.getMyBookings();
-        const pastClasses = bookings
-          .filter((booking) => booking.status === "completed" || new Date(booking.scheduled_at) < new Date())
-          .sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
+
+        // A classroom can finish before/after its scheduled slot timestamp is
+        // updated. Inspect each booking's session so an ended class is still
+        // listed in My Notes even when scheduled_at is unexpectedly in future.
+        const inspected = await Promise.all(bookings.map(async (booking) => {
+          try {
+            const session = await bookingsApi.getBookingSession(booking.id);
+            const sessionStatus = String(session?.status || "").toLowerCase();
+            const sessionEnded = ["ended", "completed"].includes(sessionStatus);
+            const bookingPast = booking.status === "completed" || new Date(booking.scheduled_at) < new Date();
+            return { booking, session, shouldShow: sessionEnded || bookingPast, sessionEnded };
+          } catch {
+            const bookingPast = booking.status === "completed" || new Date(booking.scheduled_at) < new Date();
+            return { booking, session: null, shouldShow: bookingPast, sessionEnded: false };
+          }
+        }));
+
+        const pastClasses = inspected
+          .filter((item) => item.shouldShow)
+          .sort((a, b) => new Date(b.booking.scheduled_at) - new Date(a.booking.scheduled_at));
 
         const results = await Promise.all(
-          pastClasses.map(async (booking) => {
+          pastClasses.map(async ({ booking, session, sessionEnded }) => {
+            if (!session) return { booking, session: null, notes: null, available: false };
             try {
-              const session = await bookingsApi.getBookingSession(booking.id);
-              const isRecentlyCompleted = Date.now() - new Date(booking.scheduled_at).getTime() < 30 * 60 * 1000;
-              const maxAttempts = isRecentlyCompleted ? 10 : 1;
-
+              // Notes generation can finish asynchronously after the class ends.
+              // Retry briefly for ended sessions, not only by scheduled time.
+              const maxAttempts = sessionEnded || booking.status === "completed" ? 10 : 1;
               for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
                 try {
                   const { data: notes } = await api.get(`/classroom/sessions/${session.id}/notes`);
@@ -66,10 +83,9 @@ export default function MyNotes() {
                   await new Promise((resolve) => setTimeout(resolve, 1500));
                 }
               }
-
               return { booking, session, notes: null, available: false };
             } catch {
-              return { booking, session: null, notes: null, available: false };
+              return { booking, session, notes: null, available: false };
             }
           })
         );
