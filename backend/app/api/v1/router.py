@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    admin, admin_dashboard, admin_students, admin_teachers, admin_bookings, class_reviews, admin_teacher_candidates, admin_teacher_profile_requests, admin_packages, admin_student_packages, admin_payouts, admin_finance, package_payments, package_payment_webhooks, auth, bookings, package_bookings, classroom, external_class_records, admin_meet_class_records, admin_no_show_class_records, marketing, parents, students, teachers, users, payments, system, profiles, subjects, whatsapp, packages,
+    admin, admin_dashboard, admin_students, admin_teachers, admin_bookings, admin_package_schedules, class_reviews, admin_teacher_candidates, admin_teacher_profile_requests, admin_packages, admin_student_packages, admin_payouts, admin_finance, package_payments, package_payment_webhooks, auth, bookings, package_bookings, classroom, external_class_records, admin_meet_class_records, admin_no_show_class_records, marketing, parents, students, teachers, users, payments, system, profiles, subjects, whatsapp, packages,
 )
 api_router=APIRouter()
 api_router.include_router(auth.router,prefix="/auth",tags=["auth"])
@@ -25,6 +25,7 @@ api_router.include_router(admin_teachers.router,prefix="/admin/teachers",tags=["
 api_router.include_router(admin_teacher_profile_requests.router,prefix="/admin/teacher-profile-requests",tags=["admin-teacher-profile-requests"])
 api_router.include_router(admin_students.router,prefix="/admin/students",tags=["admin-students"])
 api_router.include_router(admin_bookings.router,prefix="/admin/bookings",tags=["admin-bookings"])
+api_router.include_router(admin_package_schedules.router,prefix="/admin/package-schedules",tags=["admin-package-schedules"])
 api_router.include_router(admin_packages.router,prefix="/admin/packages",tags=["admin-packages"])
 api_router.include_router(admin_student_packages.router,prefix="/admin/students",tags=["admin-student-packages"])
 api_router.include_router(admin_payouts.router,prefix="/admin/payouts",tags=["admin-payouts"])
