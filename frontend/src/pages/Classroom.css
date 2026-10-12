@@ -95,3 +95,9 @@
     transition:none!important;
   }
 }
+/* Mirror the remote-share stage for the person sharing locally, so the sharer also sees their screen over the whiteboard. */
+.dexmy-classroom-shell #local-screen:has(video){display:block!important;position:fixed;left:0;right:380px;top:56px;bottom:0;z-index:45;background:#000;pointer-events:none;overflow:hidden}
+.dexmy-classroom-shell #local-screen:has(video) video{width:100%!important;height:100%!important;object-fit:contain!important;background:#000}
+.dexmy-classroom-shell #local-screen:not(:has(video)){display:none!important}
+@media (max-width:900px) and (orientation:portrait){.dexmy-classroom-shell #local-screen:has(video){right:38vw}}
+@media (max-width:900px) and (orientation:landscape){.dexmy-classroom-shell #local-screen:has(video){right:38vw}}
