@@ -1028,7 +1028,10 @@ export default function Classroom() {
         };
         const reattachTracks = () => {
           room.localParticipant.trackPublications.forEach(attachLocalPublication);
-          room.remoteParticipants.forEach((participant) => participant.trackPublications.forEach((publication) => attachRemotePublication(publication, participant)));
+          room.remoteParticipants.forEach((participant) => {
+            subscribeToRemoteScreenShares(participant);
+            participant.trackPublications.forEach((publication) => attachRemotePublication(publication, participant));
+          });
         };
         const restoreMediaState = async () => {
           const participant = room.localParticipant;
