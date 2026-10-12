@@ -139,6 +139,19 @@ export default function AdminPackageSchedules() {
       setPreviewing(false);
     }
   }
+  async function cancelSchedule(item) {
+    if (!window.confirm("Cancel all future classes in this package schedule and restore their package credits? Completed/past class records will remain unchanged.")) return;
+    setError("");
+    setNotice("");
+    try {
+      const response = await api.post(`/admin/package-schedules/${item.id}/cancel-future`);
+      setNotice(`Schedule cancelled. ${response.data.cancelled_future_classes} future classes cancelled and ${response.data.credits_restored} credits restored.`);
+      await load();
+    } catch (e) {
+      setError(e.response?.data?.detail || "Unable to cancel future schedule classes.");
+    }
+  }
+
   async function approveSchedule() {
     if (!preview?.valid || approving) return;
     setApproving(true);
@@ -273,8 +286,8 @@ export default function AdminPackageSchedules() {
           </div>
           {schedules.length === 0 ? <p className="text-sm text-chalk-muted">No recurring package schedules yet.</p> : <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead><tr className="border-b border-chalk-faint text-xs uppercase tracking-wide text-chalk-muted"><th className="py-3 pr-4">Student</th><th className="py-3 pr-4">Teacher</th><th className="py-3 pr-4">Subject</th><th className="py-3 pr-4">Pattern</th><th className="py-3 pr-4">Classes</th><th className="py-3">Status</th></tr></thead>
-              <tbody>{schedules.map((item) => <tr key={item.id} className="border-b border-chalk-faint/60 last:border-0"><td className="py-3 pr-4">{item.student_name}</td><td className="py-3 pr-4">{item.teacher_name}</td><td className="py-3 pr-4">{item.subject_name}</td><td className="py-3 pr-4">{item.weekday_labels.join(", ")} · {item.start_time}</td><td className="py-3 pr-4">{item.created_classes}/{item.class_count}</td><td className="py-3"><span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-300">{item.status}</span></td></tr>)}</tbody>
+              <thead><tr className="border-b border-chalk-faint text-xs uppercase tracking-wide text-chalk-muted"><th className="py-3 pr-4">Student</th><th className="py-3 pr-4">Teacher</th><th className="py-3 pr-4">Subject</th><th className="py-3 pr-4">Pattern</th><th className="py-3 pr-4">Classes</th><th className="py-3 pr-4">Status</th><th className="py-3">Actions</th></tr></thead>
+              <tbody>{schedules.map((item) => <tr key={item.id} className="border-b border-chalk-faint/60 last:border-0"><td className="py-3 pr-4">{item.student_name}</td><td className="py-3 pr-4">{item.teacher_name}</td><td className="py-3 pr-4">{item.subject_name}</td><td className="py-3 pr-4">{item.weekday_labels.join(", ")} · {item.start_time}</td><td className="py-3 pr-4">{item.created_classes}/{item.class_count}</td><td className="py-3 pr-4"><span className={`rounded-full px-2.5 py-1 text-xs ${item.status === "approved" ? "bg-emerald-500/10 text-emerald-300" : "bg-chalk-faint text-chalk-muted"}`}>{item.status}</span></td><td className="py-3">{item.status === "approved" ? <button type="button" onClick={() => cancelSchedule(item)} className="rounded-lg border border-brand-red/40 px-3 py-1.5 text-xs font-semibold text-brand-red hover:bg-brand-red/10">Cancel future classes</button> : <span className="text-xs text-chalk-muted">—</span>}</td></tr>)}</tbody>
             </table>
           </div>}
         </section>
