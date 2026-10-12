@@ -15,50 +15,74 @@ const attachMedia = (track, containerId, muted = false) => {
     }
     return null;
   }
+  const isScreenContainer = containerId === "remote-screen" || containerId === "local-screen";
   const selector = track.kind === Track.Kind.Video ? "video" : "audio";
   const trackSid = track.sid || track.publication?.trackSid || "";
   const existing = Array.from(box.querySelectorAll(selector));
-  const sameTrack = trackSid ? existing.find((el) => el.dataset.dexmyTrackSid === trackSid) : null;
+  // Screen-share video elements are declared in React and kept mounted. Reusing
+  // that stable element avoids imperative children being lost during rerenders.
+  const el = isScreenContainer ? box.querySelector("video") : null;
+  const sameTrack = trackSid ? existing.find((item) => item.dataset.dexmyTrackSid === trackSid) : null;
   if (sameTrack) {
     sameTrack.muted = muted;
     sameTrack.autoplay = true;
     sameTrack.playsInline = true;
-    // The existing element is already attached to this LiveKit track. Avoid
-    // issuing another play() during reattach/reconnect; it can race track cleanup.
+    if (isScreenContainer) box.dataset.active = "true";
     return sameTrack;
   }
-  existing.forEach((el) => el.remove());
-  const el = track.attach();
-  el.autoplay = true;
-  el.playsInline = true;
-  el.muted = muted;
-  if (trackSid) el.dataset.dexmyTrackSid = trackSid;
+  if (isScreenContainer && el) {
+    if (el.dataset.dexmyTrackSid && el.dataset.dexmyTrackSid !== trackSid) {
+      el.srcObject = null;
+      delete el.dataset.dexmyTrackSid;
+    }
+  } else {
+    existing.forEach((item) => item.remove());
+  }
+  const attached = track.attach(el || undefined);
+  attached.autoplay = true;
+  attached.playsInline = true;
+  attached.muted = muted;
+  if (trackSid) attached.dataset.dexmyTrackSid = trackSid;
   if (track.kind === Track.Kind.Video) {
-    el.className = "absolute inset-0 w-full h-full object-contain bg-black";
+    attached.className = "absolute inset-0 w-full h-full object-contain bg-black";
   }
-  if (containerId === "remote-screen" || containerId === "local-screen") {
+  if (isScreenContainer) {
     box.dataset.dexmyScreenTrackSid = trackSid;
-    el.addEventListener("loadedmetadata", () => console.info("[Dexmy screen share] Remote video metadata", {
-      containerId, videoWidth: el.videoWidth, videoHeight: el.videoHeight, readyState: el.readyState,
+    box.dataset.active = "true";
+    attached.addEventListener("loadedmetadata", () => console.info("[Dexmy screen share] Remote video metadata", {
+      containerId, videoWidth: attached.videoWidth, videoHeight: attached.videoHeight, readyState: attached.readyState,
     }), { once: true });
+    attached.addEventListener("playing", () => console.info("[Dexmy screen share] Remote video playing", {
+      containerId, videoWidth: attached.videoWidth, videoHeight: attached.videoHeight,
+    }), { once: true });
+  } else {
+    box.appendChild(attached);
   }
-  // Let LiveKit own media attachment/playback. Manually calling play() after
-  // Track.attach() races LiveKit's own playback lifecycle in Chromium.
-  box.appendChild(el);
-  return el;
+  return attached;
 };
 
 const detachMedia = (track, publication) => {
   const sid = track?.sid || publication?.trackSid || "";
-  track?.detach().forEach((el) => el.remove());
-  // LiveKit already detached the elements, so detach() returns []. Remove them by track sid.
-  if (sid) document.querySelectorAll(`[data-dexmy-track-sid="${sid}"]`).forEach((el) => el.remove());
-  document.querySelectorAll("#remote-screen, #local-screen").forEach((box) => {
-    if (!box.querySelector("video")) {
-      box.style.display = "none";
-      delete box.dataset.dexmyScreenTrackSid;
+  const screenBox = Array.from(document.querySelectorAll("#remote-screen, #local-screen"))
+    .find((box) => (sid && box.dataset.dexmyScreenTrackSid === sid) ||
+      (publication?.source === Track.Source.ScreenShare && box.id === (publication?.participant?.isLocal ? "local-screen" : "remote-screen")));
+  if (screenBox) {
+    const video = screenBox.querySelector("video");
+    if (video) {
+      try { track?.detach(video); } catch { }
+      video.pause();
+      video.srcObject = null;
+      delete video.dataset.dexmyTrackSid;
+    } else {
+      track?.detach();
     }
-  });
+    screenBox.dataset.active = "false";
+    delete screenBox.dataset.dexmyScreenTrackSid;
+    return;
+  }
+  track?.detach().forEach((el) => el.remove());
+  // Clean up legacy screen elements if a track was attached before this layout mounted.
+  if (sid) document.querySelectorAll(`[data-dexmy-track-sid="${sid}"]`).forEach((el) => el.remove());
 };
 
 const W = 1600, H = 900;
@@ -1381,7 +1405,7 @@ export default function Classroom() {
           <input type="range" title="Stroke width" aria-label="Stroke width" min="1" max="18" value={width} onChange={(e) => setWidth(Number(e.target.value))} disabled={!canAnnotate} className="classroom-tool-width disabled:opacity-40" />
         </>}
       </div>
-      <div className="flex-1 min-h-0 flex items-center justify-center p-3 bg-[#070b16]"><div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl classroom-whiteboard-frame">{slides[slide - 1]?.image_url && <img src={slides[slide - 1].image_url} alt="PDF page" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />}<canvas key={whiteboardCanvasEpoch} ref={canvasRef} width={W} height={H} className={`absolute inset-0 w-full h-full touch-none ${!canAnnotate ? "cursor-default" : "cursor-crosshair"}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} /><div id="remote-screen" className="classroom-screen-overlay classroom-remote-screen" aria-label="Remote shared screen" /><div id="local-screen" className="classroom-screen-overlay classroom-local-screen" aria-label="Your shared screen" /><div className="absolute inset-0 z-40 pointer-events-none"><img src="/dexmy-logo-bg-removed.png" alt="Dexmy" draggable="false" className="absolute left-[20px] top-[12px] h-[34px] w-auto max-w-[140px] object-contain" /><div className="absolute right-[20px] bottom-[14px] text-[14px] font-medium text-[#64748c] opacity-80">{email}</div></div>{slides.length > 1 && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2 bg-black/70 rounded-xl px-2 py-1.5"><button disabled={!isTeacher} onClick={() => changeSlide(slide - 1)} className="disabled:opacity-40">‹</button><span className="text-xs px-2">Slide {slide}/{slides.length}</span><button disabled={!isTeacher} onClick={() => changeSlide(slide + 1)} className="disabled:opacity-40">›</button></div>}</div></div>
+      <div className="flex-1 min-h-0 flex items-center justify-center p-3 bg-[#070b16]"><div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl classroom-whiteboard-frame">{slides[slide - 1]?.image_url && <img src={slides[slide - 1].image_url} alt="PDF page" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />}<canvas key={whiteboardCanvasEpoch} ref={canvasRef} width={W} height={H} className={`absolute inset-0 w-full h-full touch-none ${!canAnnotate ? "cursor-default" : "cursor-crosshair"}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} /><div id="remote-screen" data-active="false" className="classroom-screen-overlay classroom-remote-screen" aria-label="Remote shared screen"><video muted autoPlay playsInline /></div><div id="local-screen" data-active="false" className="classroom-screen-overlay classroom-local-screen" aria-label="Your shared screen"><video muted autoPlay playsInline /></div><div className="absolute inset-0 z-40 pointer-events-none"><img src="/dexmy-logo-bg-removed.png" alt="Dexmy" draggable="false" className="absolute left-[20px] top-[12px] h-[34px] w-auto max-w-[140px] object-contain" /><div className="absolute right-[20px] bottom-[14px] text-[14px] font-medium text-[#64748c] opacity-80">{email}</div></div>{slides.length > 1 && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2 bg-black/70 rounded-xl px-2 py-1.5"><button disabled={!isTeacher} onClick={() => changeSlide(slide - 1)} className="disabled:opacity-40">‹</button><span className="text-xs px-2">Slide {slide}/{slides.length}</span><button disabled={!isTeacher} onClick={() => changeSlide(slide + 1)} className="disabled:opacity-40">›</button></div>}</div></div>
       {isTeacher && <div className={`classroom-filmstrip-wrap shrink-0 border-t border-white/10 bg-[#111827] ${filmstripCollapsed ? "classroom-filmstrip-collapsed" : ""}`}>
         <button type="button" title={filmstripCollapsed ? "Expand pages" : "Collapse pages"} aria-label={filmstripCollapsed ? "Expand pages" : "Collapse pages"} onClick={() => setFilmstripCollapsed((value) => !value)} className="classroom-filmstrip-toggle"><ToolIcon id={filmstripCollapsed ? "expand" : "collapse"} /><ToolIcon id="film" /><span>{slide}/{slides.length}</span></button>
         {!filmstripCollapsed && <div className="h-[100px] px-3 py-2 flex items-center gap-3 overflow-x-auto classroom-page-filmstrip">
