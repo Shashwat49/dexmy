@@ -1,5 +1,7 @@
 import asyncio
 import io
+import logging
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -14,47 +16,92 @@ from app.models.package import PackageCreditLedger, StudentPackage
 from app.services.notes_service import compile_notes_pdf
 from app.services.storage_service import download_bytes, save_bytes_file
 
+logger = logging.getLogger(__name__)
+_notes_jobs_lock = threading.Lock()
+_notes_jobs: set[str] = set()
+_NOTES_RETRY_WINDOW_SECONDS = 5 * 60
+_NOTES_RETRY_INTERVAL_SECONDS = 10
+
 
 def _generate_notes(session_id: uuid.UUID) -> None:
-    # Give the browser a short window to flush its final debounced whiteboard
-    # snapshot after the teacher presses "End class". This avoids generating a
-    # PDF one stroke behind the final classroom state.
-    time.sleep(1.5)
-    db = SessionLocal()
+    """Retry notes generation for delayed snapshots and transient storage failures."""
+    session_key = str(session_id)
+    deadline = time.monotonic() + _NOTES_RETRY_WINDOW_SECONDS
     try:
-        if db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first():
-            return
+        # Allow final debounced whiteboard snapshots to flush.
+        time.sleep(1.5)
+        while True:
+            db = SessionLocal()
+            try:
+                if db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first():
+                    logger.info("Class notes already exist for session %s", session_key)
+                    return
 
-        image_keys=[]
-        for _ in range(5):
-            pages=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id).order_by(ClassroomPage.position.asc()).all()
-            image_keys=[]
-            for page in pages:
-                snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(WhiteboardSnapshot.created_at.desc()).first()
-                key=snap.image_url if snap and snap.image_url else page.image_url
-                if key: image_keys.append(key)
-            if image_keys: break
-            time.sleep(0.5)
+                pages = db.query(ClassroomPage).filter(
+                    ClassroomPage.session_id == session_id
+                ).order_by(ClassroomPage.position.asc()).all()
+                image_keys = []
+                for page in pages:
+                    snap = db.query(WhiteboardSnapshot).filter(
+                        WhiteboardSnapshot.session_id == session_id,
+                        WhiteboardSnapshot.page_id == page.id,
+                    ).order_by(WhiteboardSnapshot.created_at.desc()).first()
+                    key = snap.image_url if snap and snap.image_url else page.image_url
+                    if key and key not in image_keys:
+                        image_keys.append(key)
 
-        if not image_keys:
-            return
+                if image_keys:
+                    image_streams = [io.BytesIO(download_bytes(key)) for key in image_keys]
+                    pdf_bytes = compile_notes_pdf(image_streams)
+                    if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
+                        raise RuntimeError("PDF renderer returned an invalid PDF")
+                    pdf_key = save_bytes_file(pdf_bytes, f"notes_{session_id}", "pdf")
+                    db.add(ClassNotes(session_id=session_id, pdf_url=pdf_key))
+                    db.commit()
+                    logger.info("Generated class notes PDF for session %s (%s pages)", session_key, len(image_keys))
+                    return
 
-        image_streams = [io.BytesIO(download_bytes(key)) for key in image_keys]
-        pdf_bytes = compile_notes_pdf(image_streams)
-        pdf_key = save_bytes_file(pdf_bytes, f"notes_{session_id}", "pdf")
-        db.add(ClassNotes(session_id=session_id, pdf_url=pdf_key))
-        db.commit()
-    except Exception:
-        db.rollback()
+                logger.warning("No saved whiteboard images yet for session %s; retrying", session_key)
+            except Exception:
+                db.rollback()
+                logger.exception("Class notes generation attempt failed for session %s", session_key)
+            finally:
+                db.close()
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.error("Class notes generation exhausted its five-minute retry window for session %s", session_key)
+                return
+            time.sleep(min(_NOTES_RETRY_INTERVAL_SECONDS, remaining))
     finally:
-        db.close()
+        with _notes_jobs_lock:
+            _notes_jobs.discard(session_key)
+
+
+def queue_notes_generation(session_id: uuid.UUID) -> bool:
+    """Queue at most one retryable notes job per session in this backend process."""
+    session_key = str(session_id)
+    with _notes_jobs_lock:
+        if session_key in _notes_jobs:
+            return False
+        _notes_jobs.add(session_key)
+    try:
+        asyncio.get_running_loop().create_task(asyncio.to_thread(_generate_notes, session_id))
+        return True
+    except RuntimeError:
+        # Also support calls from synchronous API workers with no event loop.
+        thread = threading.Thread(target=_generate_notes, args=(session_id,), daemon=True)
+        thread.start()
+        return True
+    except Exception:
+        with _notes_jobs_lock:
+            _notes_jobs.discard(session_key)
+        logger.exception("Unable to queue class notes generation for session %s", session_key)
+        return False
 
 
 def _queue_notes_generation(session_id: uuid.UUID) -> None:
-    try:
-        asyncio.get_running_loop().create_task(asyncio.to_thread(_generate_notes, session_id))
-    except RuntimeError:
-        pass
+    queue_notes_generation(session_id)
 
 
 def mark_student_no_show(session_id: uuid.UUID, db: Session) -> bool:
