@@ -237,35 +237,10 @@ export default function Classroom() {
   useEffect(() => { if (!deadline) return; const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))); tick(); const id = setInterval(tick, 1000); return () => clearInterval(id); }, [deadline]);
   useEffect(() => { let active = true; api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => { if (!active) return; if (["ended", "cancelled"].includes(String(data.status || "").toLowerCase())) { classFinalizedRef.current = true; navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"); return; } setClassTitle(data.subject_name || "Class"); }).catch(() => { }); return () => { active = false; }; }, [sessionId, isTeacher, navigate]);
   useEffect(() => { if (!sessionId || !hasEntered) return; const state = { dexmyClassroom: true, sessionId }; window.history.pushState(state, "", window.location.href); const onPopState = () => { window.history.pushState(state, "", window.location.href); setNotice("Browser Back is disabled in the classroom. Use the class review to return to your dashboard."); }; window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, [sessionId, hasEntered]);
-  useEffect(() => {
-    if (!hasEntered || !sessionId) return;
-    const warnBeforeExit = (event) => {
-      if (classFinalizedRef.current) return;
-      event.preventDefault();
-      event.returnValue = "Refreshing or closing this tab will end the classroom for both participants.";
-      return event.returnValue;
-    };
-    const endOnConfirmedExit = () => {
-      if (classFinalizedRef.current) return;
-      classFinalizedRef.current = true;
-      const token = localStorage.getItem("dexmy_token");
-      const base = import.meta.env.VITE_API_BASE_URL;
-      if (!base || !token) return;
-      const apiBase = base.endsWith("/") ? base.slice(0, -1) : base;
-      fetch(`${apiBase}/classroom/sessions/${sessionId}/leave`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: "{}",
-        keepalive: true,
-      }).catch(() => {});
-    };
-    window.addEventListener("beforeunload", warnBeforeExit);
-    window.addEventListener("pagehide", endOnConfirmedExit);
-    return () => {
-      window.removeEventListener("beforeunload", warnBeforeExit);
-      window.removeEventListener("pagehide", endOnConfirmedExit);
-    };
-  }, [hasEntered, sessionId]);
+  // Refreshing or closing the tab must not end a class. The classroom WebSocket
+  // disconnect/reconnect lifecycle pauses and resumes the session timer; only
+  // the explicit End class action finalizes the session.
+
   useEffect(() => { const root = document.querySelector(".dexmy-classroom-shell"); const toolbar = root?.querySelector("main section > div:first-child"); if (!toolbar) return; toolbar.classList.add("classroom-toolbar"); let dragging = false, startX = 0, startY = 0, originX = 0, originY = 0; const onDown = (event) => { if (event.target.closest("button,input,label")) return; dragging = true; toolbar.classList.add("is-dragging"); startX = event.clientX; startY = event.clientY; const r = toolbar.getBoundingClientRect(); originX = r.left; originY = r.top; toolbar.setPointerCapture?.(event.pointerId); }; const onMove = (event) => { if (!dragging) return; const x = clamp(originX + event.clientX - startX, 8, window.innerWidth - toolbar.offsetWidth - 8); const y = clamp(originY + event.clientY - startY, 58, window.innerHeight - toolbar.offsetHeight - 8); toolbar.style.left = `${x}px`; toolbar.style.top = `${y}px`; }; const onUp = () => { dragging = false; toolbar.classList.remove("is-dragging"); }; toolbar.addEventListener("pointerdown", onDown); toolbar.addEventListener("pointermove", onMove); toolbar.addEventListener("pointerup", onUp); toolbar.addEventListener("pointercancel", onUp); return () => { toolbar.removeEventListener("pointerdown", onDown); toolbar.removeEventListener("pointermove", onMove); toolbar.removeEventListener("pointerup", onUp); toolbar.removeEventListener("pointercancel", onUp); }; }, []);
   const send = useCallback((payload) => { if (wsRef.current?.readyState !== WebSocket.OPEN) return false; try { wsRef.current.send(JSON.stringify(payload)); return true; } catch { return false; } }, []);
   const sendWhiteboardQueue = useCallback(() => {
