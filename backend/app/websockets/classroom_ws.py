@@ -165,19 +165,21 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
     raise last_error or RuntimeError("LiveKit permission synchronization failed")
 
 
-async def _finish_screen_share_grant(class_session: ClassSession, target_user_id: uuid.UUID, room, session_id: uuid.UUID, granted_by: uuid.UUID) -> None:
-    """Apply a screen-share grant in LiveKit without blocking the teacher's click."""
+async def _finish_screen_share_permission_change(class_session: ClassSession, target_user_id: uuid.UUID, room, session_id: uuid.UUID, granted_by: uuid.UUID, granted: bool) -> None:
+    """Apply screen-share grants/revokes in LiveKit without blocking the teacher."""
     key = str(target_user_id)
     try:
         await _sync_livekit_permissions(class_session, target_user_id, room)
-        # A revoke can arrive while the grant's LiveKit request is in flight.
-        # Re-sync the latest room state so an older task cannot re-enable sharing.
-        if "screen_share" not in room.permissions.get(key, set()):
+        # Permission may have changed again while this request was in flight.
+        # Re-apply the latest state to prevent stale tasks from undoing a newer click.
+        current_granted = "screen_share" in room.permissions.get(key, set())
+        if current_granted != granted:
             await _sync_livekit_permissions(class_session, target_user_id, room)
     except Exception as exc:
-        # If this grant is still the active in-memory state, revert it and persist
-        # a compensating event. LiveKit remains the final enforcement boundary.
-        if "screen_share" in room.permissions.get(key, set()):
+        # For a failed grant, fail closed and persist the rollback. For a revoke,
+        # keep the app-level denial and keep retrying LiveKit in later permission
+        # updates; the student client also stops its active screen-share track.
+        if granted and "screen_share" in room.permissions.get(key, set()):
             room.permissions[key].discard("screen_share")
             db = SessionLocal()
             try:
@@ -194,10 +196,6 @@ async def _finish_screen_share_grant(class_session: ClassSession, target_user_id
                 logging.getLogger(__name__).exception("Could not persist screen-share grant rollback")
             finally:
                 db.close()
-            try:
-                await _sync_livekit_permissions(class_session, target_user_id, room)
-            except Exception:
-                logging.getLogger(__name__).warning("Could not restore revoked screen-share state in LiveKit", exc_info=True)
             event = {"type": "permission_update", "permission": "screen_share", "granted": False}
             for ws in (room.teacher_ws, room.student_ws):
                 if ws:
@@ -208,7 +206,7 @@ async def _finish_screen_share_grant(class_session: ClassSession, target_user_id
         failure = {
             "type": "permission_sync_failed",
             "permission": "screen_share",
-            "granted": True,
+            "granted": granted,
             "reason": str(exc)[:300],
         }
         if room.teacher_ws:
@@ -705,12 +703,11 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         room.permissions[key] = next_permissions
 
         # Annotation is enforced by the classroom WebSocket and receiving client.
-        # A screen-share grant is persisted and announced immediately; LiveKit's
-        # publish-source permission is then applied in the background. Revokes and
-        # camera/mic changes remain LiveKit-confirmed before success is announced.
-        if permission == PermissionType.screen_share and granted:
+        # Screen-share grants and revokes are saved and announced immediately;
+        # LiveKit's publish-source permission is applied asynchronously.
+        if permission == PermissionType.screen_share:
             try:
-                db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=True, granted_by=user.id))
+                db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=granted, granted_by=user.id))
                 db.commit()
             except Exception:
                 db.rollback()
@@ -722,11 +719,11 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     "reason": "Could not save the permission change. Please try again.",
                 })
                 return
-            event = {"type": "permission_update", "permission": permission.value, "granted": True}
+            event = {"type": "permission_update", "permission": permission.value, "granted": granted}
             if peer:
                 await peer.send_json(event)
             await websocket.send_json(event)
-            asyncio.create_task(_finish_screen_share_grant(class_session, target_user_id, room, session_id, user.id))
+            asyncio.create_task(_finish_screen_share_permission_change(class_session, target_user_id, room, session_id, user.id, granted))
             return
 
         if permission != PermissionType.annotate:
