@@ -7,24 +7,33 @@ import "./Classroom.css";
 import ClassReviewModal from "../components/ClassReviewModal";
 
 const attachMedia = (track, containerId, muted = false) => {
-  if (!track) return;
+  if (!track) return null;
   const box = document.getElementById(containerId);
-  if (!box) return;
+  if (!box) return null;
   const selector = track.kind === Track.Kind.Video ? "video" : "audio";
   const trackSid = track.sid || track.publication?.trackSid || "";
   const existing = Array.from(box.querySelectorAll(selector));
-  if (trackSid && existing.some((el) => el.dataset.dexmyTrackSid === trackSid)) return;
-  existing.forEach((el) => {
-    if (!trackSid || el.dataset.dexmyTrackSid !== trackSid) el.remove();
-  });
+  const sameTrack = trackSid ? existing.find((el) => el.dataset.dexmyTrackSid === trackSid) : null;
+  if (sameTrack) {
+    sameTrack.muted = muted;
+    sameTrack.autoplay = true;
+    sameTrack.playsInline = true;
+    if (track.kind === Track.Kind.Video) sameTrack.play?.().catch(() => {});
+    return sameTrack;
+  }
+  existing.forEach((el) => el.remove());
   const el = track.attach();
   el.autoplay = true;
   el.playsInline = true;
   el.muted = muted;
   if (trackSid) el.dataset.dexmyTrackSid = trackSid;
-  if (track.kind === Track.Kind.Video) el.className = "absolute inset-0 w-full h-full object-contain bg-black";
+  if (track.kind === Track.Kind.Video) {
+    el.className = "absolute inset-0 w-full h-full object-contain bg-black";
+    el.play?.().catch(() => {});
+  }
   box.appendChild(el);
-  if (track.kind === Track.Kind.Audio && !muted) el.play?.().catch(() => { });
+  if (track.kind === Track.Kind.Audio && !muted) el.play?.().catch(() => {});
+  return el;
 };
 
 const detachMedia = (track, publication) => {
@@ -990,19 +999,23 @@ export default function Classroom() {
             setScreen(!publication.isMuted);
           }
         };
-        const attachRemotePublication = (publication, participant) => {
-          const track = publication?.track;
-          if (!track) return;
+        const attachRemotePublication = (publication, participant, subscribedTrack = null) => {
+          // TrackSubscribed supplies the live track directly; use it rather than depending on
+          // publication.track being populated at the exact moment the event is handled.
+          const track = subscribedTrack || publication?.track;
+          if (!track || !publication) return;
           if (publication.source === Track.Source.Camera) {
             attachMedia(track, remoteVideoTarget, false);
             if (participant?.name) setPeerName(participant.name);
           } else if (publication.source === Track.Source.Microphone) {
             attachMedia(track, "remote-audio", false);
           } else if (publication.source === Track.Source.ScreenShare) {
-            // Screen-share video must autoplay muted; otherwise browser autoplay policy can leave the overlay black.
-            attachMedia(track, "remote-screen", true);
-            const video = document.querySelector(`#remote-screen video[data-dexmy-track-sid="${track.sid || publication.trackSid || ""}"]`);
-            video?.play?.().catch(() => {});
+            const video = attachMedia(track, "remote-screen", true);
+            // Explicitly restart playback after attachment; browsers may reject autoplay
+            // on a newly subscribed remote video even when the element has autoplay set.
+            video?.play?.().catch((error) => {
+              console.warn("[Dexmy screen share] Remote video playback was blocked", error);
+            });
           }
         };
         const reattachTracks = () => {
@@ -1035,8 +1048,16 @@ export default function Classroom() {
           if (!disposedRef.current) setStatus("Reconnecting video…");
         });
         room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-          if (!participant || participant.identity === String(user.id)) return;
-          attachRemotePublication(publication, participant);
+          if (!participant) return;
+          attachRemotePublication(publication, participant, track);
+        });
+        room.on(RoomEvent.TrackSubscriptionFailed, (trackSid, participant, reason) => {
+          console.error("[Dexmy screen share] Track subscription failed", {
+            trackSid,
+            participant: participant?.identity,
+            reason,
+          });
+          if (reason) setNotice("A shared video could not be received. Please stop sharing and start again.");
         });
         room.on(RoomEvent.LocalTrackPublished, (publication) => attachLocalPublication(publication));
         room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
