@@ -81,8 +81,8 @@ def _active_package(db: Session, package_id: uuid.UUID, *, lock: bool = False) -
 
 
 def _occurrence_dates(start_date: date, weekdays: list[int], count: int) -> list[date]:
-    if start_date < datetime.now(IST).date():
-        raise HTTPException(status_code=422, detail="Start date cannot be in the past.")
+    if start_date <= datetime.now(IST).date():
+        raise HTTPException(status_code=422, detail="Start date must be tomorrow or later, matching Dexmy's existing booking rules.")
     if (start_date - datetime.now(IST).date()).days > MAX_SCHEDULE_HORIZON_DAYS:
         raise HTTPException(status_code=422, detail="Start date is too far in the future.")
     dates: list[date] = []
