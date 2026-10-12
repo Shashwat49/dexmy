@@ -291,7 +291,7 @@ export default function Classroom() {
     return { x: (W - width) / 2, y: (H - height) / 2, width, height };
   }, []);
   useEffect(() => { if (!deadline) return; const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))); tick(); const id = setInterval(tick, 1000); return () => clearInterval(id); }, [deadline]);
-  useEffect(() => { let active = true; api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => { if (!active) return; if (["ended", "cancelled"].includes(String(data.status || "").toLowerCase())) { classFinalizedRef.current = true; navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"); return; } setClassTitle(data.subject_name || "Class"); }).catch(() => { }); return () => { active = false; }; }, [sessionId, isTeacher, navigate]);
+  useEffect(() => { let active = true; api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => { if (!active) return; if (["ended", "cancelled"].includes(String(data.status || "").toLowerCase())) { classFinalizedRef.current = true; setEnding(true); if (String(data.booking_status || "").toLowerCase() === "completed") { setShowReview(true); api.get(`/classroom/sessions/${sessionId}/notes`).then((r) => setNotesUrl(r.data.pdf_url)).catch(() => { }); } else { navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"); } return; } setClassTitle(data.subject_name || "Class"); }).catch(() => { }); return () => { active = false; }; }, [sessionId, isTeacher, navigate]);
   useEffect(() => { if (!sessionId || !hasEntered) return; const state = { dexmyClassroom: true, sessionId }; window.history.pushState(state, "", window.location.href); const onPopState = () => { window.history.pushState(state, "", window.location.href); setNotice("Browser Back is disabled in the classroom. Use the class review to return to your dashboard."); }; window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, [sessionId, hasEntered]);
   // Refreshing or closing the tab must not end a class. The classroom WebSocket
   // disconnect/reconnect lifecycle pauses and resumes the session timer; only
@@ -1002,7 +1002,15 @@ export default function Classroom() {
         if (disposedRef.current) return;
         if (event.code === 4409) {
           classFinalizedRef.current = true;
-          navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student");
+          api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => {
+            if (String(data.booking_status || "").toLowerCase() === "completed") {
+              setEnding(true);
+              setShowReview(true);
+              api.get(`/classroom/sessions/${sessionId}/notes`).then((r) => setNotesUrl(r.data.pdf_url)).catch(() => { });
+            } else {
+              navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student");
+            }
+          }).catch(() => navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"));
           return;
         }
         if (![4401, 4403, 4404].includes(event.code)) {
