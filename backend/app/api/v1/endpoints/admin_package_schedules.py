@@ -330,6 +330,22 @@ def approve_package_schedule(
         raise
     except IntegrityError as exc:
         db.rollback()
+        # If a retry raced with the first request, return the committed result
+        # for the same idempotency key instead of inviting a duplicate attempt.
+        existing = db.execute(
+            select(PackageSchedule).where(PackageSchedule.idempotency_key == payload.idempotency_key)
+        ).scalar_one_or_none()
+        if existing:
+            booking_ids = db.execute(
+                select(Booking.id).where(Booking.schedule_id == existing.id).order_by(Booking.scheduled_at)
+            ).scalars().all()
+            return {
+                "schedule_id": str(existing.id),
+                "status": existing.status,
+                "class_count": len(booking_ids),
+                "booking_ids": [str(item) for item in booking_ids],
+                "idempotent_replay": True,
+            }
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Schedule could not be committed because a slot was claimed or conflicted concurrently. Refresh the preview and resolve the conflict before retrying.",
