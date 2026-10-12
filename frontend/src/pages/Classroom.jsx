@@ -27,9 +27,11 @@ const attachMedia = (track, containerId, muted = false) => {
   if (track.kind === Track.Kind.Audio && !muted) el.play?.().catch(() => { });
 };
 
-const detachMedia = (track) => {
-  if (!track) return;
-  track.detach().forEach((el) => el.remove());
+const detachMedia = (track, publication) => {
+  const sid = track?.sid || publication?.trackSid || "";
+  track?.detach().forEach((el) => el.remove());
+  // LiveKit already detached the elements, so detach() returns []. Remove them by track sid.
+  if (sid) document.querySelectorAll(`[data-dexmy-track-sid="${sid}"]`).forEach((el) => el.remove());
 };
 
 const W = 1600, H = 900;
@@ -1035,7 +1037,7 @@ export default function Classroom() {
         });
         room.on(RoomEvent.LocalTrackPublished, (publication) => attachLocalPublication(publication));
         room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
-          detachMedia(publication.track);
+          detachMedia(publication.track, publication);
           if (publication.source === Track.Source.Camera) setCamera(false);
           else if (publication.source === Track.Source.Microphone) setMic(false);
           else if (publication.source === Track.Source.ScreenShare) {
@@ -1045,12 +1047,13 @@ export default function Classroom() {
         });
         room.on(RoomEvent.TrackUnpublished, (publication) => {
           if (publication?.source === Track.Source.ScreenShare) {
+            detachMedia(publication.track, publication);
             // Remote share can be unpublished before the subscribed track is fully detached.
             restoreWhiteboardAfterScreenShare();
           }
         });
         room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
-          detachMedia(track);
+          detachMedia(track, publication);
           if (publication?.source === Track.Source.ScreenShare) {
             restoreWhiteboardAfterScreenShare();
           }
