@@ -252,6 +252,8 @@ export default function Classroom() {
   backgroundSizeRef.current = backgroundSize;
   const [mic, setMic] = useState(false), [camera, setCamera] = useState(false), [screen, setScreen] = useState(false), [studentId, setStudentId] = useState(null), [peerName, setPeerName] = useState("");
   const [permissions, setPermissions] = useState({ mic: true, camera: true, annotate: false, screen_share: false }), [ending, setEnding] = useState(false), [notesUrl, setNotesUrl] = useState(null), [timer, setTimer] = useState(null), [deadline, setDeadline] = useState(null), [timerRunning, setTimerRunning] = useState(false), [extensionUsed, setExtensionUsed] = useState(false);
+  const permissionsRef = useRef(permissions);
+  permissionsRef.current = permissions;
   const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [confirmEnd, setConfirmEnd] = useState(false), [showNoShowPrompt, setShowNoShowPrompt] = useState(false), [showReview, setShowReview] = useState(false);
   const classFinalizedRef = useRef(false);
   const [hasEntered, setHasEntered] = useState(false), [cameraDevices, setCameraDevices] = useState([]), [microphoneDevices, setMicrophoneDevices] = useState([]), [selectedCameraId, setSelectedCameraId] = useState(""), [selectedMicrophoneId, setSelectedMicrophoneId] = useState(""), [deviceError, setDeviceError] = useState("");
@@ -1197,7 +1199,7 @@ export default function Classroom() {
           if (!participant || !topic) return;
           // LiveKit data is peer-to-peer; reject student previews unless the
           // teacher-authorized permission state allows annotation.
-          if (isTeacher && !permissions.annotate) return;
+          if (isTeacher && !permissionsRef.current.annotate) return;
           let msg;
           try { msg = JSON.parse(decoder.decode(payload)); } catch { return; }
           if (msg.type === "whiteboard_live" && topic === LIVE_TOPIC) {
