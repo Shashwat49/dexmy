@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.constants import BOOKING_END_HOUR, BOOKING_START_HOUR, CLASS_DURATION_MINUTES, SLOT_DURATION_MINUTES
 from app.core.dependencies import get_current_admin
@@ -138,6 +138,45 @@ def _validate_schedule(db: Session, payload: ScheduleRequest, package: StudentPa
         if not allowed:
             errors.append(f"{start.strftime('%a, %d %b %Y %I:%M %p')} IST: {reason}")
     return subject, teacher, starts, errors
+
+
+@router.get("")
+def list_package_schedules(
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    student_user = aliased(User)
+    teacher_user = aliased(User)
+    rows = db.execute(
+        select(PackageSchedule, student_user.full_name, teacher_user.full_name, Subject.name)
+        .join(student_user, student_user.id == PackageSchedule.student_id)
+        .join(teacher_user, teacher_user.id == PackageSchedule.teacher_id)
+        .join(Subject, Subject.id == PackageSchedule.subject_id)
+        .order_by(PackageSchedule.created_at.desc())
+        .limit(50)
+    ).all()
+    weekday_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    result = []
+    for schedule, student_name, teacher_name, subject_name in rows:
+        created_classes = db.execute(
+            select(Booking.id).where(Booking.schedule_id == schedule.id)
+        ).scalars().all()
+        result.append({
+            "id": str(schedule.id),
+            "student_name": student_name,
+            "teacher_name": teacher_name,
+            "subject_name": subject_name,
+            "weekdays": schedule.weekdays,
+            "weekday_labels": [weekday_names[day] for day in schedule.weekdays],
+            "start_date": schedule.start_date.isoformat(),
+            "start_time": schedule.start_time.strftime("%I:%M %p"),
+            "duration_minutes": schedule.duration_minutes,
+            "class_count": schedule.class_count,
+            "created_classes": len(created_classes),
+            "status": schedule.status,
+            "created_at": schedule.created_at.isoformat() if schedule.created_at else None,
+        })
+    return result
 
 
 @router.get("/options")
