@@ -37,36 +37,14 @@ const attachMedia = (track, containerId, muted = false) => {
     el.className = "absolute inset-0 w-full h-full object-contain bg-black";
   }
   if (containerId === "remote-screen" || containerId === "local-screen") {
-    // Apply critical geometry inline as a fallback to stylesheet/Tailwind ordering.
-    box.style.setProperty("display", "block", "important");
-    box.style.setProperty("position", "absolute", "important");
-    box.style.setProperty("inset", "0", "important");
-    box.style.setProperty("z-index", "60", "important");
-    box.style.setProperty("overflow", "hidden", "important");
-    el.style.setProperty("position", "absolute", "important");
-    el.style.setProperty("inset", "0", "important");
-    el.style.setProperty("width", "100%", "important");
-    el.style.setProperty("height", "100%", "important");
-    el.style.setProperty("object-fit", "contain", "important");
-    el.style.setProperty("display", "block", "important");
     box.dataset.dexmyScreenTrackSid = trackSid;
     el.addEventListener("loadedmetadata", () => console.info("[Dexmy screen share] Remote video metadata", {
       containerId, videoWidth: el.videoWidth, videoHeight: el.videoHeight, readyState: el.readyState,
     }), { once: true });
   }
+  // Let LiveKit own media attachment/playback. Manually calling play() after
+  // Track.attach() races LiveKit's own playback lifecycle in Chromium.
   box.appendChild(el);
-  if (track.kind === Track.Kind.Video || (track.kind === Track.Kind.Audio && !muted)) {
-    const playback = el.play?.();
-    if (playback && typeof playback.catch === "function") playback.catch((error) => {
-      if (containerId === "remote-screen" || containerId === "local-screen") {
-        console.error("[Dexmy screen share] Video playback failed", {
-          containerId, error: error?.name, message: error?.message,
-          readyState: el.readyState, videoWidth: el.videoWidth, videoHeight: el.videoHeight,
-          isConnected: el.isConnected,
-        });
-      }
-    });
-  }
   return el;
 };
 
@@ -995,7 +973,10 @@ export default function Classroom() {
           roomRef.current = null;
         }
 
-        const room = new Room({ adaptiveStream: true, dynacast: true });
+        // Screen-share video is rendered as a conditional whiteboard overlay. Adaptive
+        // Stream can classify that initially hidden overlay as invisible and pause its
+        // video layer; keep subscription/rendering stable for this classroom layout.
+        const room = new Room({ adaptiveStream: false, dynacast: true });
         roomRef.current = room;
 
         const localVideoTarget = isTeacher ? "local-video" : "remote-video";
