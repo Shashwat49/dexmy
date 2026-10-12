@@ -200,6 +200,56 @@ def list_package_schedules(
     return result
 
 
+@router.post("/{schedule_id}/cancel-future")
+def cancel_future_schedule_classes(
+    schedule_id: uuid.UUID,
+    current_user: User = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    schedule = db.execute(
+        select(PackageSchedule)
+        .where(PackageSchedule.id == schedule_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if schedule is None:
+        raise HTTPException(status_code=404, detail="Package schedule not found.")
+    if schedule.status != "approved":
+        raise HTTPException(status_code=409, detail="Only an approved schedule can be cancelled.")
+
+    now = datetime.now(IST)
+    future_bookings = db.execute(
+        select(Booking)
+        .where(
+            Booking.schedule_id == schedule.id,
+            Booking.status == BookingStatus.confirmed,
+            Booking.scheduled_at >= now,
+        )
+        .order_by(Booking.scheduled_at.asc())
+        .with_for_update()
+    ).scalars().all()
+
+    try:
+        for booking in future_bookings:
+            booking.status = BookingStatus.cancelled
+            PackageCreditService.refund(
+                db,
+                student_package_id=schedule.student_package_id,
+                booking_id=booking.id,
+                created_by=current_user.id,
+            )
+        schedule.status = "cancelled"
+        db.commit()
+        return {
+            "schedule_id": str(schedule.id),
+            "status": schedule.status,
+            "cancelled_future_classes": len(future_bookings),
+            "credits_restored": len(future_bookings),
+        }
+    except Exception:
+        db.rollback()
+        raise
+
+
 @router.get("/options")
 def get_schedule_options(
     current_user: User = Depends(get_current_admin),
