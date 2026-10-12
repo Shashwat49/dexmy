@@ -145,11 +145,6 @@ const DRAW_TOOLS = new Set(TOOLS.map(([id]) => id));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 const makeWhiteboardPage = (page_number = 1) => ({ page_id: newId(), page_number, page_type: "whiteboard", image_url: null });
-const makeWatermarkPositions = (count = 4) => Array.from({ length: count }, () => ({
-  left: 5 + Math.random() * 72,
-  top: 10 + Math.random() * 72,
-  rotate: -18 + Math.random() * 36,
-}));
 const normalizePages = (pages) => (pages?.length ? pages : [makeWhiteboardPage(1)]).map((p, i) => ({ ...p, page_id: p.page_id || newId(), page_number: i + 1, page_type: p.page_type || (p.image_url ? "pdf" : "whiteboard") }));
 
 function PageThumbnail({ page, strokes, number, active, canSelect, canDelete, onSelect, onDelete, version }) {
@@ -228,7 +223,7 @@ function PageThumbnail({ page, strokes, number, active, canSelect, canDelete, on
 
 export default function Classroom() {
   const { user } = useAuth(); const { sessionId } = useParams(); const navigate = useNavigate();
-  const isTeacher = user?.role === "teacher"; const email = user?.email || "";
+  const isTeacher = user?.role === "teacher";
   const canvasRef = useRef(null), wsRef = useRef(null), roomRef = useRef(null), drawRef = useRef(null), drawBaseRef = useRef(null);
   const slidesRef = useRef([makeWhiteboardPage(1)]), strokesByPageRef = useRef(new Map()), slideRef = useRef(1);
   const liveRef = useRef(new Map()), committedRef = useRef(new Set()), pendingLiveRef = useRef(null), snapshotTimerRef = useRef(null), disposedRef = useRef(false), imageCacheRef = useRef(new Map()), reliableStrokeTimerRef = useRef(null), slideControlActiveRef = useRef(false);
@@ -262,12 +257,6 @@ export default function Classroom() {
   const [classTitle, setClassTitle] = useState("Class"), [showPermissions, setShowPermissions] = useState(false), [confirmEnd, setConfirmEnd] = useState(false), [showNoShowPrompt, setShowNoShowPrompt] = useState(false), [showReview, setShowReview] = useState(false);
   const classFinalizedRef = useRef(false);
   const [hasEntered, setHasEntered] = useState(false), [cameraDevices, setCameraDevices] = useState([]), [microphoneDevices, setMicrophoneDevices] = useState([]), [selectedCameraId, setSelectedCameraId] = useState(""), [selectedMicrophoneId, setSelectedMicrophoneId] = useState(""), [deviceError, setDeviceError] = useState("");
-  const [watermarkPositions, setWatermarkPositions] = useState(() => makeWatermarkPositions());
-  useEffect(() => {
-    if (!hasEntered) return;
-    const interval = window.setInterval(() => setWatermarkPositions(makeWatermarkPositions()), 5000);
-    return () => window.clearInterval(interval);
-  }, [hasEntered]);
   const previewRef = useRef(null), previewStreamRef = useRef(null);
   useEffect(() => { let cancelled = false; const prepareDevices = async () => { try { let stream; try { stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); previewStreamRef.current = stream; if (previewRef.current) previewRef.current.srcObject = stream; } catch (error) { setDeviceError(error?.message || "Allow camera and microphone access to choose devices."); } const devices = await navigator.mediaDevices.enumerateDevices(); if (cancelled) { stream?.getTracks().forEach((track) => track.stop()); return; } const cameras = devices.filter((device) => device.kind === "videoinput"); const microphones = devices.filter((device) => device.kind === "audioinput"); setCameraDevices(cameras); setMicrophoneDevices(microphones); setSelectedCameraId((current) => current || cameras[0]?.deviceId || ""); setSelectedMicrophoneId((current) => current || microphones[0]?.deviceId || ""); } catch (error) { if (!cancelled) setDeviceError(error?.message || "Unable to list media devices."); } }; prepareDevices(); return () => { cancelled = true; previewStreamRef.current?.getTracks().forEach((track) => track.stop()); previewStreamRef.current = null; }; }, []);
   useEffect(() => { if (hasEntered || (!selectedCameraId && !selectedMicrophoneId)) return; let cancelled = false; let stream; const updatePreview = async () => { try { stream = await navigator.mediaDevices.getUserMedia({ video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true, audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true }); if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return; } previewStreamRef.current?.getTracks().forEach((track) => track.stop()); previewStreamRef.current = stream; if (previewRef.current) previewRef.current.srcObject = stream; } catch (error) { if (!cancelled) setDeviceError(error?.message || "Could not preview the selected devices."); } }; updatePreview(); return () => { cancelled = true; if (stream) stream.getTracks().forEach((track) => track.stop()); }; }, [selectedCameraId, selectedMicrophoneId, hasEntered]);
@@ -1456,7 +1445,6 @@ export default function Classroom() {
       </div>
       <div className="flex-1 min-h-0 flex items-center justify-center p-3 bg-[#070b16]"><div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl classroom-whiteboard-frame">{slides[slide - 1]?.image_url && <img src={slides[slide - 1].image_url} alt="PDF page" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />}<canvas key={whiteboardCanvasEpoch} ref={canvasRef} width={W} height={H} className={`absolute inset-0 w-full h-full touch-none ${!canAnnotate ? "cursor-default" : "cursor-crosshair"}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} /><div id="remote-screen" data-active="false" className="classroom-screen-overlay classroom-remote-screen" aria-label="Remote shared screen"><video muted autoPlay playsInline /></div><div id="local-screen" data-active="false" className="classroom-screen-overlay classroom-local-screen" aria-label="Your shared screen"><video muted autoPlay playsInline /></div>{hasEntered && !ending && !showReview && !classFinalizedRef.current && <div className="absolute inset-0 z-[70] pointer-events-none overflow-hidden" aria-hidden="true">
   <img src="/dexmy-logo-bg-removed.png" alt="" draggable="false" className="absolute left-[20px] top-[12px] h-[34px] w-auto max-w-[140px] object-contain opacity-90" />
-  {watermarkPositions.map((position, index) => <div key={index} className="absolute max-w-[30%] break-words text-[10px] sm:text-xs font-medium leading-tight text-slate-500/40" style={{ left: `${position.left}%`, top: `${position.top}%`, transform: `translate(-50%, -50%) rotate(${position.rotate}deg)` }}>{user?.full_name || user?.name || user?.display_name || (isTeacher ? "Teacher" : "Student")}<br />{email}</div>)}
 </div>}{slides.length > 1 && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2 bg-black/70 rounded-xl px-2 py-1.5"><button disabled={!isTeacher} onClick={() => changeSlide(slide - 1)} className="disabled:opacity-40">‹</button><span className="text-xs px-2">Slide {slide}/{slides.length}</span><button disabled={!isTeacher} onClick={() => changeSlide(slide + 1)} className="disabled:opacity-40">›</button></div>}</div></div>
       {isTeacher && <div className={`classroom-filmstrip-wrap shrink-0 border-t border-white/10 bg-[#111827] ${filmstripCollapsed ? "classroom-filmstrip-collapsed" : ""}`}>
         <button type="button" title={filmstripCollapsed ? "Expand pages" : "Collapse pages"} aria-label={filmstripCollapsed ? "Expand pages" : "Collapse pages"} onClick={() => setFilmstripCollapsed((value) => !value)} className="classroom-filmstrip-toggle"><ToolIcon id={filmstripCollapsed ? "expand" : "collapse"} /><ToolIcon id="film" /><span>{slide}/{slides.length}</span></button>
