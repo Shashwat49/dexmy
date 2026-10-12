@@ -81,25 +81,31 @@ async def _broadcast_timer_state(room) -> None:
 
 
 async def _update_timer_for_presence(room) -> None:
-    # Before the student has ever been admitted, the teacher's timer and the
-    # 15-minute no-show window run while the teacher is present. Once the
-    # student has joined, both participants must be connected for time to run.
-    should_run = bool(room.teacher_ws) and (
-        not room.student_ever_joined or bool(room.student_ws)
-    )
+    # The teaching countdown starts only when both participants are present for
+    # the first time. After admission, disconnects must not pause the deadline:
+    # the timer task remains responsible for ending the class at that deadline.
     now = datetime.now(timezone.utc)
-    if should_run and not room.timer_running and room.timer_started:
-        room.remaining_seconds = max(0, float(room.remaining_seconds or 0))
-        room.deadline = now + timedelta(seconds=room.remaining_seconds)
-        room.timer_running = True
-        if not room.student_ever_joined and not room.no_show_prompted and room.no_show_remaining_seconds > 0:
-            room.no_show_deadline = now + timedelta(seconds=room.no_show_remaining_seconds)
-    elif not should_run and room.timer_running:
-        if room.deadline:
-            room.remaining_seconds = max(0, (room.deadline - now).total_seconds())
-        room.deadline = None
-        room.timer_running = False
-        if room.no_show_deadline:
+    if room.student_ever_joined:
+        if not room.timer_running and room.timer_started and room.teacher_ws and room.student_ws:
+            room.remaining_seconds = max(0, float(room.remaining_seconds or 0))
+            room.deadline = now + timedelta(seconds=room.remaining_seconds)
+            room.timer_running = True
+        # Once the teaching timer has started, preserve its wall-clock deadline
+        # across refreshes, transient WebSocket drops, and participant reconnects.
+        room.no_show_deadline = None
+        room.no_show_remaining_seconds = 0
+    else:
+        # Before the student joins, only the no-show window runs; do not consume
+        # the class duration while the teacher is waiting for the student.
+        if room.timer_running:
+            if room.deadline:
+                room.remaining_seconds = max(0, (room.deadline - now).total_seconds())
+            room.deadline = None
+            room.timer_running = False
+        if room.teacher_ws and not room.no_show_prompted and room.no_show_remaining_seconds > 0:
+            if room.no_show_deadline is None:
+                room.no_show_deadline = now + timedelta(seconds=room.no_show_remaining_seconds)
+        elif room.no_show_deadline:
             room.no_show_remaining_seconds = max(0, (room.no_show_deadline - now).total_seconds())
             room.no_show_deadline = None
     await _broadcast_timer_state(room)
