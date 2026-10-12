@@ -332,4 +332,4 @@ def get_session_status(session_id: uuid.UUID, current_user: User = Depends(get_c
     booking = db.get(Booking, cs.booking_id)
     if current_user.id not in (booking.teacher_id, booking.student_id): raise HTTPException(status_code=403, detail="Not part of this classroom")
     subject = db.get(Subject, booking.subject_id)
-    return {"id": cs.id, "booking_id": cs.booking_id, "livekit_room_name": cs.livekit_room_name, "status": cs.status, "started_at": cs.started_at, "ended_at": cs.ended_at, "subject_name": subject.name if subject else "Class"}
+    return {"id": cs.id, "booking_id": cs.booking_id, "livekit_room_name": cs.livekit_room_name, "status": cs.status, "booking_status": booking.status if booking else None, "started_at": cs.started_at, "ended_at": cs.ended_at, "subject_name": subject.name if subject else "Class"}
