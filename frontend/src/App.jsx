@@ -133,6 +133,7 @@ export default function App() {
         <Route path="/dashboard/admin/students" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminStudents /></ProtectedRoute>} />
         <Route path="/dashboard/admin/teachers" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminTeachers /></ProtectedRoute>} />
         <Route path="/dashboard/admin/bookings" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminBookings /></ProtectedRoute>} />
+        <Route path="/dashboard/admin/package-schedules" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminPackageSchedules /></ProtectedRoute>} />
         <Route path="/dashboard/admin/reviews" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminReviews /></ProtectedRoute>} />
         <Route path="/dashboard/admin/meet-class-records" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminMeetClassRecords /></ProtectedRoute>} />
         <Route path="/dashboard/admin/student-no-show" element={<ProtectedRoute roles={ADMIN_ROLES}><AdminStudentNoShow /></ProtectedRoute>} />
