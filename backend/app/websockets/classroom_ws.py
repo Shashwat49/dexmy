@@ -926,16 +926,24 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
 
 
 async def session_timer(session_id):
+    logger = logging.getLogger(__name__)
+    logger.info("Class timer task started for session %s", session_id)
     while True:
         await asyncio.sleep(1)
         room = manager.rooms.get(session_id)
         if room is None:
+            logger.warning("Class timer stopped because room state is missing for session %s", session_id)
             return
         db = SessionLocal()
         try:
             cs = db.get(ClassSession, session_id)
             if cs is None or cs.status in (SessionStatus.ended, SessionStatus.cancelled):
                 return
+        except Exception:
+            db.rollback()
+            logger.exception("Could not check class status in timer loop for session %s; retrying", session_id)
+            await asyncio.sleep(2)
+            continue
         finally:
             db.close()
 
@@ -948,11 +956,7 @@ async def session_timer(session_id):
                 try:
                     await room.teacher_ws.send_json({"type": "student_no_show_prompt"})
                 except Exception:
-                    logging.getLogger(__name__).warning(
-                        "Could not send student no-show prompt for session %s",
-                        session_id,
-                        exc_info=True,
-                    )
+                    logger.warning("Could not send student no-show prompt for session %s", session_id, exc_info=True)
 
         if not room.timer_running or room.deadline is None:
             continue
@@ -960,7 +964,9 @@ async def session_timer(session_id):
         remaining = (room.deadline - now).total_seconds()
         room.remaining_seconds = max(0, remaining)
         if remaining <= 0:
+            logger.info("Class deadline reached for session %s; attempting finalization", session_id)
             if await _auto_end_session(session_id, room):
+                logger.info("Class automatically finalized for session %s", session_id)
                 return
             await asyncio.sleep(2)
             continue
@@ -974,11 +980,7 @@ async def session_timer(session_id):
                         "seconds_remaining": max(0, int(remaining)),
                     })
                 except Exception:
-                    logging.getLogger(__name__).warning(
-                        "Could not send class extension warning for session %s",
-                        session_id,
-                        exc_info=True,
-                    )
+                    logger.warning("Could not send class extension warning for session %s", session_id, exc_info=True)
 
 
 async def _auto_end_session(session_id, room):
