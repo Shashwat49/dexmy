@@ -550,7 +550,7 @@ export default function Classroom() {
       setChatUpload((current) => current?.id === uploadId ? null : current);
     }
   };
-  const isChatImage = (fileName = "") => /\\.(apng|avif|gif|jpe?g|png|webp|bmp|svg)$/i.test(fileName.split("?")[0]);
+  const isChatImage = (fileName = "") => /\.(apng|avif|gif|jpe?g|png|webp|bmp|svg)$/i.test(fileName.split("?")[0]);
   const waitForScreenSharePublishPermission = async (participant, timeoutMs = 3000) => {
     const canPublishScreenShare = () => {
       const permission = participant?.permissions;
