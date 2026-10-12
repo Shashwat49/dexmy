@@ -14,7 +14,7 @@ from app.schemas.classroom import JoinTokenRequest, JoinTokenResponse, ClassSess
 from app.services.livekit_service import create_join_token
 from app.models.classroom_content import ClassNotes, WhiteboardSnapshot, ClassroomPage
 from app.services.storage_service import save_bytes_file, get_presigned_url, delete_file
-from app.services.session_lifecycle import end_class_session, mark_student_no_show
+from app.services.session_lifecycle import end_class_session, mark_student_no_show, queue_notes_generation
 from app.websockets.connection_manager import manager
 from pydantic import BaseModel
 from sqlalchemy import desc
@@ -142,7 +142,12 @@ def get_notes(session_id: uuid.UUID, current_user: User = Depends(get_current_us
     booking = db.get(Booking, cs.booking_id)
     if current_user.id not in (booking.teacher_id, booking.student_id): raise HTTPException(status_code=403, detail="Not part of this classroom")
     notes = db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first()
-    if notes is None: raise HTTPException(status_code=404, detail="Notes not generated yet")
+    if notes is None:
+        # Recover notes for already-ended classes too; do not rely only on the
+        # original in-memory end-class task having survived a deploy/restart.
+        if cs.status == SessionStatus.ended and booking.status == BookingStatus.completed:
+            queue_notes_generation(session_id)
+        raise HTTPException(status_code=404, detail="Notes are still being generated")
     return ClassNotesRead(session_id=notes.session_id, pdf_url=get_presigned_url(notes.pdf_url, expires_in=3600), generated_at=notes.generated_at)
 
 @router.post("/sessions/{session_id}/chat-file", response_model=FileUploadResponse)
