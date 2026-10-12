@@ -999,7 +999,10 @@ export default function Classroom() {
           } else if (publication.source === Track.Source.Microphone) {
             attachMedia(track, "remote-audio", false);
           } else if (publication.source === Track.Source.ScreenShare) {
-            attachMedia(track, "remote-screen", false);
+            // Screen-share video must autoplay muted; otherwise browser autoplay policy can leave the overlay black.
+            attachMedia(track, "remote-screen", true);
+            const video = document.querySelector(`#remote-screen video[data-dexmy-track-sid="${track.sid || publication.trackSid || ""}"]`);
+            video?.play?.().catch(() => {});
           }
         };
         const reattachTracks = () => {
