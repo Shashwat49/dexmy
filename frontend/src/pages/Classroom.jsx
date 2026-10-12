@@ -9,7 +9,12 @@ import ClassReviewModal from "../components/ClassReviewModal";
 const attachMedia = (track, containerId, muted = false) => {
   if (!track) return null;
   const box = document.getElementById(containerId);
-  if (!box) return null;
+  if (!box) {
+    if (containerId === "remote-screen" || containerId === "local-screen") {
+      console.error("[Dexmy screen share] Screen overlay container is missing", { containerId });
+    }
+    return null;
+  }
   const selector = track.kind === Track.Kind.Video ? "video" : "audio";
   const trackSid = track.sid || track.publication?.trackSid || "";
   const existing = Array.from(box.querySelectorAll(selector));
@@ -31,14 +36,36 @@ const attachMedia = (track, containerId, muted = false) => {
   if (track.kind === Track.Kind.Video) {
     el.className = "absolute inset-0 w-full h-full object-contain bg-black";
   }
-  box.appendChild(el);
   if (containerId === "remote-screen" || containerId === "local-screen") {
-    // Explicitly reveal the overlay when the video track is attached.
-    box.style.display = "block";
+    // Apply critical geometry inline as a fallback to stylesheet/Tailwind ordering.
+    box.style.setProperty("display", "block", "important");
+    box.style.setProperty("position", "absolute", "important");
+    box.style.setProperty("inset", "0", "important");
+    box.style.setProperty("z-index", "60", "important");
+    box.style.setProperty("overflow", "hidden", "important");
+    el.style.setProperty("position", "absolute", "important");
+    el.style.setProperty("inset", "0", "important");
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("height", "100%", "important");
+    el.style.setProperty("object-fit", "contain", "important");
+    el.style.setProperty("display", "block", "important");
     box.dataset.dexmyScreenTrackSid = trackSid;
+    el.addEventListener("loadedmetadata", () => console.info("[Dexmy screen share] Remote video metadata", {
+      containerId, videoWidth: el.videoWidth, videoHeight: el.videoHeight, readyState: el.readyState,
+    }), { once: true });
   }
+  box.appendChild(el);
   if (track.kind === Track.Kind.Video || (track.kind === Track.Kind.Audio && !muted)) {
-    el.play?.().catch(() => {});
+    const playback = el.play?.();
+    if (playback && typeof playback.catch === "function") playback.catch((error) => {
+      if (containerId === "remote-screen" || containerId === "local-screen") {
+        console.error("[Dexmy screen share] Video playback failed", {
+          containerId, error: error?.name, message: error?.message,
+          readyState: el.readyState, videoWidth: el.videoWidth, videoHeight: el.videoHeight,
+          isConnected: el.isConnected,
+        });
+      }
+    });
   }
   return el;
 };
