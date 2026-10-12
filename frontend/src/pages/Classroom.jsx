@@ -27,7 +27,10 @@ const attachMedia = (track, containerId, muted = false) => {
     sameTrack.muted = muted;
     sameTrack.autoplay = true;
     sameTrack.playsInline = true;
-    if (isScreenContainer) box.dataset.active = "true";
+    if (isScreenContainer) {
+      box.style.removeProperty("display");
+      box.dataset.active = "true";
+    }
     return sameTrack;
   }
   if (isScreenContainer && el) {
@@ -48,6 +51,9 @@ const attachMedia = (track, containerId, muted = false) => {
   }
   if (isScreenContainer) {
     box.dataset.dexmyScreenTrackSid = trackSid;
+    // Older cleanup code could leave an inline `display: none !important`,
+    // which overrides the active-state CSS even after the track is attached.
+    box.style.removeProperty("display");
     box.dataset.active = "true";
     attached.addEventListener("loadedmetadata", () => console.info("[Dexmy screen share] Remote video metadata", {
       containerId, videoWidth: attached.videoWidth, videoHeight: attached.videoHeight, readyState: attached.readyState,
