@@ -1,7 +1,7 @@
 """Add admin-approved recurring package schedules.
 
 Revision ID: 20261012_package_recurring_schedules
-Revises: 20261008_unlimited_booking_ledger_reason
+Revises: 20261008_unlimited_booking_ledger_reason, 20261002_admin_no_show_class_records
 """
 from alembic import op
 import sqlalchemy as sa
@@ -9,7 +9,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "20261012_package_recurring_schedules"
-down_revision = "20261008_unlimited_booking_ledger_reason"
+down_revision = ("20261008_unlimited_booking_ledger_reason", "20261002_admin_no_show_class_records")
 branch_labels = None
 depends_on = None
 
