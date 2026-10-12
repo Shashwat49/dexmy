@@ -656,14 +656,14 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         try:
             await _sync_livekit_permissions(class_session, target_user_id, room)
         except Exception as exc:
-                room.permissions[key] = previous_permissions
-                await websocket.send_json({
-                    "type": "permission_sync_failed",
-                    "permission": permission.value,
-                    "granted": granted,
-                    "reason": str(exc)[:300],
-                })
-                return
+            room.permissions[key] = previous_permissions
+            await websocket.send_json({
+                "type": "permission_sync_failed",
+                "permission": permission.value,
+                "granted": granted,
+                "reason": str(exc)[:300],
+            })
+            return
 
         try:
             db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=granted, granted_by=user.id))
@@ -674,7 +674,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             try:
                 await _sync_livekit_permissions(class_session, target_user_id, room)
             except Exception:
-                    logging.getLogger(__name__).warning("Failed to restore LiveKit permissions after DB commit failure", exc_info=True)
+                logging.getLogger(__name__).warning("Failed to restore LiveKit permissions after DB commit failure", exc_info=True)
             await websocket.send_json({
                 "type": "permission_sync_failed",
                 "permission": permission.value,
