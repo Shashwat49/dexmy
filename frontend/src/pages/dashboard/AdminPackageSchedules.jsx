@@ -50,6 +50,7 @@ export default function AdminPackageSchedules() {
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [approvalKey, setApprovalKey] = useState(() => crypto.randomUUID());
 
   const selectedPackage = options.packages.find((p) => p.id === form.student_package_id);
   const eligibleTeachers = useMemo(
@@ -75,7 +76,7 @@ export default function AdminPackageSchedules() {
           ...current,
           student_package_id: pkg?.id || "",
           subject_id: current.subject_id || String(nextOptions.subjects[0]?.id || ""),
-          class_count: pkg?.remaining_classes == null ? Math.min(current.class_count || 1, 32) : Math.max(1, Math.min(current.class_count || 1, pkg.remaining_classes)),
+          class_count: pkg?.remaining_classes == null ? 32 : Math.min(120, pkg.remaining_classes),
         };
       });
     } catch (e) {
@@ -91,15 +92,17 @@ export default function AdminPackageSchedules() {
     setPreview(null);
     setError("");
     setNotice("");
+    setApprovalKey(crypto.randomUUID());
   }
   function selectPackage(value) {
     const pkg = options.packages.find((p) => p.id === value);
     setForm((current) => ({
       ...current,
       student_package_id: value,
-      class_count: pkg?.remaining_classes == null ? Math.min(32, current.class_count || 1) : Math.max(1, Math.min(current.class_count || 1, pkg.remaining_classes)),
+      class_count: pkg?.remaining_classes == null ? 32 : Math.min(120, pkg.remaining_classes),
     }));
     setPreview(null);
+    setApprovalKey(crypto.randomUUID());
   }
   function toggleWeekday(value) {
     const days = form.weekdays.includes(value)
@@ -144,10 +147,11 @@ export default function AdminPackageSchedules() {
     try {
       const response = await api.post("/admin/package-schedules/approve", {
         ...payload(),
-        idempotency_key: crypto.randomUUID(),
+        idempotency_key: approvalKey,
       });
       setNotice(`Schedule approved. ${response.data.class_count ?? response.data.booking_ids?.length ?? 0} classes were assigned to the teacher and student calendars.`);
       setPreview(null);
+      setApprovalKey(crypto.randomUUID());
       await load();
     } catch (e) {
       const detail = e.response?.data?.detail;
