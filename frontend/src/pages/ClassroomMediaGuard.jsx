@@ -1,12 +1,8 @@
 import { useEffect, useState } from "react";
-import { LocalParticipant, Room, RoomEvent, Track, TrackEvent } from "livekit-client";
+import { LocalParticipant, Room, RoomEvent, TrackEvent } from "livekit-client";
 
 const desiredMedia = new WeakMap();
 const PATCHED = Symbol("dexmyMediaGuardPatched");
-
-// The LiveKit room the classroom is currently using. Set whenever Room.connect
-// runs, cleared when the classroom unmounts.
-let activeRoom = null;
 
 function remember(participant, kind, enabled) {
   const state = desiredMedia.get(participant) || { camera: false, microphone: false };
@@ -37,7 +33,6 @@ function installMediaGuard() {
   };
 
   Room.prototype.connect = async function connect(...args) {
-    activeRoom = this;
     const result = await originalConnect.apply(this, args);
     const room = this;
     const participant = room.localParticipant;
@@ -106,7 +101,6 @@ export default function ClassroomMediaGuard() {
     return () => {
       active = false;
       clearInterval(playbackWatch);
-      activeRoom = null;
     };
   }, []);
 
