@@ -221,7 +221,7 @@ export default function AdminPackageSchedules() {
                   </select>
                 </label>
                 <label className={labelClass}>Number of classes
-                  <input required type="number" min="1" max={selectedPackage?.remaining_classes ?? 120} className={inputClass} value={form.class_count} onChange={(e) => setField("class_count", Number(e.target.value))} />
+                  <input required type="number" min="1" max={Math.min(120, selectedPackage?.remaining_classes ?? 120)} className={inputClass} value={form.class_count} onChange={(e) => setField("class_count", Number(e.target.value))} />
                   <span className="mt-1 block text-xs text-chalk-muted">{selectedPackage?.remaining_classes == null ? "Unlimited package; up to 120 occurrences per schedule." : `Available credits: ${selectedPackage.remaining_classes}`}</span>
                 </label>
               </div>
