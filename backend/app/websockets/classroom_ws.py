@@ -247,15 +247,28 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
 
             if not room.timer_started:
                 now = datetime.now(timezone.utc)
+                first_start = class_session.started_at is None
                 if class_session.status == SessionStatus.scheduled:
                     class_session.status = SessionStatus.live
                     class_session.started_at = now
-                elif class_session.started_at is None:
+                elif first_start:
                     class_session.started_at = now
                 db.commit()
                 room.timer_started = True
-                room.remaining_seconds = float(CLASS_DURATION_MINUTES * 60)
-                room.no_show_remaining_seconds = 900.0
+                if first_start:
+                    # Initialize the duration only once. If in-memory room state
+                    # was lost during a reconnect/reload, recover the elapsed time
+                    # from the persisted session start instead of resetting to 55m.
+                    room.remaining_seconds = float(CLASS_DURATION_MINUTES * 60)
+                    room.no_show_remaining_seconds = 900.0
+                else:
+                    started_at = class_session.started_at
+                    if started_at.tzinfo is None:
+                        started_at = started_at.replace(tzinfo=timezone.utc)
+                    elapsed = max(0.0, (now - started_at).total_seconds())
+                    room.remaining_seconds = max(0.0, float(CLASS_DURATION_MINUTES * 60) - elapsed)
+                    room.no_show_remaining_seconds = 0.0
+                    room.student_ever_joined = True
 
             pending_student = room.pending_student
             if pending_student:
