@@ -97,27 +97,53 @@ def mark_student_no_show(session_id: uuid.UUID, db: Session) -> bool:
     return True
 
 
+def _record_unlimited_completion_once(booking: Booking, db: Session) -> bool:
+    """Increment an unlimited package only once per completed booking."""
+    if booking.student_package_id is None:
+        return False
+    package = db.get(StudentPackage, booking.student_package_id)
+    if package is None or not package.is_unlimited:
+        return False
+    existing = db.query(PackageCreditLedger).filter(
+        PackageCreditLedger.booking_id == booking.id,
+        PackageCreditLedger.reason == "classroom_completed",
+    ).first()
+    if existing:
+        return False
+    package.classes_used += 1
+    db.add(PackageCreditLedger(
+        student_package_id=package.id,
+        booking_id=booking.id,
+        delta=1,
+        reason="classroom_completed",
+    ))
+    return True
+
+
 def end_class_session(session_id: uuid.UUID, db: Session) -> ClassNotes | None:
     class_session = db.get(ClassSession, session_id)
     if class_session is None:
         return None
+
+    booking = db.get(Booking, class_session.booking_id)
     if class_session.status == SessionStatus.ended:
+        # A previous lifecycle path may have ended the session before booking
+        # and package counters were reconciled. Repair those fields idempotently.
+        changed = False
+        if booking is not None and booking.status not in (BookingStatus.cancelled, BookingStatus.no_show):
+            if booking.status != BookingStatus.completed:
+                booking.status = BookingStatus.completed
+                changed = True
+            changed = _record_unlimited_completion_once(booking, db) or changed
+        if changed:
+            db.commit()
         return db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first()
+
     class_session.status = SessionStatus.ended
     class_session.ended_at = datetime.now(timezone.utc)
-    booking = db.get(Booking, class_session.booking_id)
-    if booking is not None and booking.status != BookingStatus.cancelled:
+    if booking is not None and booking.status not in (BookingStatus.cancelled, BookingStatus.no_show):
         booking.status = BookingStatus.completed
-        if booking.student_package_id is not None:
-            package = db.get(StudentPackage, booking.student_package_id)
-            if package is not None and package.is_unlimited:
-                package.classes_used += 1
-                db.add(PackageCreditLedger(
-                    student_package_id=package.id,
-                    booking_id=booking.id,
-                    delta=1,
-                    reason="classroom_completed",
-                ))
+        _record_unlimited_completion_once(booking, db)
     db.commit()
     existing = db.query(ClassNotes).filter(ClassNotes.session_id == session_id).first()
     if existing:
