@@ -67,6 +67,20 @@ const attachMedia = (track, containerId, muted = false) => {
   return attached;
 };
 
+const clearScreenOverlay = (containerId) => {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const video = box.querySelector("video");
+  if (video) {
+    video.pause();
+    video.srcObject = null;
+    delete video.dataset.dexmyTrackSid;
+  }
+  box.dataset.active = "false";
+  delete box.dataset.dexmyScreenTrackSid;
+  box.style.removeProperty("display");
+};
+
 const detachMedia = (track, publication) => {
   const sid = track?.sid || publication?.trackSid || "";
   const screenBox = Array.from(document.querySelectorAll("#remote-screen, #local-screen"))
@@ -1124,6 +1138,8 @@ export default function Classroom() {
           else if (publication.source === Track.Source.Microphone) setMic(false);
           else if (publication.source === Track.Source.ScreenShare) {
             setScreen(false);
+            // Force-hide the local overlay even if detachMedia cannot match the track SID.
+            clearScreenOverlay("local-screen");
             restoreWhiteboardAfterScreenShare();
           }
         });
