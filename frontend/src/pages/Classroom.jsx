@@ -31,6 +31,11 @@ const attachMedia = (track, containerId, muted = false) => {
     el.className = "absolute inset-0 w-full h-full object-contain bg-black";
   }
   box.appendChild(el);
+  if (containerId === "remote-screen" || containerId === "local-screen") {
+    // Explicitly reveal the overlay when the video track is attached.
+    box.style.display = "block";
+    box.dataset.dexmyScreenTrackSid = trackSid;
+  }
   if (track.kind === Track.Kind.Video || (track.kind === Track.Kind.Audio && !muted)) {
     el.play?.().catch(() => {});
   }
@@ -42,6 +47,12 @@ const detachMedia = (track, publication) => {
   track?.detach().forEach((el) => el.remove());
   // LiveKit already detached the elements, so detach() returns []. Remove them by track sid.
   if (sid) document.querySelectorAll(`[data-dexmy-track-sid="${sid}"]`).forEach((el) => el.remove());
+  document.querySelectorAll("#remote-screen, #local-screen").forEach((box) => {
+    if (!box.querySelector("video")) {
+      box.style.display = "none";
+      delete box.dataset.dexmyScreenTrackSid;
+    }
+  });
 };
 
 const W = 1600, H = 900;
@@ -975,6 +986,22 @@ export default function Classroom() {
             setScreen(!publication.isMuted);
           }
         };
+        const isScreenShareVideo = (publication) => {
+          const source = String(publication?.source || "").toLowerCase();
+          return publication?.kind === Track.Kind.Video &&
+            (publication.source === Track.Source.ScreenShare || source === "screen_share" || source === "screen_share_video");
+        };
+        const subscribeToRemoteScreenShares = (participant) => {
+          participant?.trackPublications?.forEach((publication) => {
+            if (!isScreenShareVideo(publication)) return;
+            try {
+              // Recover shares already published when the other participant joins/reconnects.
+              publication.setSubscribed(true);
+            } catch (error) {
+              console.error("[Dexmy screen share] Could not request remote subscription", error);
+            }
+          });
+        };
         const attachRemotePublication = (publication, participant, subscribedTrack = null) => {
           // TrackSubscribed supplies the live track directly; use it rather than depending on
           // publication.track being populated at the exact moment the event is handled.
@@ -985,7 +1012,12 @@ export default function Classroom() {
             if (participant?.name) setPeerName(participant.name);
           } else if (publication.source === Track.Source.Microphone) {
             attachMedia(track, "remote-audio", false);
-          } else if (publication.source === Track.Source.ScreenShare) {
+          } else if (isScreenShareVideo(publication)) {
+            console.info("[Dexmy screen share] Remote screen-share track subscribed", {
+              participant: participant?.identity,
+              source: publication.source,
+              trackSid: track.sid || publication.trackSid || null,
+            });
             const video = attachMedia(track, "remote-screen", true);
             // Explicitly restart playback after attachment; browsers may reject autoplay
             // on a newly subscribed remote video even when the element has autoplay set.
@@ -1014,6 +1046,17 @@ export default function Classroom() {
 
         room.on(RoomEvent.ParticipantConnected, (participant) => {
           if (participant?.name) setPeerName(participant.name);
+          subscribeToRemoteScreenShares(participant);
+        });
+        room.on(RoomEvent.TrackPublished, (publication, participant) => {
+          if (participant && isScreenShareVideo(publication)) {
+            console.info("[Dexmy screen share] Remote screen-share track published", {
+              participant: participant.identity,
+              source: publication.source,
+              trackSid: publication.trackSid || null,
+            });
+            subscribeToRemoteScreenShares(participant);
+          }
         });
         room.on(RoomEvent.Reconnecting, () => setStatus("Reconnecting video…"));
         room.on(RoomEvent.Reconnected, () => {
@@ -1046,7 +1089,7 @@ export default function Classroom() {
           }
         });
         room.on(RoomEvent.TrackUnpublished, (publication) => {
-          if (publication?.source === Track.Source.ScreenShare) {
+          if (isScreenShareVideo(publication)) {
             detachMedia(publication.track, publication);
             // Remote share can be unpublished before the subscribed track is fully detached.
             restoreWhiteboardAfterScreenShare();
@@ -1054,7 +1097,7 @@ export default function Classroom() {
         });
         room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
           detachMedia(track, publication);
-          if (publication?.source === Track.Source.ScreenShare) {
+          if (isScreenShareVideo(publication)) {
             restoreWhiteboardAfterScreenShare();
           }
         });
