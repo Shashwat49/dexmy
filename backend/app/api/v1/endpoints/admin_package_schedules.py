@@ -14,7 +14,7 @@ from app.db.session import get_db
 from app.models.booking import Booking, BookingStatus, TeacherAssignmentStatus
 from app.models.package import PackagePlan, StudentPackage
 from app.models.package_schedule import PackageSchedule
-from app.models.teacher import Subject, TeacherProfile, TeacherSubject
+from app.models.teacher import Subject, TeacherAvailability, TeacherProfile, TeacherSubject
 from app.models.user import User, UserRole
 from app.services.package_credit_service import PackageCreditService
 from app.services.scheduling_service import can_assign_teacher
@@ -121,7 +121,28 @@ def _validate_schedule(db: Session, payload: ScheduleRequest, package: StudentPa
     dates = _occurrence_dates(payload.start_date, payload.weekdays, payload.class_count)
     starts = [datetime.combine(day, payload.start_time, tzinfo=IST) for day in dates]
     errors: list[str] = []
+    availability = db.execute(
+        select(TeacherAvailability).where(
+            TeacherAvailability.teacher_id == payload.teacher_id,
+            TeacherAvailability.is_recurring.is_(True),
+        )
+    ).scalars().all()
+    slot_start_clock = datetime.combine(date.min, payload.start_time)
+    slot_end_clock = slot_start_clock + timedelta(minutes=SLOT_DURATION_MINUTES)
     for start in starts:
+        if availability:
+            weekday = (start.weekday() + 1) % 7
+            matches_availability = any(
+                item.day_of_week == weekday
+                and datetime.combine(date.min, item.start_time) <= slot_start_clock
+                and datetime.combine(date.min, item.end_time) >= slot_end_clock
+                for item in availability
+            )
+            if not matches_availability:
+                errors.append(
+                    f"{start.strftime('%a, %d %b %Y %I:%M %p')} IST: teacher availability does not cover this full slot."
+                )
+                continue
         probe = Booking(
             id=uuid.uuid4(),
             student_id=student.id,
