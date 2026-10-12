@@ -148,8 +148,9 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
                     permission=api.ParticipantPermission(
                         can_subscribe=True,
                         can_publish=bool(sources),
-                        # Student LiveKit data is allowed only while annotation is granted.
-                        can_publish_data=("annotate" in room.permissions.get(str(user_id), set())),
+                        # Keep the LiveKit data channel available; annotation writes are
+                        # independently authorized by the classroom WebSocket and receiver.
+                        can_publish_data=True,
                         can_publish_sources=sources,
                     ),
                 )
