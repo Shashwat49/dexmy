@@ -11,6 +11,7 @@ def create_join_token(
     name: str,
     can_publish: bool,
     publish_sources: list[str] | None = None,
+    can_publish_data: bool = True,
 ) -> str:
     """Create a short-lived, least-privilege classroom token.
 
@@ -28,7 +29,7 @@ def create_join_token(
                 room=room_name,
                 can_publish=can_publish,
                 can_subscribe=True,
-                can_publish_data=True,
+                can_publish_data=can_publish_data,
                 can_publish_sources=publish_sources,
             )
         )
