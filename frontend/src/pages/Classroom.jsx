@@ -29,10 +29,11 @@ const attachMedia = (track, containerId, muted = false) => {
   if (trackSid) el.dataset.dexmyTrackSid = trackSid;
   if (track.kind === Track.Kind.Video) {
     el.className = "absolute inset-0 w-full h-full object-contain bg-black";
-    el.play?.().catch(() => {});
   }
   box.appendChild(el);
-  if (track.kind === Track.Kind.Audio && !muted) el.play?.().catch(() => {});
+  if (track.kind === Track.Kind.Video || (track.kind === Track.Kind.Audio && !muted)) {
+    el.play?.().catch(() => {});
+  }
   return el;
 };
 
