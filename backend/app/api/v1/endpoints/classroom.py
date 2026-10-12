@@ -32,7 +32,8 @@ class WhiteboardPageResponse(BaseModel):
     image_url: str | None = None
 
 def _student_publish_sources(session_id: uuid.UUID, student_id: uuid.UUID, db: Session) -> list[str]:
-    sources = {"camera", "microphone", "screen_share"}
+    # Screen sharing is opt-in and must never be enabled by default.
+    sources = {"camera", "microphone"}
     events = (db.query(PermissionEvent).filter(PermissionEvent.session_id == session_id, PermissionEvent.target_user_id == student_id).order_by(desc(PermissionEvent.created_at)).all())
     latest = {}
     for event in events:
@@ -46,6 +47,15 @@ def _student_publish_sources(session_id: uuid.UUID, student_id: uuid.UUID, db: S
             else: sources.discard(source)
     return sorted(sources)
 
+def _student_can_annotate(session_id: uuid.UUID, student_id: uuid.UUID, db: Session) -> bool:
+    latest = (db.query(PermissionEvent)
+        .filter(PermissionEvent.session_id == session_id,
+                PermissionEvent.target_user_id == student_id,
+                PermissionEvent.permission == PermissionType.annotate)
+        .order_by(desc(PermissionEvent.created_at))
+        .first())
+    return bool(latest and latest.granted)
+
 @router.post("/join-token", response_model=JoinTokenResponse)
 def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     session = db.get(ClassSession, payload.session_id)
@@ -56,7 +66,7 @@ def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_c
     is_student = current_user.id == booking.student_id
     if not (is_teacher or is_student): raise HTTPException(status_code=403, detail="You are not part of this classroom")
     sources = None if is_teacher else _student_publish_sources(payload.session_id, current_user.id, db)
-    token = create_join_token(room_name=session.livekit_room_name, identity=str(current_user.id), name=current_user.full_name, can_publish=is_teacher or bool(sources), publish_sources=sources)
+    token = create_join_token(room_name=session.livekit_room_name, identity=str(current_user.id), name=current_user.full_name, can_publish=is_teacher or bool(sources), publish_sources=sources, can_publish_data=is_teacher or _student_can_annotate(payload.session_id, current_user.id, db))
     return JoinTokenResponse(livekit_token=token, livekit_url=settings.LIVEKIT_URL, room_name=session.livekit_room_name)
 
 @router.post("/sessions/{session_id}/end", response_model=ClassNotesRead)
