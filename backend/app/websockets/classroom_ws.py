@@ -267,8 +267,7 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                         started_at = started_at.replace(tzinfo=timezone.utc)
                     elapsed = max(0.0, (now - started_at).total_seconds())
                     room.remaining_seconds = max(0.0, float(CLASS_DURATION_MINUTES * 60) - elapsed)
-                    room.no_show_remaining_seconds = 0.0
-                    room.student_ever_joined = True
+                    room.no_show_remaining_seconds = max(0.0, 900.0 - elapsed)
 
             pending_student = room.pending_student
             if pending_student:
