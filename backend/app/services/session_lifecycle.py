@@ -63,11 +63,17 @@ def mark_student_no_show(session_id: uuid.UUID, db: Session) -> bool:
     A no-show is not a completed teaching session: do not mark the booking
     completed and do not create teacher class/payout credit.
     """
-    class_session = db.get(ClassSession, session_id)
+    # Serialize manual-end, timer-end, and no-show transitions for this session.
+    # Concurrent lifecycle requests must not race while updating booking/package counters.
+    class_session = db.query(ClassSession).filter(
+        ClassSession.id == session_id
+    ).with_for_update().first()
     if class_session is None or class_session.status == SessionStatus.ended:
         return False
 
-    booking = db.get(Booking, class_session.booking_id)
+    booking = db.query(Booking).filter(
+        Booking.id == class_session.booking_id
+    ).with_for_update().first()
     if booking is None or booking.status in (BookingStatus.cancelled, BookingStatus.no_show):
         class_session.status = SessionStatus.ended
         class_session.ended_at = datetime.now(timezone.utc)
@@ -121,11 +127,17 @@ def _record_unlimited_completion_once(booking: Booking, db: Session) -> bool:
 
 
 def end_class_session(session_id: uuid.UUID, db: Session) -> ClassNotes | None:
-    class_session = db.get(ClassSession, session_id)
+    # Lock the session row so a teacher click and the automatic timer cannot
+    # finalize the same class concurrently or double-apply completion accounting.
+    class_session = db.query(ClassSession).filter(
+        ClassSession.id == session_id
+    ).with_for_update().first()
     if class_session is None:
         return None
 
-    booking = db.get(Booking, class_session.booking_id)
+    booking = db.query(Booking).filter(
+        Booking.id == class_session.booking_id
+    ).with_for_update().first()
     if class_session.status == SessionStatus.ended:
         # A previous lifecycle path may have ended the session before booking
         # and package counters were reconciled. Repair those fields idempotently.
