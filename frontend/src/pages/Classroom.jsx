@@ -1097,17 +1097,51 @@ export default function Classroom() {
             restoreWhiteboardAfterScreenShare();
           }
         });
-        room.on(RoomEvent.TrackUnpublished, (publication) => {
+        room.on(RoomEvent.TrackUnpublished, (publication, participant) => {
           if (isScreenShareVideo(publication)) {
+            console.info("[Dexmy screen share] Remote screen-share track unpublished", {
+              participant: participant?.identity,
+              trackSid: publication.trackSid || null,
+              isPublished: publication.isPublished,
+              roomState: room.state,
+            });
             detachMedia(publication.track, publication);
-            // Remote share can be unpublished before the subscribed track is fully detached.
             restoreWhiteboardAfterScreenShare();
           }
         });
-        room.on(RoomEvent.TrackUnsubscribed, (track, publication) => {
+        room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+          const isScreenShare = isScreenShareVideo(publication);
+          if (isScreenShare) {
+            console.warn("[Dexmy screen share] Remote screen-share track unsubscribed", {
+              participant: participant?.identity,
+              trackSid: publication.trackSid || track?.sid || null,
+              isPublished: publication.isPublished,
+              isSubscribed: publication.isSubscribed,
+              roomState: room.state,
+            });
+          }
           detachMedia(track, publication);
-          if (isScreenShareVideo(publication)) {
+          if (isScreenShare) {
             restoreWhiteboardAfterScreenShare();
+            // A transient unsubscribe must not leave the student with a blank
+            // whiteboard while the publisher is still sharing. Recover only if
+            // LiveKit still reports this publication as published.
+            if (publication.isPublished && room.state === "connected") {
+              setTimeout(() => {
+                if (disposedRef.current || roomRef.current !== room || room.state !== "connected") return;
+                const current = participant?.trackPublications?.get(publication.trackSid);
+                if (!current || !current.isPublished || current.isSubscribed) return;
+                console.warn("[Dexmy screen share] Retrying subscription to still-published screen share", {
+                  participant: participant?.identity,
+                  trackSid: current.trackSid || null,
+                });
+                try {
+                  current.setSubscribed(true);
+                } catch (error) {
+                  console.error("[Dexmy screen share] Screen-share resubscription retry failed", error);
+                }
+              }, 350);
+            }
           }
         });
         room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
