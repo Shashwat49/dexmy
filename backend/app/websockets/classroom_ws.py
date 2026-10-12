@@ -148,7 +148,8 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
                     permission=api.ParticipantPermission(
                         can_subscribe=True,
                         can_publish=bool(sources),
-                        can_publish_data=True,
+                        # Student LiveKit data is allowed only while annotation is granted.
+                        can_publish_data=("annotate" in room.permissions.get(str(user_id), set())),
                         can_publish_sources=sources,
                     ),
                 )
@@ -652,10 +653,9 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         # Apply LiveKit publish permissions before telling either client that a
         # camera/mic/screen-share change succeeded. Otherwise the student UI can
         # say "allowed" while LiveKit still rejects publishing.
-        if permission != PermissionType.annotate:
-            try:
-                await _sync_livekit_permissions(class_session, target_user_id, room)
-            except Exception as exc:
+        try:
+            await _sync_livekit_permissions(class_session, target_user_id, room)
+        except Exception as exc:
                 room.permissions[key] = previous_permissions
                 await websocket.send_json({
                     "type": "permission_sync_failed",
@@ -671,10 +671,9 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
         except Exception as exc:
             db.rollback()
             room.permissions[key] = previous_permissions
-            if permission != PermissionType.annotate:
-                try:
-                    await _sync_livekit_permissions(class_session, target_user_id, room)
-                except Exception:
+            try:
+                await _sync_livekit_permissions(class_session, target_user_id, room)
+            except Exception:
                     logging.getLogger(__name__).warning("Failed to restore LiveKit permissions after DB commit failure", exc_info=True)
             await websocket.send_json({
                 "type": "permission_sync_failed",
