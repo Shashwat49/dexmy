@@ -50,6 +50,10 @@ class Booking(Base):
         UUID(as_uuid=True), ForeignKey("student_packages.id", ondelete="RESTRICT"), index=True, nullable=True
     )
 
+    schedule_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("package_schedules.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+
     scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
     # Production DB requires the class end timestamp.
