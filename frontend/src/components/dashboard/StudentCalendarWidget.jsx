@@ -2,146 +2,353 @@ import { useEffect, useMemo, useState } from "react";
 import { getMyBookings } from "../../api/bookings";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const statusOf = (booking) => String(booking?.status || "").toLowerCase().split(".").pop();
-const tomorrowDate = () => { const date = new Date(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() + 1); return date; };
-const sameDay = (a, b) => {
-  const left = new Date(a), right = new Date(b);
-  return left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate();
-};
-const monthLabel = (date) => date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-const timeLabel = (date) => new Date(date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
-function monthDays(month) {
-  const first = new Date(month.getFullYear(), month.getMonth(), 1);
-  const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-  const result = [];
-  for (let i = 0; i < first.getDay(); i++) {
-    result.push({ date: new Date(first.getFullYear(), first.getMonth(), 1 - (first.getDay() - i)), inMonth: false });
+function startOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function endOfMonth(date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+}
+
+function formatMonth(date) {
+  return date.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function formatTime(dateString) {
+  return new Date(dateString).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function getEndTime(scheduledAt, durationMinutes) {
+  const date = new Date(scheduledAt);
+  date.setMinutes(date.getMinutes() + (Number(durationMinutes) || 55));
+  return date.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function statusOf(booking) {
+  return String(booking?.status || "").toLowerCase().split(".").pop();
+}
+
+function tomorrowDate() {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 1);
+  return date;
+}
+
+function sameDay(dateA, dateB) {
+  return (
+    dateA.getFullYear() === dateB.getFullYear() &&
+    dateA.getMonth() === dateB.getMonth() &&
+    dateA.getDate() === dateB.getDate()
+  );
+}
+
+function getCalendarDays(monthDate) {
+  const first = startOfMonth(monthDate);
+  const last = endOfMonth(monthDate);
+  const days = [];
+
+  for (let i = first.getDay() - 1; i >= 0; i--) {
+    const date = new Date(first);
+    date.setDate(first.getDate() - i - 1);
+    days.push({ date, currentMonth: false });
   }
-  for (let day = 1; day <= count; day++) {
-    result.push({ date: new Date(month.getFullYear(), month.getMonth(), day), inMonth: true });
+
+  for (let day = 1; day <= last.getDate(); day++) {
+    days.push({
+      date: new Date(monthDate.getFullYear(), monthDate.getMonth(), day),
+      currentMonth: true,
+    });
   }
-  let next = 1;
-  while (result.length < 42) {
-    result.push({ date: new Date(month.getFullYear(), month.getMonth() + 1, next++), inMonth: false });
+
+  let nextDay = 1;
+  while (days.length < 42) {
+    days.push({
+      date: new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, nextDay++),
+      currentMonth: false,
+    });
   }
-  return result;
+
+  return days;
 }
 
 export default function StudentCalendarWidget() {
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const date = tomorrowDate();
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  });
   const [bookings, setBookings] = useState([]);
-  const [month, setMonth] = useState(() => { const date = tomorrowDate(); return new Date(date.getFullYear(), date.getMonth(), 1); });
-  const [selectedDate, setSelectedDate] = useState(() => tomorrowDate());
-  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedDate, setSelectedDate] = useState(() => tomorrowDate());
 
   useEffect(() => {
     let active = true;
-    getMyBookings()
-      .then((data) => { if (active) setBookings(Array.isArray(data) ? data : []); })
-      .catch((err) => { if (active) setError(err.response?.data?.detail || "Calendar classes could not be loaded."); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+
+    async function loadBookings() {
+      try {
+        setLoading(true);
+        setError("");
+        const data = await getMyBookings();
+        if (active) setBookings(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (active) {
+          setError(
+            err.response?.data?.detail || "Unable to load your calendar."
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadBookings();
+    return () => {
+      active = false;
+    };
   }, []);
 
-  // Show all assigned bookings, including every future occurrence in an approved package schedule.
+  // Keep the student calendar aligned with the teacher calendar: show every assigned class on its date.
   const visibleBookings = useMemo(
-    () => bookings.filter((booking) => booking?.scheduled_at),
+    () => bookings.filter((booking) => booking?.scheduled_at && !Number.isNaN(new Date(booking.scheduled_at).getTime())),
     [bookings]
   );
 
-  const days = useMemo(() => monthDays(month), [month]);
-  const selectedBookings = useMemo(() => visibleBookings
-    .filter((booking) => booking.scheduled_at && sameDay(booking.scheduled_at, selectedDate))
-    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [visibleBookings, selectedDate]);
+  const calendarDays = useMemo(() => getCalendarDays(currentMonth), [currentMonth]);
 
-  const moveMonth = (offset) => setMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
-  const goToday = () => {
+  const selectedDayBookings = useMemo(
+    () =>
+      visibleBookings
+        .filter((booking) => sameDay(new Date(booking.scheduled_at), selectedDate))
+        .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)),
+    [visibleBookings, selectedDate]
+  );
+
+  function previousMonth() {
+    setCurrentMonth((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1));
+  }
+
+  function nextMonth() {
+    setCurrentMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1));
+  }
+
+  function goToToday() {
     const today = new Date();
-    setMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+    setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1));
     setSelectedDate(today);
-  };
-  const completedCount = selectedBookings.filter((booking) => statusOf(booking) === "completed").length;
+  }
+
+  if (loading) {
+    return (
+      <section className="bg-panel px-4 py-6 sm:px-6 lg:px-8" aria-label="Your class calendar">
+        <div className="mx-auto max-w-7xl">
+          <p className="text-sm text-chalk-muted">Loading calendar...</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className="border-b border-chalk-faint bg-panel/95 px-4 py-4 sm:px-6 lg:px-8" aria-label="Your class calendar">
-      <div className="mx-auto max-w-[1500px]">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <section className="bg-panel px-4 py-6 sm:px-6 lg:px-8" aria-label="Your class calendar">
+      <div className="mx-auto max-w-7xl">
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Class calendar</h2>
-            <p className="mt-1 text-xs text-chalk-muted">Scheduled classes across your calendar and your completed class history.</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => moveMonth(-1)} aria-label="Previous month" className="grid h-8 w-8 place-items-center rounded-lg border border-chalk-faint hover:border-chalk-muted">←</button>
-            <span className="min-w-32 text-center text-sm font-semibold">{monthLabel(month)}</span>
-            <button type="button" onClick={() => moveMonth(1)} aria-label="Next month" className="grid h-8 w-8 place-items-center rounded-lg border border-chalk-faint hover:border-chalk-muted">→</button>
-            <button type="button" onClick={goToday} className="rounded-lg border border-chalk-faint px-3 py-1.5 text-xs hover:border-brand-gold">Today</button>
+            <h2 className="text-3xl font-semibold">Class calendar</h2>
+            <p className="mt-2 text-sm text-chalk-muted">
+              View your scheduled classes and learning schedule.
+            </p>
           </div>
         </div>
 
-        <div className="mb-3 flex flex-wrap gap-3 text-xs">
-          <span className="inline-flex items-center gap-1.5 text-chalk-muted"><span className="h-2.5 w-2.5 rounded-sm bg-amber-300" /> Scheduled</span>
-          <span className="inline-flex items-center gap-1.5 text-chalk-muted"><span className="h-2.5 w-2.5 rounded-sm bg-green-400" /> Completed</span>
-          <span className="inline-flex items-center gap-1.5 text-chalk-muted"><span className="h-2.5 w-2.5 rounded-sm bg-slate-500" /> Cancelled / other</span>
-        </div>
-
-        {error && <p role="status" className="mb-3 rounded-lg border border-brand-red/30 bg-brand-red/10 px-3 py-2 text-xs text-brand-red">{error}</p>}
-        {loading ? <p className="py-5 text-sm text-chalk-muted">Loading calendar…</p> : (
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.7fr)]">
-            <div className="overflow-hidden rounded-xl border border-chalk-faint">
-              <div className="grid grid-cols-7 border-b border-chalk-faint bg-panel-2">
-                {WEEKDAYS.map((day) => <div key={day} className="py-2 text-center text-[10px] font-semibold text-chalk-muted sm:text-xs">{day}</div>)}
-              </div>
-              <div className="grid grid-cols-7">
-                {days.map(({ date, inMonth }) => {
-                  const dayBookings = visibleBookings.filter((booking) => booking.scheduled_at && sameDay(booking.scheduled_at, date));
-                  const scheduled = dayBookings.filter((booking) => statusOf(booking) === "confirmed").length;
-                  const completed = dayBookings.filter((booking) => statusOf(booking) === "completed").length;
-                  const selected = sameDay(date, selectedDate);
-                  const today = sameDay(date, new Date());
-                  return (
-                    <button key={date.toISOString()} type="button" onClick={() => setSelectedDate(date)} aria-pressed={selected}
-                      className={`min-h-[48px] border-b border-r border-chalk-faint p-1.5 text-left transition sm:min-h-[62px] sm:p-2 ${selected ? "bg-brand-gold/10 ring-1 ring-inset ring-brand-gold" : "hover:bg-panel-2"}`}>
-                      <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] sm:text-xs ${today ? "bg-brand-red text-white" : inMonth ? "text-chalk" : "text-chalk-muted/40"}`}>{date.getDate()}</span>
-                      {dayBookings.length > 0 && <div className="mt-1 flex flex-wrap gap-1">
-                        {scheduled > 0 && <span title={`${scheduled} scheduled`} className="rounded-sm bg-amber-300 px-1 text-[9px] font-bold leading-4 text-amber-950">{scheduled}</span>}
-                        {completed > 0 && <span title={`${completed} completed`} className="rounded-sm bg-green-400 px-1 text-[9px] font-bold leading-4 text-green-950">{completed}</span>}
-                        {dayBookings.length > scheduled + completed && <span title="Cancelled or other status" className="rounded-sm bg-slate-500 px-1 text-[9px] font-bold leading-4 text-white">{dayBookings.length - scheduled - completed}</span>}
-                      </div>}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <aside className="min-w-0 rounded-xl border border-chalk-faint bg-panel-2 p-3 sm:p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-semibold">{selectedDate.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" })}</h3>
-                  <p className="mt-1 text-xs text-chalk-muted">{selectedBookings.length} class{selectedBookings.length === 1 ? "" : "es"} · {completedCount} completed</p>
-                </div>
-              </div>
-              {selectedBookings.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-chalk-faint p-4 text-xs text-chalk-muted">No classes on this date.</p> : (
-                <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
-                  {selectedBookings.map((booking) => {
-                    const completed = statusOf(booking) === "completed";
-                    const scheduled = statusOf(booking) === "confirmed";
-                    const tone = completed ? "border-green-400/30 bg-green-400/10 text-green-300" : scheduled ? "border-amber-300/30 bg-amber-300/10 text-amber-200" : "border-chalk-faint bg-panel text-chalk-muted";
-                    return <article key={booking.id} className={`rounded-lg border p-3 ${tone}`}>
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="min-w-0 truncate text-xs font-semibold">{booking.subject_name || "Class"}</p>
-                        <span className="shrink-0 text-[10px] font-semibold capitalize">{completed ? "Completed" : scheduled ? "Scheduled" : String(booking.status || "Other").replaceAll("_", " ")}</span>
-                      </div>
-                      <p className="mt-1 text-[11px] opacity-80">{timeLabel(booking.scheduled_at)}{booking.teacher_name ? ` · ${booking.teacher_name}` : ""}</p>
-                    </article>;
-                  })}
-                </div>
-              )}
-            </aside>
+        {error && (
+          <div role="alert" className="mb-6 rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">
+            {error}
+            <button type="button" onClick={() => window.location.reload()} className="ml-3 underline">
+              Retry
+            </button>
           </div>
         )}
+
+        <div className="overflow-hidden rounded-2xl border border-chalk-faint bg-panel">
+          <div className="flex flex-col gap-4 border-b border-chalk-faint p-5 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={previousMonth}
+                aria-label="Previous month"
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-chalk-faint hover:border-chalk-muted"
+              >
+                ←
+              </button>
+              <h3 className="min-w-[180px] text-center text-lg font-semibold">
+                {formatMonth(currentMonth)}
+              </h3>
+              <button
+                type="button"
+                onClick={nextMonth}
+                aria-label="Next month"
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-chalk-faint hover:border-chalk-muted"
+              >
+                →
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={goToToday}
+              className="rounded-xl border border-chalk-faint px-4 py-2 text-sm font-medium hover:border-brand-gold"
+            >
+              Today
+            </button>
+          </div>
+
+          <div className="flex flex-wrap gap-4 border-b border-chalk-faint px-5 py-3 text-xs text-chalk-muted">
+            <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-amber-300" /> Scheduled classes</span>
+            <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-green-400" /> Completed classes</span>
+            <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-slate-500" /> Cancelled / other</span>
+          </div>
+
+          <div className="grid grid-cols-7 border-b border-chalk-faint">
+            {WEEKDAYS.map((day) => (
+              <div key={day} className="border-r border-chalk-faint px-2 py-3 text-center text-xs font-medium text-chalk-muted last:border-r-0">
+                {day}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7">
+            {calendarDays.map(({ date, currentMonth: isCurrentMonth }) => {
+              const dayBookings = visibleBookings.filter((booking) =>
+                sameDay(new Date(booking.scheduled_at), date)
+              );
+              const selected = sameDay(date, selectedDate);
+              const today = sameDay(date, new Date());
+
+              return (
+                <button
+                  key={date.toISOString()}
+                  type="button"
+                  onClick={() => setSelectedDate(date)}
+                  aria-pressed={selected}
+                  aria-label={date.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                  className={[
+                    "min-h-[110px] border-r border-b border-chalk-faint p-2 text-left transition",
+                    selected ? "bg-brand-gold/10" : "hover:bg-panel-3",
+                  ].join(" ")}
+                >
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={[
+                        "flex h-7 w-7 items-center justify-center rounded-full text-xs",
+                        today ? "bg-brand-red text-white" : isCurrentMonth ? "text-chalk" : "text-chalk-muted/40",
+                      ].join(" ")}
+                    >
+                      {date.getDate()}
+                    </span>
+                    {dayBookings.length > 0 && (
+                      <span className="text-[10px] text-brand-gold">{dayBookings.length}</span>
+                    )}
+                  </div>
+
+                  <div className="mt-2 space-y-1">
+                    {dayBookings.slice(0, 3).map((booking) => {
+                      const status = statusOf(booking);
+                      const bookingTone =
+                        status === "completed"
+                          ? "bg-green-500/10 text-green-400"
+                          : status === "confirmed"
+                            ? "bg-amber-300/15 text-amber-200"
+                            : "bg-slate-500/10 text-slate-300";
+
+                      return (
+                        <div key={booking.id} className={["truncate rounded-md px-2 py-1 text-[10px]", bookingTone].join(" ")}>
+                          {formatTime(booking.scheduled_at)} · {booking.subject_name || "Class"}
+                        </div>
+                      );
+                    })}
+                    {dayBookings.length > 3 && (
+                      <div className="px-2 text-[10px] text-chalk-muted">
+                        +{dayBookings.length - 3} more
+                      </div>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <section className="mt-8">
+          <div className="mb-4">
+            <h3 className="text-xl font-semibold">
+              {selectedDate.toLocaleDateString("en-US", {
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+                year: "numeric",
+              })}
+            </h3>
+            <p className="mt-1 text-sm text-chalk-muted">Your classes for this day.</p>
+          </div>
+
+          {selectedDayBookings.length === 0 ? (
+            <div className="rounded-2xl border border-chalk-faint bg-panel p-8">
+              <p className="text-sm text-chalk-muted">No classes scheduled for this day.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {selectedDayBookings.map((booking) => {
+                const status = statusOf(booking);
+                const statusTone =
+                  status === "completed"
+                    ? "bg-green-500/10 text-green-400"
+                    : status === "confirmed"
+                      ? "bg-amber-300/15 text-amber-200"
+                      : "bg-slate-500/10 text-slate-300";
+
+                return (
+                  <article key={booking.id} className="rounded-2xl border border-chalk-faint bg-panel p-5">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <h4 className="font-semibold">{booking.subject_name || "Class"}</h4>
+                        <p className="mt-1 text-sm text-chalk-muted">
+                          Teacher: {booking.teacher_name || "Assigned teacher"}
+                        </p>
+                        <p className="mt-1 text-sm text-chalk-muted">
+                          {formatTime(booking.scheduled_at)} – {getEndTime(booking.scheduled_at, booking.duration_minutes)}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <span className={["rounded-full px-3 py-1.5 text-xs capitalize", statusTone].join(" ")}>
+                          {String(booking.status || "other").replaceAll("_", " ")}
+                        </span>
+                        <button
+                          type="button"
+                          disabled
+                          className="rounded-xl bg-brand-red px-4 py-2 text-sm font-semibold opacity-50"
+                        >
+                          Classroom
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
       </div>
     </section>
   );
