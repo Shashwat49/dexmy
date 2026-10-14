@@ -52,6 +52,25 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    const handleStorage = async (event) => {
+      if (event.key !== "dexmy_user") return;
+      if (!event.newValue) {
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+      try {
+        const currentUser = await authApi.getMe();
+        setUser(currentUser);
+      } catch {
+        setUser(null);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  useEffect(() => {
     if (user) localStorage.setItem("dexmy_user", JSON.stringify(user));
     else localStorage.removeItem("dexmy_user");
   }, [user]);
