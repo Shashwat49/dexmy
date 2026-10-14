@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { getMyBookings } from "../../api/bookings";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const statusOf = (booking) => String(booking?.status || "").toLowerCase().split(".").pop();
+const tomorrowDate = () => { const date = new Date(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() + 1); return date; };
 const sameDay = (a, b) => {
   const left = new Date(a), right = new Date(b);
   return left.getFullYear() === right.getFullYear() &&
@@ -30,8 +32,8 @@ function monthDays(month) {
 
 export default function StudentCalendarWidget() {
   const [bookings, setBookings] = useState([]);
-  const [month, setMonth] = useState(() => new Date());
-  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [month, setMonth] = useState(() => { const date = tomorrowDate(); return new Date(date.getFullYear(), date.getMonth(), 1); });
+  const [selectedDate, setSelectedDate] = useState(() => tomorrowDate());
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -46,11 +48,9 @@ export default function StudentCalendarWidget() {
 
   // Keep completed history visible, but only expose confirmed upcoming classes for tomorrow.
   const visibleBookings = useMemo(() => {
-    const tomorrow = new Date();
-    tomorrow.setHours(0, 0, 0, 0);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrow = tomorrowDate();
     return bookings.filter((booking) =>
-      booking.status !== "confirmed" ||
+      statusOf(booking) !== "confirmed" ||
       (booking.scheduled_at && sameDay(booking.scheduled_at, tomorrow))
     );
   }, [bookings]);
@@ -66,7 +66,7 @@ export default function StudentCalendarWidget() {
     setMonth(new Date(today.getFullYear(), today.getMonth(), 1));
     setSelectedDate(today);
   };
-  const completedCount = selectedBookings.filter((booking) => booking.status === "completed").length;
+  const completedCount = selectedBookings.filter((booking) => statusOf(booking) === "completed").length;
 
   return (
     <section className="border-b border-chalk-faint bg-panel/95 px-4 py-4 sm:px-6 lg:px-8" aria-label="Your class calendar">
@@ -74,7 +74,7 @@ export default function StudentCalendarWidget() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Class calendar</h2>
-            <p className="mt-1 text-xs text-chalk-muted">Your scheduled and completed classes, across all dates.</p>
+            <p className="mt-1 text-xs text-chalk-muted">Tomorrow's scheduled classes and your completed class history.</p>
           </div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => moveMonth(-1)} aria-label="Previous month" className="grid h-8 w-8 place-items-center rounded-lg border border-chalk-faint hover:border-chalk-muted">←</button>
@@ -100,7 +100,7 @@ export default function StudentCalendarWidget() {
               <div className="grid grid-cols-7">
                 {days.map(({ date, inMonth }) => {
                   const dayBookings = visibleBookings.filter((booking) => booking.scheduled_at && sameDay(booking.scheduled_at, date));
-                  const scheduled = dayBookings.filter((booking) => booking.status === "confirmed").length;
+                  const scheduled = dayBookings.filter((booking) => statusOf(booking) === "confirmed").length;
                   const completed = dayBookings.filter((booking) => booking.status === "completed").length;
                   const selected = sameDay(date, selectedDate);
                   const today = sameDay(date, new Date());
@@ -129,8 +129,8 @@ export default function StudentCalendarWidget() {
               {selectedBookings.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-chalk-faint p-4 text-xs text-chalk-muted">No classes on this date.</p> : (
                 <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
                   {selectedBookings.map((booking) => {
-                    const completed = booking.status === "completed";
-                    const scheduled = booking.status === "confirmed";
+                    const completed = statusOf(booking) === "completed";
+                    const scheduled = statusOf(booking) === "confirmed";
                     const tone = completed ? "border-green-400/30 bg-green-400/10 text-green-300" : scheduled ? "border-amber-300/30 bg-amber-300/10 text-amber-200" : "border-chalk-faint bg-panel text-chalk-muted";
                     return <article key={booking.id} className={`rounded-lg border p-3 ${tone}`}>
                       <div className="flex items-start justify-between gap-2">

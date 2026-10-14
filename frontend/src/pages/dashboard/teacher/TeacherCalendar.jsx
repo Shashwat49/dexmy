@@ -62,6 +62,10 @@ function getEndTime(
   });
 }
 
+function statusOf(booking) { return String(booking?.status || "").toLowerCase().split(".").pop(); }
+
+function tomorrowDate() { const date = new Date(); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() + 1); return date; }
+
 function sameDay(dateA, dateB) {
   return (
     dateA.getFullYear() === dateB.getFullYear() &&
@@ -130,7 +134,7 @@ function getCalendarDays(monthDate) {
 
 export default function TeacherCalendar() {
   const [currentMonth, setCurrentMonth] =
-    useState(new Date());
+    useState(() => { const date = tomorrowDate(); return new Date(date.getFullYear(), date.getMonth(), 1); });
 
   const [bookings, setBookings] =
     useState([]);
@@ -142,7 +146,7 @@ export default function TeacherCalendar() {
     useState("");
 
   const [selectedDate, setSelectedDate] =
-    useState(new Date());
+    useState(() => tomorrowDate());
 
   useEffect(() => {
     async function loadBookings() {
@@ -177,11 +181,9 @@ export default function TeacherCalendar() {
 
   // Keep completed history visible, but only expose confirmed upcoming classes for tomorrow.
   const visibleBookings = useMemo(() => {
-    const tomorrow = new Date();
-    tomorrow.setHours(0, 0, 0, 0);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrow = tomorrowDate();
     return bookings.filter((booking) =>
-      booking.status !== "confirmed" ||
+      statusOf(booking) !== "confirmed" ||
       (booking.scheduled_at && sameDay(new Date(booking.scheduled_at), tomorrow))
     );
   }, [bookings]);
@@ -457,7 +459,7 @@ export default function TeacherCalendar() {
                               key={
                                 booking.id
                               }
-                              className={`truncate rounded-md px-2 py-1 text-[10px] ${booking.status === "completed" ? "bg-green-500/10 text-green-400" : booking.status === "confirmed" ? "bg-amber-300/15 text-amber-200" : "bg-slate-500/10 text-slate-300"}`}
+                              className={`truncate rounded-md px-2 py-1 text-[10px] ${statusOf(booking) === "completed" ? "bg-green-500/10 text-green-400" : statusOf(booking) === "confirmed" ? "bg-amber-300/15 text-amber-200" : "bg-slate-500/10 text-slate-300"}`}
                             >
                               {formatTime(
                                 booking.scheduled_at
@@ -573,7 +575,7 @@ export default function TeacherCalendar() {
 
                       <div className="flex items-center gap-3">
 
-                        <span className={`rounded-full px-3 py-1.5 text-xs capitalize ${booking.status === "completed" ? "bg-green-500/10 text-green-400" : booking.status === "confirmed" ? "bg-amber-300/15 text-amber-200" : "bg-slate-500/10 text-slate-300"}`}>
+                        <span className={`rounded-full px-3 py-1.5 text-xs capitalize ${statusOf(booking) === "completed" ? "bg-green-500/10 text-green-400" : statusOf(booking) === "confirmed" ? "bg-amber-300/15 text-amber-200" : "bg-slate-500/10 text-slate-300"}`}>
                           {String(booking.status || "other").replaceAll("_", " ")}
                         </span>
 
