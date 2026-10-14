@@ -4,6 +4,8 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 export const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
+  // Never leave auth screens spinning forever if the API or database stalls.
+  timeout: 20000,
 });
 
 let csrfToken = null;
