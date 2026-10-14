@@ -256,6 +256,22 @@ async def _finish_screen_share_permission_change(class_session: ClassSession, ta
         current_granted = "screen_share" in room.permissions.get(key, set())
         if current_granted != granted:
             await _sync_livekit_permissions(class_session, target_user_id, room)
+
+        # Do not tell the student that sharing is enabled until LiveKit has
+        # actually accepted the participant permission update. Otherwise the
+        # UI can open the picker while the old token/participant grant is still
+        # active, causing "insufficient permissions" on publish.
+        event = {
+            "type": "permission_update",
+            "permission": "screen_share",
+            "granted": current_granted,
+        }
+        for ws in (room.teacher_ws, room.student_ws):
+            if ws:
+                try:
+                    await ws.send_json(event)
+                except Exception:
+                    pass
     except Exception as exc:
         # For a failed grant, fail closed and persist the rollback. For a revoke,
         # keep the app-level denial and keep retrying LiveKit in later permission
@@ -868,10 +884,14 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     "reason": "Could not save the permission change. Please try again.",
                 })
                 return
-            event = {"type": "permission_update", "permission": permission.value, "granted": granted}
-            if peer:
-                await peer.send_json(event)
-            await websocket.send_json(event)
+            # A revoke must take effect in the UI immediately. A grant is
+            # announced only after LiveKit confirms it in
+            # _finish_screen_share_permission_change, avoiding a publish race.
+            if not granted:
+                event = {"type": "permission_update", "permission": permission.value, "granted": False}
+                if peer:
+                    await peer.send_json(event)
+                await websocket.send_json(event)
             asyncio.create_task(_finish_screen_share_permission_change(class_session, target_user_id, room, session_id, user.id, granted))
             return
 
