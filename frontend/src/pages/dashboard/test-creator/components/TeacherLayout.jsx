@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { logout as logoutApi } from "../../../../api/auth";
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
   DashboardIcon,
@@ -189,10 +190,13 @@ function TeacherLayout({ children }) {
     return () => window.removeEventListener("storage", load);
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try { await logoutApi(); } catch { /* Clear local UI even if the session already expired. */ }
     localStorage.removeItem("teacherToken");
     localStorage.removeItem("dexmy_token");
     localStorage.removeItem("token");
+    localStorage.removeItem("dexmy_user");
+    window.dispatchEvent(new Event("dexmy:auth-expired"));
     navigate("/login");
   };
 
