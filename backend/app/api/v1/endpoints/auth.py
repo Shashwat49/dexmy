@@ -20,6 +20,7 @@ from app.models.user import User, UserRole
 from app.models.user_session import UserSession
 from app.schemas.user import TokenResponse, UserCreate, UserLogin
 from app.services.auth_session import (
+    RefreshTokenConcurrentUseError,
     RefreshTokenReuseError,
     create_user_session,
     revoke_user_session,
@@ -152,6 +153,9 @@ def refresh(
 
     try:
         new_refresh_token = rotate_user_session(db=db, refresh_token=refresh_token, user_id=user.id)
+    except RefreshTokenConcurrentUseError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Refresh token rotation in progress; retry with the latest cookie")
     except RefreshTokenReuseError:
         # Persist family-wide revocation before returning an authentication error.
         db.commit()
