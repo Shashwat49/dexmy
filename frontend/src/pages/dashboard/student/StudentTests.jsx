@@ -246,7 +246,6 @@ function App() {
         let data = null;
         try {
           const response = await fetchWithAuth(`${TESTING_API_BASE}/tests/published`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
           });
           if (response.ok) {
             data = await response.json();
@@ -257,7 +256,6 @@ function App() {
 
         if (!data || !data.tests || data.tests.length === 0) {
           const legacyRes = await fetchWithAuth(`${TESTING_API_BASE}/test-creation/published`, {
-            headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
           });
           if (legacyRes.ok) {
             data = await legacyRes.json();
@@ -283,11 +281,6 @@ function App() {
                   TESTING_API_BASE + "/test-submissions/session/" + savedSession.sessionId,
                   {
                     headers: {
-                      Authorization: "Bearer " + (
-                        localStorage.getItem("dexmy_token") ||
-                        localStorage.getItem("token") ||
-                        "student"
-                      ),
                     },
                   }
                 );
@@ -326,7 +319,6 @@ function App() {
     const fetchHistory = async () => {
       try {
         const res = await fetchWithAuth(`${TESTING_API_BASE}/test-submissions/my-submissions`, {
-          headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.submissions)) {
@@ -359,10 +351,6 @@ function App() {
 
   const handleStartTest = async (test) => {
     try {
-      const token =
-        localStorage.getItem("dexmy_token") ||
-        localStorage.getItem("token") ||
-        "student";
 
       const response = await fetchWithAuth(
         TESTING_API_BASE + "/test-submissions/start",
@@ -447,7 +435,6 @@ function App() {
   const handleUnlockTest = async (test) => {
     const tId = String(test.id || test._id);
     try {
-      const token = localStorage.getItem("token") || localStorage.getItem("dexmy_token") || "student";
       const res = await fetchWithAuth(`${TESTING_API_BASE}/tests/${tId}/purchase`, {
         method: "POST",
         headers: {
@@ -938,10 +925,7 @@ function App() {
         `${TESTING_API_BASE}/test-submissions`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}`,
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             testId,
             sessionId: activeSession?.id,
@@ -1027,11 +1011,6 @@ function App() {
             method: "PATCH",
             headers: {
               "Content-Type": "application/json",
-              Authorization: "Bearer " + (
-                localStorage.getItem("dexmy_token") ||
-                localStorage.getItem("token") ||
-                "student"
-              ),
             },
             body: JSON.stringify({ answers }),
           }
