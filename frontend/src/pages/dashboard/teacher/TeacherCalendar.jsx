@@ -336,6 +336,12 @@ export default function TeacherCalendar() {
 
           </div>
 
+          <div className="flex flex-wrap gap-4 border-b border-chalk-faint px-5 py-3 text-xs text-chalk-muted">
+            <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-amber-300" /> Scheduled classes</span>
+            <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-green-400" /> Completed classes</span>
+            <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-slate-500" /> Cancelled / other</span>
+          </div>
+
           {/* WEEKDAYS */}
 
           <div className="grid grid-cols-7 border-b border-chalk-faint">
@@ -440,7 +446,7 @@ export default function TeacherCalendar() {
                               key={
                                 booking.id
                               }
-                              className="truncate rounded-md bg-brand-gold/10 px-2 py-1 text-[10px] text-brand-gold"
+                              className={`truncate rounded-md px-2 py-1 text-[10px] ${booking.status === "completed" ? "bg-green-500/10 text-green-400" : booking.status === "confirmed" ? "bg-amber-300/15 text-amber-200" : "bg-slate-500/10 text-slate-300"}`}
                             >
                               {formatTime(
                                 booking.scheduled_at
@@ -556,10 +562,8 @@ export default function TeacherCalendar() {
 
                       <div className="flex items-center gap-3">
 
-                        <span className="rounded-full bg-green-500/10 px-3 py-1.5 text-xs text-green-400">
-                          {
-                            booking.status
-                          }
+                        <span className={`rounded-full px-3 py-1.5 text-xs capitalize ${booking.status === "completed" ? "bg-green-500/10 text-green-400" : booking.status === "confirmed" ? "bg-amber-300/15 text-amber-200" : "bg-slate-500/10 text-slate-300"}`}>
+                          {String(booking.status || "other").replaceAll("_", " ")}
                         </span>
 
                         <button
