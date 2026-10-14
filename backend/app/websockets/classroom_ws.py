@@ -23,6 +23,78 @@ from app.services.storage_service import save_base64_file, get_presigned_url
 from app.websockets.connection_manager import manager
 
 router = APIRouter()
+_annotation_permission_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _persist_annotation_permission_change(
+    session_id: uuid.UUID,
+    target_user_id: uuid.UUID,
+    granted_by: uuid.UUID,
+    room,
+    permission_key: str,
+    version: int,
+    previous_granted: bool,
+    granted: bool,
+) -> None:
+    """Persist annotation permission changes off the classroom WebSocket path."""
+    lock_key = f"{session_id}:{target_user_id}:{permission_key}"
+    lock = _annotation_permission_locks.setdefault(lock_key, asyncio.Lock())
+    async with lock:
+        def persist() -> str | None:
+            db = SessionLocal()
+            try:
+                db.add(PermissionEvent(
+                    session_id=session_id,
+                    target_user_id=target_user_id,
+                    permission=PermissionType(permission_key),
+                    granted=granted,
+                    granted_by=granted_by,
+                ))
+                db.commit()
+                return None
+            except Exception as exc:
+                db.rollback()
+                return str(exc)[:300]
+            finally:
+                db.close()
+
+        error = await asyncio.to_thread(persist)
+        if not error:
+            return
+
+        logger = logging.getLogger(__name__)
+        logger.error("Could not persist annotation permission change: %s", error)
+        versions = getattr(room, "_annotation_permission_versions", {})
+        if versions.get(lock_key) != version:
+            return
+
+        permissions = set(room.permissions.get(str(target_user_id), _default_student_permissions()))
+        if previous_granted:
+            permissions.add(permission_key)
+        else:
+            permissions.discard(permission_key)
+        room.permissions[str(target_user_id)] = permissions
+        rollback_event = {
+            "type": "permission_update",
+            "permission": permission_key,
+            "granted": previous_granted,
+        }
+        for ws in (room.teacher_ws, room.student_ws):
+            if ws:
+                try:
+                    await ws.send_json(rollback_event)
+                except Exception:
+                    pass
+        if room.teacher_ws:
+            try:
+                await room.teacher_ws.send_json({
+                    "type": "permission_sync_failed",
+                    "permission": permission_key,
+                    "granted": granted,
+                    "reason": "Could not save the permission change. Please try again.",
+                })
+            except Exception:
+                pass
 
 
 async def _relay_whiteboard_event(peer, payload):
@@ -751,7 +823,35 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             next_permissions.discard(permission.value)
         room.permissions[key] = next_permissions
 
-        # Annotation is enforced by the classroom WebSocket and receiving client.
+        # Annotation is authorized from room.permissions, so update both clients
+        # immediately and persist in the background. A slow database commit must
+        # not stall this WebSocket and delay the student's first annotation.
+        if permission == PermissionType.annotate:
+            previous_granted = permission.value in previous_permissions
+            versions = getattr(room, "_annotation_permission_versions", {})
+            version_key = f"{session_id}:{target_user_id}:{permission.value}"
+            version = versions.get(version_key, 0) + 1
+            versions[version_key] = version
+            room._annotation_permission_versions = versions
+            event = {"type": "permission_update", "permission": permission.value, "granted": granted}
+            for ws in (room.teacher_ws, room.student_ws):
+                if ws:
+                    try:
+                        await ws.send_json(event)
+                    except Exception:
+                        pass
+            asyncio.create_task(_persist_annotation_permission_change(
+                session_id=session_id,
+                target_user_id=target_user_id,
+                granted_by=user.id,
+                room=room,
+                permission_key=permission.value,
+                version=version,
+                previous_granted=previous_granted,
+                granted=granted,
+            ))
+            return
+
         # Screen-share grants and revokes are saved and announced immediately;
         # LiveKit's publish-source permission is applied asynchronously.
         if permission == PermissionType.screen_share:
