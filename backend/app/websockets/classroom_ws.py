@@ -209,41 +209,40 @@ def _permission_payload(room, user_id: uuid.UUID) -> dict[str, bool]:
 
 
 async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.UUID, room) -> None:
+    """Apply the current app permission state to the connected LiveKit participant.
+
+    The classroom WebSocket is opened only after the client has connected to
+    LiveKit, so update the participant directly rather than spending an extra
+    round trip on get_participant before every permission update.
+    """
     sources = _allowed_sources(room, user_id)
     last_error = None
-    for attempt in range(10):
-        lkapi = api.LiveKitAPI(settings.LIVEKIT_URL, settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
-        try:
+    lkapi = api.LiveKitAPI(settings.LIVEKIT_URL, settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
+    try:
+        for attempt in range(6):
             try:
-                await lkapi.room.get_participant(api.RoomParticipantIdentity(room=class_session.livekit_room_name, identity=str(user_id)))
+                await lkapi.room.update_participant(
+                    api.UpdateParticipantRequest(
+                        room=class_session.livekit_room_name,
+                        identity=str(user_id),
+                        permission=api.ParticipantPermission(
+                            can_subscribe=True,
+                            can_publish=bool(sources),
+                            # Keep the LiveKit data channel available; annotation writes are
+                            # independently authorized by the classroom WebSocket and receiver.
+                            can_publish_data=True,
+                            can_publish_sources=sources,
+                        ),
+                    )
+                )
+                return
             except Exception as exc:
                 last_error = exc
-                if attempt < 9:
-                    await asyncio.sleep(0.35)
-                    continue
-                raise
-            await lkapi.room.update_participant(
-                api.UpdateParticipantRequest(
-                    room=class_session.livekit_room_name,
-                    identity=str(user_id),
-                    permission=api.ParticipantPermission(
-                        can_subscribe=True,
-                        can_publish=bool(sources),
-                        # Keep the LiveKit data channel available; annotation writes are
-                        # independently authorized by the classroom WebSocket and receiver.
-                        can_publish_data=True,
-                        can_publish_sources=sources,
-                    ),
-                )
-            )
-            return
-        except Exception as exc:
-            last_error = exc
-            if attempt < 9:
-                await asyncio.sleep(0.35)
-        finally:
-            await lkapi.aclose()
-    raise last_error or RuntimeError("LiveKit permission synchronization failed")
+                if attempt < 5:
+                    await asyncio.sleep(0.2)
+        raise last_error or RuntimeError("LiveKit permission synchronization failed")
+    finally:
+        await lkapi.aclose()
 
 
 async def _finish_screen_share_permission_change(class_session: ClassSession, target_user_id: uuid.UUID, room, session_id: uuid.UUID, granted_by: uuid.UUID, granted: bool) -> None:
