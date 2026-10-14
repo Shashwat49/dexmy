@@ -36,6 +36,7 @@ const AdminMeetClassRecords = lazy(() => import("./pages/dashboard/AdminMeetClas
 const AdminStudentNoShow = lazy(() => import("./pages/dashboard/AdminStudentNoShow"));
 const BookClass = lazy(() => import("./pages/dashboard/student/BookClass"));
 const MyNotes = lazy(() => import("./pages/dashboard/student/MyNotes"));
+const StudentCalendarPage = lazy(() => import("./pages/dashboard/student/StudentCalendarPage"));
 const MyAccount = lazy(() => import("./pages/dashboard/MyAccount"));
 const TeacherProfile = lazy(() => import("./pages/dashboard/teacher/TeacherProfile"));
 const TeacherProfileView = lazy(() => import("./pages/dashboard/teacher/TeacherProfileView"));
@@ -122,6 +123,7 @@ export default function App() {
         <Route path="/dashboard/teacher/profile/edit" element={<ProtectedRoute roles={["teacher"]}><TeacherDashboardLayout><TeacherProfile /></TeacherDashboardLayout></ProtectedRoute>} />
         <Route path="/dashboard/teacher/calendar" element={<ProtectedRoute roles={["teacher"]}><TeacherDashboardLayout><TeacherCalendar /></TeacherDashboardLayout></ProtectedRoute>} />
         <Route path="/dashboard/student" element={<ProtectedRoute roles={["student"]}><StudentDashboard /></ProtectedRoute>} />
+        <Route path="/dashboard/student/calendar" element={<ProtectedRoute roles={["student"]}><StudentCalendarPage /></ProtectedRoute>} />
         <Route path="/dashboard/student/book" element={<ProtectedRoute roles={["student"]}><BookClass /></ProtectedRoute>} />
         <Route path="/dashboard/student/notes" element={<ProtectedRoute roles={["student"]}><MyNotes /></ProtectedRoute>} />
         <Route path="/dashboard/student/account" element={<ProtectedRoute roles={["student"]}><MyAccount /></ProtectedRoute>} />
