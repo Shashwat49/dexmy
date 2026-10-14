@@ -614,7 +614,24 @@ export default function Classroom() {
     }
   };
   const isChatImage = (fileName = "") => /\.(apng|avif|gif|jpe?g|png|webp|bmp|svg)$/i.test(fileName.split("?")[0]);
-  const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant || mediaBusyRef.current) return; if (kind === "mic" && !isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); if (kind === "camera" && !isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); if (kind === "screen" && !isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); mediaBusyRef.current = true; try { if (kind === "mic") { const publication = participant.getTrackPublication?.(Track.Source.Microphone); const next = !(publication?.track && !publication.isMuted); await participant.setMicrophoneEnabled(next, selectedMicrophoneId ? { deviceId: selectedMicrophoneId } : undefined); micStateRef.current = next; setMic(next); } else if (kind === "camera") { const publication = participant.getTrackPublication?.(Track.Source.Camera); const next = !(publication?.track && !publication.isMuted); await participant.setCameraEnabled(next, selectedCameraId ? { deviceId: selectedCameraId } : undefined); cameraStateRef.current = next; setCamera(next); } else if (kind === "screen") { const publication = participant.getTrackPublication?.(Track.Source.ScreenShare); const next = !(publication?.track && !publication.isMuted); await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" }); setScreen(next); } } catch (error) { if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") setNotice("Camera/microphone access was blocked. Please allow the device permission in your browser and try again."); else setNotice(error?.message || "Could not change media."); } finally { mediaBusyRef.current = false; } };
+  const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant || mediaBusyRef.current) return; if (kind === "mic" && !isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); if (kind === "camera" && !isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); if (kind === "screen" && !isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); mediaBusyRef.current = true; try { if (kind === "mic") { const publication = participant.getTrackPublication?.(Track.Source.Microphone); const next = !(publication?.track && !publication.isMuted); await participant.setMicrophoneEnabled(next, selectedMicrophoneId ? { deviceId: selectedMicrophoneId } : undefined); micStateRef.current = next; setMic(next); } else if (kind === "camera") { const publication = participant.getTrackPublication?.(Track.Source.Camera); const next = !(publication?.track && !publication.isMuted); await participant.setCameraEnabled(next, selectedCameraId ? { deviceId: selectedCameraId } : undefined); cameraStateRef.current = next; setCamera(next); } else if (kind === "screen") {
+        // The classroom WebSocket grant can arrive just before LiveKit's updated
+        // publish-source permission reaches this SDK instance. Wait only while a
+        // known source list still denies screen sharing; this avoids opening the
+        // browser picker and then failing with "insufficient permissions".
+        if (!isTeacher) {
+          const permissionDeadline = Date.now() + 2000;
+          while (Date.now() < permissionDeadline) {
+            const allowedSources = participant.permissions?.canPublishSources;
+            if (!Array.isArray(allowedSources) || allowedSources.includes(Track.Source.ScreenShare)) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+        }
+        const publication = participant.getTrackPublication?.(Track.Source.ScreenShare);
+        const next = !(publication?.track && !publication.isMuted);
+        await participant.setScreenShareEnabled(next, { contentHint: "detail", selfBrowserSurface: "exclude" });
+        setScreen(next);
+      } } catch (error) { if (error?.name === "NotAllowedError" || error?.name === "PermissionDeniedError") setNotice("Camera/microphone access was blocked. Please allow the device permission in your browser and try again."); else setNotice(error?.message || "Could not change media."); } finally { mediaBusyRef.current = false; } };
   useEffect(() => {
     if (!hasEntered || !sessionId || !user || !wsUrl) return;
     disposedRef.current = false;
