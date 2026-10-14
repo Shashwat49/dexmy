@@ -508,7 +508,15 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
                 if room.timer_task is None or room.timer_task.done():
                     room.timer_task = asyncio.create_task(session_timer(session_id))
         await _send_latest_whiteboard(session_id, websocket, db)
+        # Release the setup transaction before the long-lived socket waits for
+        # its next message. Otherwise idle classroom sockets can retain pooled
+        # PostgreSQL connections and starve unrelated requests such as login.
+        db.rollback()
         while True:
+            # A prior message may have performed read-only queries. End that
+            # transaction before awaiting network input so idle sockets do not
+            # hold database connections indefinitely.
+            db.rollback()
             data = await websocket.receive_json()
             await _handle_message(data, user, is_teacher, session_id, room, db, websocket, class_session, booking)
     except WebSocketDisconnect:
