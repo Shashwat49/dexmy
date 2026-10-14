@@ -71,7 +71,9 @@ export default function Login() {
       navigate(DASHBOARD_BY_ROLE[user.role] || "/dashboard");
     } catch (err) {
       setError(
-        err.response?.data?.detail || "Couldn't log in — check your details and try again."
+        err.code === "ECONNABORTED"
+          ? "The server is taking too long to respond. Please try again in a moment."
+          : err.response?.data?.detail || "Couldn't log in — check your details and try again."
       );
     }
   }
