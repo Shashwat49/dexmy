@@ -175,6 +175,17 @@ export default function TeacherCalendar() {
     loadBookings();
   }, []);
 
+  // Keep completed history visible, but only expose confirmed upcoming classes for tomorrow.
+  const visibleBookings = useMemo(() => {
+    const tomorrow = new Date();
+    tomorrow.setHours(0, 0, 0, 0);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return bookings.filter((booking) =>
+      booking.status !== "confirmed" ||
+      (booking.scheduled_at && sameDay(new Date(booking.scheduled_at), tomorrow))
+    );
+  }, [bookings]);
+
   const calendarDays = useMemo(
     () =>
       getCalendarDays(
@@ -185,7 +196,7 @@ export default function TeacherCalendar() {
 
   const selectedDayBookings =
     useMemo(() => {
-      return bookings
+      return visibleBookings
         .filter((booking) =>
           sameDay(
             new Date(
@@ -204,7 +215,7 @@ export default function TeacherCalendar() {
             )
         );
     }, [
-      bookings,
+      visibleBookings,
       selectedDate,
     ]);
 
@@ -371,7 +382,7 @@ export default function TeacherCalendar() {
               }) => {
 
                 const dayBookings =
-                  bookings.filter(
+                  visibleBookings.filter(
                     (booking) =>
                       sameDay(
                         new Date(
