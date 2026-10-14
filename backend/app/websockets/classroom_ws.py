@@ -566,8 +566,11 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                         stroke_order.append(stroke_id)
                         strokes_by_id[stroke_id] = saved_stroke
                         continue
-                    current_revision = int(strokes_by_id[stroke_id].get("_whiteboard_revision") or 0)
-                    incoming_revision = int(saved_stroke.get("_whiteboard_revision") or 0)
+                    try:
+                        current_revision = int(strokes_by_id[stroke_id].get("_whiteboard_revision") or 0)
+                        incoming_revision = int(saved_stroke.get("_whiteboard_revision") or 0)
+                    except (TypeError, ValueError):
+                        current_revision = incoming_revision = 0
                     if incoming_revision > current_revision:
                         strokes_by_id[stroke_id] = saved_stroke
             strokes = [
