@@ -46,14 +46,11 @@ export default function StudentCalendarWidget() {
     return () => { active = false; };
   }, []);
 
-  // Keep completed history visible, but only expose confirmed upcoming classes for tomorrow.
-  const visibleBookings = useMemo(() => {
-    const tomorrow = tomorrowDate();
-    return bookings.filter((booking) =>
-      statusOf(booking) !== "confirmed" ||
-      (booking.scheduled_at && sameDay(booking.scheduled_at, tomorrow))
-    );
-  }, [bookings]);
+  // Show all assigned bookings, including every future occurrence in an approved package schedule.
+  const visibleBookings = useMemo(
+    () => bookings.filter((booking) => booking?.scheduled_at),
+    [bookings]
+  );
 
   const days = useMemo(() => monthDays(month), [month]);
   const selectedBookings = useMemo(() => visibleBookings
@@ -74,7 +71,7 @@ export default function StudentCalendarWidget() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Class calendar</h2>
-            <p className="mt-1 text-xs text-chalk-muted">Tomorrow's scheduled classes and your completed class history.</p>
+            <p className="mt-1 text-xs text-chalk-muted">Scheduled classes across your calendar and your completed class history.</p>
           </div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => moveMonth(-1)} aria-label="Previous month" className="grid h-8 w-8 place-items-center rounded-lg border border-chalk-faint hover:border-chalk-muted">←</button>
@@ -101,7 +98,7 @@ export default function StudentCalendarWidget() {
                 {days.map(({ date, inMonth }) => {
                   const dayBookings = visibleBookings.filter((booking) => booking.scheduled_at && sameDay(booking.scheduled_at, date));
                   const scheduled = dayBookings.filter((booking) => statusOf(booking) === "confirmed").length;
-                  const completed = dayBookings.filter((booking) => booking.status === "completed").length;
+                  const completed = dayBookings.filter((booking) => statusOf(booking) === "completed").length;
                   const selected = sameDay(date, selectedDate);
                   const today = sameDay(date, new Date());
                   return (
