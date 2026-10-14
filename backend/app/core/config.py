@@ -9,7 +9,16 @@ class Settings(BaseSettings):
 
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    TESTING_ACCESS_TOKEN_EXPIRE_MINUTES: int = 5
+
+    ACCESS_COOKIE_NAME: str = "dexmy_access"
+    REFRESH_COOKIE_NAME: str = "dexmy_refresh"
+    CSRF_COOKIE_NAME: str = "dexmy_csrf"
+    COOKIE_SECURE: bool | None = None
+    COOKIE_SAMESITE: str | None = None
+    COOKIE_DOMAIN: str | None = None
 
     LIVEKIT_API_KEY: str
     LIVEKIT_API_SECRET: str
