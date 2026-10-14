@@ -35,42 +35,46 @@ def list_admin_teachers(verified:bool|None=None,active:bool|None=None,subject_id
     if active is not None: query=query.where(User.is_active.is_(active))
     if subject_id is not None: query=query.join(TeacherSubject,TeacherSubject.teacher_id==User.id).where(TeacherSubject.subject_id==subject_id)
     rows=db.execute(query.order_by(User.created_at.desc())).all()
-    result = []
-    for u,p,s,d,x in rows:
-        verified = bool(p.is_verified)
-        monthly = {}
-        month_start = func.date_trunc(
-                literal_column("'month'"), ExternalClassRecord.started_at
-            )
-        # Monthly counts must use the exact same completed-class population
-        # as completed_classes. Never exclude records based on account creation time.
-        monthly_class_filters = [
-            ExternalClassRecord.teacher_id == u.id,
-            ExternalClassRecord.status == "completed",
-        ]
 
-        month_rows = db.execute(
+    # Aggregate completed classes for every listed teacher in one query.
+    # The old implementation ran two additional queries per teacher (N+1).
+    teacher_ids = [u.id for u, *_ in rows]
+    month_start = func.date_trunc(
+        literal_column("'month'"), ExternalClassRecord.started_at
+    )
+    monthly_rows = (
+        db.execute(
             select(
+                ExternalClassRecord.teacher_id,
                 month_start,
                 func.count(ExternalClassRecord.id),
             )
-            .where(*monthly_class_filters)
-            .group_by(month_start)
-            .order_by(month_start)
+            .where(
+                ExternalClassRecord.teacher_id.in_(teacher_ids),
+                ExternalClassRecord.status == "completed",
+            )
+            .group_by(ExternalClassRecord.teacher_id, month_start)
+            .order_by(ExternalClassRecord.teacher_id, month_start)
         ).all()
+        if teacher_ids
+        else []
+    )
+    monthly_counts = {}
+    earliest_months = {}
+    for teacher_id, month_value, count in monthly_rows:
+        monthly_counts.setdefault(teacher_id, {})[
+            month_value.strftime("%Y-%m")
+        ] = int(count)
+        earliest_months.setdefault(teacher_id, month_value)
 
-        # Start the displayed month range at the earliest completed class so
-        # historical/pre-created records cannot disappear from the breakdown.
-        earliest_class = db.execute(
-            select(func.min(ExternalClassRecord.started_at))
-            .where(*monthly_class_filters)
-        ).scalar_one()
-        monthly_start = earliest_class or u.created_at
+    result = []
+    for u,p,s,d,x in rows:
+        verified = bool(p.is_verified)
+        # date_trunc gives the earliest completed-class month, preserving
+        # historical records while avoiding per-teacher database round trips.
+        monthly_start = earliest_months.get(u.id) or u.created_at
         monthly = {month: 0 for month in month_range(monthly_start)}
-        monthly.update({
-            month_value.strftime("%Y-%m"): int(count)
-            for month_value, count in month_rows
-        })
+        monthly.update(monthly_counts.get(u.id, {}))
         result.append(AdminTeacherListItem(
             id=u.id, full_name=u.full_name, email=u.email, phone=u.phone,
             is_active=u.is_active, is_verified=verified, rating_avg=p.rating_avg,
