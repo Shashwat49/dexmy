@@ -48,7 +48,17 @@ export default function StudentDashboard() {
   useEffect(() => { load(); }, []);
 
   const now = new Date();
-  const upcoming = bookings.filter((b) => new Date(b.scheduled_at) >= now && b.status === "confirmed").sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+  // The Upcoming section is intentionally limited to the next calendar day
+  // in the student's local timezone (e.g. Oct 14 shows Oct 15 only).
+  const tomorrowStart = new Date(now);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  tomorrowStart.setHours(0, 0, 0, 0);
+  const dayAfterTomorrowStart = new Date(tomorrowStart);
+  dayAfterTomorrowStart.setDate(dayAfterTomorrowStart.getDate() + 1);
+  const upcoming = bookings.filter((b) => {
+    const scheduledAt = new Date(b.scheduled_at);
+    return b.status === "confirmed" && scheduledAt >= tomorrowStart && scheduledAt < dayAfterTomorrowStart;
+  }).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
   const past = bookings.filter((b) => b.status === "completed" || b.status === "cancelled" || b.status === "no_show" || new Date(b.scheduled_at) < now).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
   const noShowCount = bookings.filter((b) => b.status === "no_show").length;
 
@@ -87,7 +97,7 @@ export default function StudentDashboard() {
       {tab === "upcoming" && nextClass && <div className="bg-gradient-to-r from-panel-2 to-panel-3 border border-chalk-faint border-l-[3px] border-l-brand-gold rounded-xl px-6 py-5 flex items-center justify-between mb-7"><div><h3 className="text-base font-semibold mb-1">Your next class</h3><p className="text-[13.5px] text-chalk-muted">{nextClass.subject_name} with {nextClass.teacher_name}</p></div><button disabled={!!joiningBookingId} onClick={() => handleJoin(nextClass)} className="bg-brand-gold text-[#2C1E04] text-sm font-bold px-5 py-2.5 rounded-lg disabled:opacity-60">{joiningBookingId === nextClass.id ? "Opening…" : "Join classroom"}</button></div>}
 
       {loading ? <p className="text-chalk-muted text-sm">Loading your classes…</p> : <>
-        {tab === "upcoming" ? (upcoming.length === 0 ? <div className="text-center py-16 text-chalk-muted"><h3 className="font-display text-xl text-chalk mb-2">No upcoming classes</h3><p className="text-sm">Book a class to get started.</p></div> : <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 mb-8">{upcoming.map((b) => <ClassCard key={b.id} booking={b} otherPartyName={b.teacher_name} onJoin={handleJoin} />)}</div>) : (past.length === 0 ? <div className="text-center py-16 text-chalk-muted"><h3 className="font-display text-xl text-chalk mb-2">No past classes yet</h3></div> : <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 mb-8">{past.map((b) => <ClassCard key={b.id} booking={b} otherPartyName={b.teacher_name} isPast />)}</div>)}
+        {tab === "upcoming" ? (upcoming.length === 0 ? <div className="text-center py-16 text-chalk-muted"><h3 className="font-display text-xl text-chalk mb-2">No classes scheduled for tomorrow</h3><p className="text-sm">Your next-day classes will appear here when scheduled.</p></div> : <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 mb-8">{upcoming.map((b) => <ClassCard key={b.id} booking={b} otherPartyName={b.teacher_name} onJoin={handleJoin} />)}</div>) : (past.length === 0 ? <div className="text-center py-16 text-chalk-muted"><h3 className="font-display text-xl text-chalk mb-2">No past classes yet</h3></div> : <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4 mb-8">{past.map((b) => <ClassCard key={b.id} booking={b} otherPartyName={b.teacher_name} isPast />)}</div>)}
       </>}
 
       {!isRestrictedStudent && isSubjectBalanceStudent && <section className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2">
