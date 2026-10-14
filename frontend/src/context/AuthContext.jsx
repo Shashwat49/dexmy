@@ -17,6 +17,10 @@ export function AuthProvider({ children }) {
     let active = true;
 
     async function restoreSession() {
+      // Remove legacy browser-stored access tokens as the cookie session becomes authoritative.
+      localStorage.removeItem("dexmy_token");
+      localStorage.removeItem("token");
+      localStorage.removeItem("teacherToken");
       try {
         await authApi.getCsrfToken();
         const currentUser = await authApi.getMe();
