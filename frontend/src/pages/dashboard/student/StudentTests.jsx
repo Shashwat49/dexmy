@@ -280,8 +280,7 @@ function App() {
                 const sessionResponse = await fetchWithAuth(
                   TESTING_API_BASE + "/test-submissions/session/" + savedSession.sessionId,
                   {
-                    headers: {
-                    },
+                    
                   }
                 );
                 const sessionData = await sessionResponse.json();
@@ -358,7 +357,6 @@ function App() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: "Bearer " + token,
           },
           body: JSON.stringify({
             testId: test.id || test._id,
@@ -439,7 +437,6 @@ function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
       });
       const data = await res.json();
