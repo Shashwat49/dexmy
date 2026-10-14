@@ -74,7 +74,7 @@ export default function StudentCalendarWidget() {
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold">Class calendar</h2>
-            <p className="mt-1 text-xs text-chalk-muted">Your scheduled and completed classes, across all dates.</p>
+            <p className="mt-1 text-xs text-chalk-muted">Tomorrow's scheduled classes and your completed class history.</p>
           </div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => moveMonth(-1)} aria-label="Previous month" className="grid h-8 w-8 place-items-center rounded-lg border border-chalk-faint hover:border-chalk-muted">←</button>
