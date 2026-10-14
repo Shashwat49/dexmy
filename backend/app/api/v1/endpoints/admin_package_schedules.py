@@ -12,6 +12,7 @@ from app.core.constants import BOOKING_END_HOUR, BOOKING_START_HOUR, CLASS_DURAT
 from app.core.dependencies import get_current_admin
 from app.db.session import get_db
 from app.models.booking import Booking, BookingStatus, TeacherAssignmentStatus
+from app.models.classroom import ClassSession, SessionStatus
 from app.models.package import PackagePlan, StudentPackage
 from app.models.package_schedule import PackageSchedule
 from app.models.teacher import Subject, TeacherAvailability, TeacherProfile, TeacherSubject
@@ -338,8 +339,27 @@ def approve_package_schedule(
         select(PackageSchedule).where(PackageSchedule.idempotency_key == payload.idempotency_key)
     ).scalar_one_or_none()
     if existing:
-        bookings = db.execute(select(Booking.id).where(Booking.schedule_id == existing.id).order_by(Booking.scheduled_at)).scalars().all()
-        return {"schedule_id": str(existing.id), "status": existing.status, "booking_ids": [str(item) for item in bookings], "idempotent_replay": True}
+        bookings = db.execute(
+            select(Booking).where(Booking.schedule_id == existing.id).order_by(Booking.scheduled_at)
+        ).scalars().all()
+        try:
+            # Repair sessions on idempotent retries too, so an older partially
+            # created schedule cannot continue returning bookings without rooms.
+            existing_session_booking_ids = set(db.execute(
+                select(ClassSession.booking_id).where(ClassSession.booking_id.in_([b.id for b in bookings]))
+            ).scalars().all()) if bookings else set()
+            for booking in bookings:
+                if booking.id not in existing_session_booking_ids:
+                    db.add(ClassSession(
+                        booking_id=booking.id,
+                        livekit_room_name=f"dexmy-class-{booking.id}",
+                        status=SessionStatus.scheduled,
+                    ))
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        return {"schedule_id": str(existing.id), "status": existing.status, "booking_ids": [str(item.id) for item in bookings], "idempotent_replay": True}
 
     try:
         package, student, plan = _active_package(db, payload.student_package_id, lock=True)
@@ -380,6 +400,13 @@ def approve_package_schedule(
             )
             db.add(booking)
             db.flush()
+            # Allocate a persistent classroom/session ID at the same time as
+            # each package-scheduled booking. Room names match normal bookings.
+            db.add(ClassSession(
+                booking_id=booking.id,
+                livekit_room_name=f"dexmy-class-{booking.id}",
+                status=SessionStatus.scheduled,
+            ))
             PackageCreditService.consume(
                 db,
                 student_package_id=package.id,
