@@ -18,6 +18,19 @@ const AUTH_ENDPOINTS_WITHOUT_REFRESH = [
   "/auth/logout",
 ];
 
+async function refreshWithConcurrencyRetry() {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await api.post("/auth/refresh");
+    } catch (error) {
+      if (error.response?.status !== 409 || attempt === 2) throw error;
+      // Another tab may still be applying the Set-Cookie response.
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+    }
+  }
+  throw new Error("Unable to refresh session.");
+}
+
 async function ensureCsrfToken(force = false) {
   if (force) csrfToken = null;
   if (csrfToken) return csrfToken;
@@ -85,7 +98,7 @@ api.interceptors.response.use(
     original._authRetry = true;
     try {
       if (!refreshPromise) {
-        refreshPromise = api.post("/auth/refresh").finally(() => {
+        refreshPromise = refreshWithConcurrencyRetry().finally(() => {
           refreshPromise = null;
         });
       }

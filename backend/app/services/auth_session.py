@@ -10,7 +10,11 @@ from app.models.user_session import UserSession
 
 
 class RefreshTokenReuseError(Exception):
-    """Raised when a previously rotated refresh token is presented again."""
+    """Raised when a previously rotated refresh token is replayed after the grace period."""
+
+
+class RefreshTokenConcurrentUseError(Exception):
+    """Raised when another tab is completing the same refresh rotation."""
 
 
 def create_user_session(db: Session, user_id: uuid.UUID) -> str:
@@ -42,6 +46,15 @@ def rotate_user_session(db: Session, refresh_token: str, user_id: uuid.UUID) -> 
 
     if session.revoked_at is not None:
         if session.replaced_by_session_id is not None:
+            # Multiple open tabs can submit the same cookie before the first
+            # response updates the browser cookie jar. Do not treat that small
+            # race as theft; the client retries using the newly rotated cookie.
+            last_used_at = session.last_used_at
+            if last_used_at is not None:
+                if last_used_at.tzinfo is None:
+                    last_used_at = last_used_at.replace(tzinfo=timezone.utc)
+                if now - last_used_at <= timedelta(seconds=10):
+                    raise RefreshTokenConcurrentUseError()
             db.query(UserSession).filter(
                 UserSession.session_family_id == session.session_family_id,
                 UserSession.revoked_at.is_(None),
