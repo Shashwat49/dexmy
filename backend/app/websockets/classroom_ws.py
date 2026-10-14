@@ -538,21 +538,43 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 WhiteboardSnapshot.session_id == session_id,
                 WhiteboardSnapshot.page_id == page.id,
             ).order_by(desc(WhiteboardSnapshot.created_at)).first()
-            latest_snapshot_data = latest.snapshot_data if latest and isinstance(latest.snapshot_data, dict) else {}
-            strokes = list((latest_snapshot_data.get("strokes") or []) if latest else [])
-            # A later snapshot can be stale, and created_at timestamps can tie.
-            # Collect tombstones across this page's history so a stale "latest"
-            # row can never forget an Undo/Clear and resurrect deleted elements.
-            page_snapshot_data = db.query(WhiteboardSnapshot.snapshot_data).filter(
+            # Do not trust a single "latest" snapshot as the complete canvas:
+            # rapid strokes can create snapshots with tied timestamps, and the
+            # selected row may omit strokes that were already committed. Merge
+            # the page's history by stroke ID, preferring the highest server
+            # revision for each stroke, while preserving each stroke's first
+            # position in the drawing order.
+            page_snapshots = db.query(WhiteboardSnapshot).filter(
                 WhiteboardSnapshot.session_id == session_id,
                 WhiteboardSnapshot.page_id == page.id,
-            ).all()
+            ).order_by(WhiteboardSnapshot.created_at.asc(), WhiteboardSnapshot.id.asc()).all()
             deleted_stroke_ids = {
                 str(stroke_id)
-                for (snapshot_data,) in page_snapshot_data
-                if isinstance(snapshot_data, dict)
-                for stroke_id in (snapshot_data.get("deleted_stroke_ids") or [])
+                for snapshot in page_snapshots
+                if isinstance(snapshot.snapshot_data, dict)
+                for stroke_id in (snapshot.snapshot_data.get("deleted_stroke_ids") or [])
             }
+            strokes_by_id = {}
+            stroke_order = []
+            for snapshot in page_snapshots:
+                snapshot_data = snapshot.snapshot_data if isinstance(snapshot.snapshot_data, dict) else {}
+                for saved_stroke in snapshot_data.get("strokes") or []:
+                    if not isinstance(saved_stroke, dict) or not saved_stroke.get("id"):
+                        continue
+                    stroke_id = str(saved_stroke["id"])
+                    if stroke_id not in strokes_by_id:
+                        stroke_order.append(stroke_id)
+                        strokes_by_id[stroke_id] = saved_stroke
+                        continue
+                    current_revision = int(strokes_by_id[stroke_id].get("_whiteboard_revision") or 0)
+                    incoming_revision = int(saved_stroke.get("_whiteboard_revision") or 0)
+                    if incoming_revision > current_revision:
+                        strokes_by_id[stroke_id] = saved_stroke
+            strokes = [
+                strokes_by_id[stroke_id]
+                for stroke_id in stroke_order
+                if stroke_id in strokes_by_id and stroke_id not in deleted_stroke_ids
+            ]
             stroke = payload.get("stroke")
             if kind in {"stroke", "stroke_update"} and isinstance(stroke, dict) and stroke.get("id") and str(stroke["id"]) in deleted_stroke_ids:
                 if action_id:
