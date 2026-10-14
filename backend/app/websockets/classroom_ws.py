@@ -45,7 +45,9 @@ async def _heartbeat(websocket: WebSocket) -> None:
         return
 
 
-def _authenticate(token: str, db) -> User | None:
+def _authenticate(token: str | None, db) -> User | None:
+    if not token:
+        return None
     try:
         payload = decode_access_token(token)
         user_id = uuid.UUID(payload["sub"])
