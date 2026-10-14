@@ -7,10 +7,7 @@ The final architecture integrates the existing Testing System (Node.js/Express +
 - Both services utilize PostgreSQL.
 
 ## Authentication Flow
-The system utilizes a Shared JWT Validation approach:
-1. User logs in via FastAPI and receives a JWT token containing their `user_id` and `role`.
-2. The Dexmy Frontend attaches this token as a `Bearer` token in the Authorization header for all API calls to the Node.js Testing service.
-3. The Node.js service intercepts the request, decodes the JWT using the shared `JWT_SECRET_KEY`, and verifies the identity and role of the Dexmy user.
+The main Dexmy session uses HttpOnly cookies issued by FastAPI; the browser does not persist the primary access or refresh tokens in localStorage. Because the Testing Service is hosted separately and cannot read the API host's host-only cookies, the frontend requests a short-lived (5-minute) Testing Service token from the authenticated FastAPI endpoint `/api/v1/auth/testing-token`. That scoped token is kept in memory only and sent as a Bearer token to the Node.js Testing Service. The service verifies the signature with the shared `JWT_SECRET_KEY`, and rejects tokens that declare an audience other than `dexmy-testing-service` or a purpose other than `testing`.
 
 ## Authorization Flow
 - **Admin**: Can assign or remove the `test_creator` role via FastAPI admin endpoints.
@@ -51,7 +48,7 @@ The Testing tables reside in PostgreSQL, preserving relationships to Dexmy users
 
 ## Security Considerations
 - The frontend is strictly untrusted. Role boundaries (`role=test_creator`) are entirely enforced by backend JWT validation.
-- The Node.js service cannot generate authentication tokens, only verify them.
+- The Node.js service cannot generate authentication tokens, only verify them. FastAPI issues short-lived Testing Service tokens; the main access and refresh tokens remain in HttpOnly cookies.
 - A `test_creator` cannot implicitly access `admin` endpoints in FastAPI.
 - A user ID is securely extracted from the verified token payload (`decoded.sub`), mitigating ID-spoofing attacks.
 
