@@ -1,5 +1,3 @@
-import uuid
-
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
@@ -183,7 +181,6 @@ def logout(
 
 @router.post("/testing-token")
 def get_testing_token(
-    request: Request,
     current_user: User = Depends(get_current_user),
 ):
     # The testing service is a separate host, so it cannot read the API host's
