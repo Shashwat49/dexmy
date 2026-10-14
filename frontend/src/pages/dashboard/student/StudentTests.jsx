@@ -91,7 +91,7 @@ function App() {
       setReportSubmitting(true);
       setReportError("");
 
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `${TESTING_API_BASE}/question-reports`,
         {
           method: "POST",
@@ -245,7 +245,7 @@ function App() {
 
         let data = null;
         try {
-          const response = await fetch(`${TESTING_API_BASE}/tests/published`, {
+          const response = await fetchWithAuth(`${TESTING_API_BASE}/tests/published`, {
             headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
           });
           if (response.ok) {
@@ -256,7 +256,7 @@ function App() {
         }
 
         if (!data || !data.tests || data.tests.length === 0) {
-          const legacyRes = await fetch(`${TESTING_API_BASE}/test-creation/published`, {
+          const legacyRes = await fetchWithAuth(`${TESTING_API_BASE}/test-creation/published`, {
             headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
           });
           if (legacyRes.ok) {
@@ -279,7 +279,7 @@ function App() {
 
             if (resumableTest) {
               try {
-                const sessionResponse = await fetch(
+                const sessionResponse = await fetchWithAuth(
                   TESTING_API_BASE + "/test-submissions/session/" + savedSession.sessionId,
                   {
                     headers: {
@@ -325,7 +325,7 @@ function App() {
 
     const fetchHistory = async () => {
       try {
-        const res = await fetch(`${TESTING_API_BASE}/test-submissions/my-submissions`, {
+        const res = await fetchWithAuth(`${TESTING_API_BASE}/test-submissions/my-submissions`, {
           headers: { Authorization: `Bearer ${localStorage.getItem("dexmy_token") || localStorage.getItem("token") || "student"}` },
         });
         const data = await res.json();
@@ -364,7 +364,7 @@ function App() {
         localStorage.getItem("token") ||
         "student";
 
-      const response = await fetch(
+      const response = await fetchWithAuth(
         TESTING_API_BASE + "/test-submissions/start",
         {
           method: "POST",
@@ -448,7 +448,7 @@ function App() {
     const tId = String(test.id || test._id);
     try {
       const token = localStorage.getItem("token") || localStorage.getItem("dexmy_token") || "student";
-      const res = await fetch(`${TESTING_API_BASE}/tests/${tId}/purchase`, {
+      const res = await fetchWithAuth(`${TESTING_API_BASE}/tests/${tId}/purchase`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -934,7 +934,7 @@ function App() {
 
       const testId = publishedTest?.id || publishedTest?._id;
 
-      const response = await fetch(
+      const response = await fetchWithAuth(
         `${TESTING_API_BASE}/test-submissions`,
         {
           method: "POST",
@@ -1021,7 +1021,7 @@ function App() {
 
     const timeout = setTimeout(async () => {
       try {
-        const response = await fetch(
+        const response = await fetchWithAuth(
           TESTING_API_BASE + "/test-submissions/session/" + activeSession.id,
           {
             method: "PATCH",
