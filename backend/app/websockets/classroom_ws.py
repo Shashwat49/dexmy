@@ -51,7 +51,8 @@ def _authenticate(token: str, db) -> User | None:
         user_id = uuid.UUID(payload["sub"])
     except (JWTError, KeyError, ValueError, TypeError):
         return None
-    return db.get(User, user_id)
+    user = db.get(User, user_id)
+    return user if user is not None and user.is_active else None
 
 
 def _default_student_permissions() -> set[str]:
@@ -273,11 +274,26 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
 
 
 @router.websocket("/ws/classroom/{session_id}")
-async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: str = Query(...)):
+async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: str | None = Query(default=None)):
     db = SessionLocal()
     heartbeat_task = None
     try:
-        user = _authenticate(token, db)
+        origin = websocket.headers.get("origin")
+        allowed_origins = {
+            settings.FRONTEND_ORIGIN.rstrip("/"),
+            "https://dexmyedu.com",
+            "https://www.dexmyedu.com",
+            "https://dexmy.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:3000",
+        }
+        if origin and origin.rstrip("/") not in allowed_origins:
+            await websocket.close(code=4403)
+            return
+        # Cookies are the primary auth path. The query token remains temporarily
+        # accepted to avoid breaking already-open clients during a staggered deploy.
+        access_token = websocket.cookies.get(settings.ACCESS_COOKIE_NAME) or token
+        user = _authenticate(access_token, db)
         if user is None:
             await websocket.close(code=4401)
             return

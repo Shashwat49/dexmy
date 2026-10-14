@@ -10,42 +10,27 @@ import * as authApi from "../api/auth";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    const stored = localStorage.getItem("dexmy_user");
-
-    try {
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      localStorage.removeItem("dexmy_user");
-      return null;
-    }
-  });
-
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Restore the current session when this tab first loads.
   useEffect(() => {
     let active = true;
 
     async function restoreSession() {
-      const token = localStorage.getItem("dexmy_token");
-
-      if (!token) {
-        if (active) setLoading(false);
-        return;
-      }
-
+      // Remove legacy browser-stored access tokens as the cookie session becomes authoritative.
+      localStorage.removeItem("dexmy_token");
+      localStorage.removeItem("token");
+      localStorage.removeItem("teacherToken");
       try {
+        await authApi.getCsrfToken();
         const currentUser = await authApi.getMe();
-
         if (!active) return;
         setUser(currentUser);
         localStorage.setItem("dexmy_user", JSON.stringify(currentUser));
       } catch {
         if (!active) return;
-        localStorage.removeItem("dexmy_token");
-        localStorage.removeItem("dexmy_user");
         setUser(null);
+        localStorage.removeItem("dexmy_user");
       } finally {
         if (active) setLoading(false);
       }
@@ -57,58 +42,25 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // localStorage is shared by tabs on the same origin, but React state is
-  // not. Listen for login/logout token changes made by another tab and
-  // synchronize this tab's authenticated user state.
   useEffect(() => {
-    let active = true;
-
-    async function handleStorage(event) {
-      if (event.key !== "dexmy_token") return;
-
-      if (!event.newValue) {
-        localStorage.removeItem("dexmy_user");
-        setUser(null);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      try {
-        const currentUser = await authApi.getMe();
-        if (!active) return;
-        setUser(currentUser);
-        localStorage.setItem("dexmy_user", JSON.stringify(currentUser));
-      } catch {
-        if (!active) return;
-        setUser(null);
-        localStorage.removeItem("dexmy_user");
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    window.addEventListener("storage", handleStorage);
-    return () => {
-      active = false;
-      window.removeEventListener("storage", handleStorage);
+    const handleAuthExpired = () => {
+      setUser(null);
+      localStorage.removeItem("dexmy_user");
     };
+    window.addEventListener("dexmy:auth-expired", handleAuthExpired);
+    return () => window.removeEventListener("dexmy:auth-expired", handleAuthExpired);
   }, []);
 
-  // Keep the local user copy synchronized.
   useEffect(() => {
-    if (user) {
-      localStorage.setItem("dexmy_user", JSON.stringify(user));
-    } else {
-      localStorage.removeItem("dexmy_user");
-    }
+    if (user) localStorage.setItem("dexmy_user", JSON.stringify(user));
+    else localStorage.removeItem("dexmy_user");
   }, [user]);
 
   async function login(email, password) {
     setLoading(true);
     try {
+      await authApi.getCsrfToken();
       const data = await authApi.login({ email, password });
-      localStorage.setItem("dexmy_token", data.access_token);
       setUser(data.user);
       return data.user;
     } finally {
@@ -119,8 +71,8 @@ export function AuthProvider({ children }) {
   async function signup(payload) {
     setLoading(true);
     try {
+      await authApi.getCsrfToken();
       const data = await authApi.signup(payload);
-      localStorage.setItem("dexmy_token", data.access_token);
       setUser(data.user);
       return data.user;
     } finally {
@@ -128,10 +80,19 @@ export function AuthProvider({ children }) {
     }
   }
 
-  function logout() {
-    localStorage.removeItem("dexmy_token");
-    localStorage.removeItem("dexmy_user");
-    setUser(null);
+  async function logout() {
+    try {
+      await authApi.logout();
+    } catch {
+      // Clear local UI state even if the session has already expired.
+    } finally {
+      setUser(null);
+      localStorage.removeItem("dexmy_user");
+      localStorage.removeItem("dexmy_token");
+      localStorage.removeItem("token");
+      localStorage.removeItem("teacherToken");
+      window.dispatchEvent(new Event("dexmy:auth-expired"));
+    }
   }
 
   return (
@@ -143,10 +104,6 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-
-  if (!ctx) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
-
+  if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
   return ctx;
 }

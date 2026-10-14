@@ -623,8 +623,7 @@ export default function Classroom() {
 
     const connectWebSocket = () => {
       if (disposedRef.current) return;
-      const token = localStorage.getItem("dexmy_token");
-      const nextSocket = new WebSocket(`${wsUrl}?token=${encodeURIComponent(token || "")}`);
+      const nextSocket = new WebSocket(wsUrl);
       socket = nextSocket;
       wsRef.current = nextSocket;
 

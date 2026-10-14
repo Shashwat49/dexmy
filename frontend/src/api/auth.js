@@ -1,9 +1,15 @@
-import api from "./client";
+import api, { clearCsrfToken } from "./client";
 
 export const signup = (payload) => api.post("/auth/signup", payload).then((r) => r.data);
-
 export const login = (payload) => api.post("/auth/login", payload).then((r) => r.data);
-
+export const getCsrfToken = () => api.get("/auth/csrf").then((r) => r.data);
 export const getMe = () => api.get("/users/me").then((r) => r.data);
-
 export const updateMe = (payload) => api.patch("/users/me", payload).then((r) => r.data);
+export const logout = async () => {
+  try {
+    return await api.post("/auth/logout").then((r) => r.data);
+  } finally {
+    clearCsrfToken();
+  }
+};
+export const getTestingToken = () => api.post("/auth/testing-token").then((r) => r.data);
