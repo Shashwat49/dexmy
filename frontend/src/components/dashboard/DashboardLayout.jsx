@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../api/client";
-import StudentCalendarWidget from "./StudentCalendarWidget";
 
 const ADMIN_NAV = [
   { label: "Operations", items: [{ path: "/dashboard/admin", label: "Overview" }, { path: "/dashboard/admin/students", label: "Students" }, { path: "/dashboard/admin/teachers", label: "Teachers" }, { path: "/dashboard/admin/bookings", label: "Bookings" }, { path: "/dashboard/admin/package-schedules", label: "Package Schedules", icon: "calendar" }, { path: "/dashboard/admin/reviews", label: "Class Reviews", icon: "records" }, { path: "/dashboard/admin/meet-class-records", label: "Meet Class Records", icon: "records" }, { path: "/dashboard/admin/student-no-show", label: "Student Did Not Join", icon: "records" }, { path: "/dashboard/admin/student-packages", label: "Student Packages" }, { path: "/dashboard/admin/support", label: "Support" }] },
@@ -16,6 +15,7 @@ const ADMIN_NAV = [
 const STUDENT_NAV = [
   { label: "Learn", items: [
     { path: "/dashboard/student", label: "My classes", icon: "calendar" },
+    { path: "/dashboard/student/calendar", label: "Calendar", icon: "calendar" },
     { path: "/dashboard/student/book", label: "Book a class", icon: "calendar" },
     { path: "/dashboard/student/notes", label: "My notes", icon: "records" },
     { path: "/dashboard/student/tests", label: "Tests & Assessments", icon: "records" },
@@ -110,5 +110,5 @@ export default function DashboardLayout({ navItems = [], children }) {
     </div>
   </>;
 
-  return <div className={`min-h-screen flex flex-col md:flex-row bg-void text-chalk font-body ${isStudentAssessment ? "assessment-fullscreen-shell" : ""}`}><header className={`${isStudentAssessment ? "hidden" : ""} md:hidden flex items-center justify-between px-4 py-3 bg-panel/95 backdrop-blur border-b border-chalk-faint sticky top-0 z-30`}><button onClick={() => setMobileOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg border border-chalk-faint hover:bg-panel-2">☰</button><Link to="/" className="inline-flex items-center shrink-0" aria-label="Dexmy home"><DexmyLogo mobile /></Link><div className="w-8 h-8 rounded-full bg-brand-gold text-[#2C1E04] flex items-center justify-center font-bold text-xs">{initials}</div></header>{mobileOpen && !isStudentAssessment && <div className="fixed inset-0 z-50 flex md:hidden"><div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} /><aside className="relative z-50 w-72 max-w-[88vw] bg-panel h-dvh min-h-0 flex flex-col p-4 sm:p-5 shadow-2xl border-r border-chalk-faint overflow-hidden">{nav()}</aside></div>}{!isStudentAssessment && <aside className="hidden md:flex w-64 shrink-0 bg-panel border-r border-chalk-faint flex-col p-4 lg:p-5 h-dvh max-h-dvh sticky top-0 overflow-hidden min-h-0">{nav()}</aside>}<main className="flex-1 flex flex-col min-w-0 overflow-x-hidden">{isStudent && !isStudentAssessment && <StudentCalendarWidget />}{children}</main></div>;
+  return <div className={`min-h-screen flex flex-col md:flex-row bg-void text-chalk font-body ${isStudentAssessment ? "assessment-fullscreen-shell" : ""}`}><header className={`${isStudentAssessment ? "hidden" : ""} md:hidden flex items-center justify-between px-4 py-3 bg-panel/95 backdrop-blur border-b border-chalk-faint sticky top-0 z-30`}><button onClick={() => setMobileOpen(true)} className="grid h-9 w-9 place-items-center rounded-lg border border-chalk-faint hover:bg-panel-2">☰</button><Link to="/" className="inline-flex items-center shrink-0" aria-label="Dexmy home"><DexmyLogo mobile /></Link><div className="w-8 h-8 rounded-full bg-brand-gold text-[#2C1E04] flex items-center justify-center font-bold text-xs">{initials}</div></header>{mobileOpen && !isStudentAssessment && <div className="fixed inset-0 z-50 flex md:hidden"><div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setMobileOpen(false)} /><aside className="relative z-50 w-72 max-w-[88vw] bg-panel h-dvh min-h-0 flex flex-col p-4 sm:p-5 shadow-2xl border-r border-chalk-faint overflow-hidden">{nav()}</aside></div>}{!isStudentAssessment && <aside className="hidden md:flex w-64 shrink-0 bg-panel border-r border-chalk-faint flex-col p-4 lg:p-5 h-dvh max-h-dvh sticky top-0 overflow-hidden min-h-0">{nav()}</aside>}<main className="flex-1 flex flex-col min-w-0 overflow-x-hidden">{children}</main></div>;
 }
