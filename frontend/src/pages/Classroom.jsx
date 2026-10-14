@@ -143,6 +143,67 @@ const ToolIcon = ({ id, size = 17 }) => {
 
 const DRAW_TOOLS = new Set(TOOLS.map(([id]) => id));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Hit-test the rendered geometry, not just a stroke's endpoints. The eraser
+// removes one complete stroke object, so pen/highlighter paths and shapes are
+// deleted atomically and the same geometry is used by the text-edit tool.
+const pointSegmentDistance = (point, start, end) => {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) return Math.hypot(point.x - start.x, point.y - start.y);
+  const t = clamp(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0, 1);
+  return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
+};
+
+const strokeHit = (stroke, point) => {
+  const points = Array.isArray(stroke?.points) ? stroke.points : [];
+  if (!points.length || !point) return false;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const tool = stroke.tool;
+  const width = Math.max(1, Number(stroke.width) || 3) * (tool === "highlighter" ? 4 : 1);
+  const tolerance = Math.max(8, width / 2 + 6);
+  const nearSegment = (start, end) => pointSegmentDistance(point, start, end) <= tolerance;
+
+  if (tool === "text") {
+    const fontSize = Math.max(18, (Number(stroke.width) || 3) * 6);
+    const textWidth = Math.max(fontSize * 0.6, String(stroke.text || "Text").length * fontSize * 0.6);
+    return point.x >= first.x - tolerance &&
+      point.x <= first.x + textWidth + tolerance &&
+      point.y >= first.y - fontSize - tolerance &&
+      point.y <= first.y + fontSize * 0.35 + tolerance;
+  }
+
+  if (tool === "sticky") {
+    const left = Math.min(first.x, last.x);
+    const right = Math.max(first.x + 160, last.x);
+    const top = Math.min(first.y, last.y);
+    const bottom = Math.max(first.y + 100, last.y);
+    return point.x >= left - tolerance && point.x <= right + tolerance &&
+      point.y >= top - tolerance && point.y <= bottom + tolerance;
+  }
+
+  if (tool === "rect") {
+    const left = Math.min(first.x, last.x), right = Math.max(first.x, last.x);
+    const top = Math.min(first.y, last.y), bottom = Math.max(first.y, last.y);
+    const corners = [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }];
+    return corners.some((corner, index) => nearSegment(corner, corners[(index + 1) % corners.length]));
+  }
+
+  if (tool === "circle") {
+    const radius = Math.hypot(last.x - first.x, last.y - first.y);
+    return Math.abs(Math.hypot(point.x - first.x, point.y - first.y) - radius) <= tolerance;
+  }
+
+  // Pen/highlighter paths may contain many points; line and arrow geometry
+  // uses the same segment-distance test (including a single-point tap).
+  if (points.length === 1) return Math.hypot(point.x - first.x, point.y - first.y) <= tolerance;
+  for (let index = 1; index < points.length; index += 1) {
+    if (nearSegment(points[index - 1], points[index])) return true;
+  }
+  return false;
+};
 const newId = () => (globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 const makeWhiteboardPage = (page_number = 1) => ({ page_id: newId(), page_number, page_type: "whiteboard", image_url: null });
 const normalizePages = (pages) => (pages?.length ? pages : [makeWhiteboardPage(1)]).map((p, i) => ({ ...p, page_id: p.page_id || newId(), page_number: i + 1, page_type: p.page_type || (p.image_url ? "pdf" : "whiteboard") }));
@@ -452,7 +513,7 @@ export default function Classroom() {
     };
   }, [flushLive]);
   const point = (event, allowOutside = false) => { const r = canvasRef.current.getBoundingClientRect(); if (!r.width || !r.height) return null; const boardX = (event.clientX - r.left) * W / r.width; const boardY = (event.clientY - r.top) * H / r.height; const content = getSlideContentRect(); if (!allowOutside && (boardX < content.x || boardX > content.x + content.width || boardY < content.y || boardY > content.y + content.height)) return null; return { x: clamp((boardX - content.x) * W / content.width, 0, W), y: clamp((boardY - content.y) * H / content.height, 0, H) }; };
-  const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (!p) return; if (tool === "text") { const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p)); if (hit) { setTextDraft(hit.text || ""); setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id }); } else { setTextDraft(""); setTextModal({ x: p.x, y: p.y, strokeId: null }); } redraw(); return; } if (tool === "eraser") { const list = currentStrokes(); const hit = [...list].reverse().find(s => strokeHit(s, p)); if (!hit) return; strokesByPageRef.current.set(currentPageId(), list.filter(s => s.id !== hit.id)); liveRef.current.delete(hit.id); committedRef.current.delete(hit.id); deletedStrokeIdsRef.current.add(hit.id); if (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value); const action = { kind: "stroke_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: currentPageId() }; publishControl({ kind: "whiteboard_delete", stroke_id: hit.id, page_number: action.page_number, page_id: action.page_id }); queueWhiteboardAction(action); redraw(); setThumbnailVersion(v => v + 1); saveSnapshot(); return; } if (!DRAW_TOOLS.has(tool)) return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p], page_number: slideRef.current, page_id: currentPageId() }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
+  const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (!p) return; if (tool === "text") { const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p)); if (hit) { setTextDraft(hit.text || ""); setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id }); } else { setTextDraft(""); setTextModal({ x: p.x, y: p.y, strokeId: null }); } redraw(); return; } if (tool === "eraser") { const list = currentStrokes(); const hit = [...list].reverse().find(s => strokeHit(s, p)); if (!hit) return; strokesByPageRef.current.set(currentPageId(), list.filter(s => s.id !== hit.id)); liveRef.current.delete(hit.id); committedRef.current.delete(hit.id); deletedStrokeIdsRef.current.add(hit.id);  const action = { kind: "stroke_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: currentPageId() }; publishControl({ kind: "whiteboard_delete", stroke_id: hit.id, page_number: action.page_number, page_id: action.page_id }); queueWhiteboardAction(action); redraw(); setThumbnailVersion(v => v + 1); saveSnapshot(); return; } if (!DRAW_TOOLS.has(tool)) return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p], page_number: slideRef.current, page_id: currentPageId() }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
   const onPointerMove = (event) => { const d = drawRef.current; if (!d) return; const nextPoint = point(event, true); if (!nextPoint) return; d.points.push(nextPoint); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
   const onPointerUp = (event) => { canvasRef.current?.releasePointerCapture?.(event.pointerId); const d = drawRef.current; drawRef.current = null; if (!d) return; const pageNumber = slideRef.current; const pageId = currentPageId(pageNumber); if (!["pen", "highlighter", "eraser"].includes(d.tool)) { if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0); queueLive(d, d.points, true); flushLive(true); } else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); drawBaseRef.current = null; queueWhiteboardAction({ kind: "stroke", stroke: d, page_number: pageNumber, page_id: pageId }); setThumbnailVersion((version) => version + 1); saveSnapshot(); };
   const saveTextModal = () => { if (!textModal) return; const text = textDraft.trim(); if (!text) { setTextModal(null); setTextDraft(""); redraw(); return; } const list = currentStrokes(); let stroke; if (textModal.strokeId) { const index = list.findIndex((item) => item.id === textModal.strokeId); if (index >= 0) { stroke = { ...list[index], text }; list[index] = stroke; } } if (!stroke) { stroke = { id: newId(), tool: "text", color, width, text, points: [{ x: textModal.x, y: textModal.y }] }; list.push(stroke); } else if (textModal.strokeId) { const generation = Math.max(Number(localStrokeEditGenerationRef.current.get(stroke.id)) || 0, Number(stroke._whiteboard_edit_generation) || 0) + 1; localStrokeEditGenerationRef.current.set(stroke.id, generation); stroke = { ...stroke, _whiteboard_base_revision: Number(stroke._whiteboard_revision) || 0, _whiteboard_edit_generation: generation, _whiteboard_editor_id: String(user?.id || "") }; const index = list.findIndex((item) => item.id === stroke.id); if (index >= 0) list[index] = stroke; } queueLive(stroke, stroke.points, true, true); flushLive(true); const action = { kind: textModal.strokeId ? "stroke_update" : "stroke", stroke, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); setTextModal(null); setTextDraft(""); setThumbnailVersion((version) => version + 1); redraw(); saveSnapshot(); };
@@ -528,8 +589,8 @@ export default function Classroom() {
       setNotice(error.response?.data?.detail || "Could not delete slide.");
     }
   };
-  const undo = () => { if (!canAnnotate) return; const list = currentStrokes(); if (!list.length) return; const removed = list[list.length - 1]; if (pendingLiveRef.current?.id === removed.id) pendingLiveRef.current = null; if (drawRef.current?.id === removed.id) { drawRef.current = null; drawBaseRef.current = null; } strokesByPageRef.current.set(currentPageId(), list.filter((stroke) => stroke.id !== removed.id)); liveRef.current.delete(removed.id); committedRef.current.delete(removed.id); deletedStrokeIdsRef.current.add(removed.id); if (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value); redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "stroke_delete", stroke_id: removed.id, page_number: slideRef.current, page_id: currentPageId() }; publishControl({ kind: "whiteboard_undo", stroke_id: removed.id, page_number: payload.page_number, page_id: payload.page_id }); queueWhiteboardAction(payload); saveSnapshot(); };
-  const clearBoard = () => { if (!isTeacher) return; const pageId = currentPageId(), pageNumber = slideRef.current; const activeDraw = drawRef.current && (drawRef.current.page_id === pageId || Number(drawRef.current.page_number) === pageNumber) ? drawRef.current : null; const ids = new Set([...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id), ...(activeDraw?.id ? [activeDraw.id] : [])]); if (activeDraw) { drawRef.current = null; drawBaseRef.current = null; } if (pendingLiveRef.current && (pendingLiveRef.current.page_id === pageId || Number(pendingLiveRef.current.page_number) === pageNumber)) pendingLiveRef.current = null; clearTimeout(reliableStrokeTimerRef.current); ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); }); while (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value); strokesByPageRef.current.set(pageId, []); redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids) }; publishControl({ kind: "whiteboard_clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids) }); queueWhiteboardAction(payload); saveSnapshot(); };
+  const undo = () => { if (!canAnnotate) return; const list = currentStrokes(); if (!list.length) return; const removed = list[list.length - 1]; if (pendingLiveRef.current?.id === removed.id) pendingLiveRef.current = null; if (drawRef.current?.id === removed.id) { drawRef.current = null; drawBaseRef.current = null; } strokesByPageRef.current.set(currentPageId(), list.filter((stroke) => stroke.id !== removed.id)); liveRef.current.delete(removed.id); committedRef.current.delete(removed.id); deletedStrokeIdsRef.current.add(removed.id);  redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "stroke_delete", stroke_id: removed.id, page_number: slideRef.current, page_id: currentPageId() }; publishControl({ kind: "whiteboard_undo", stroke_id: removed.id, page_number: payload.page_number, page_id: payload.page_id }); queueWhiteboardAction(payload); saveSnapshot(); };
+  const clearBoard = () => { if (!isTeacher) return; const pageId = currentPageId(), pageNumber = slideRef.current; const activeDraw = drawRef.current && (drawRef.current.page_id === pageId || Number(drawRef.current.page_number) === pageNumber) ? drawRef.current : null; const ids = new Set([...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id), ...(activeDraw?.id ? [activeDraw.id] : [])]); if (activeDraw) { drawRef.current = null; drawBaseRef.current = null; } if (pendingLiveRef.current && (pendingLiveRef.current.page_id === pageId || Number(pendingLiveRef.current.page_number) === pageNumber)) pendingLiveRef.current = null; clearTimeout(reliableStrokeTimerRef.current); ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); });  strokesByPageRef.current.set(pageId, []); redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids) }; publishControl({ kind: "whiteboard_clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids) }); queueWhiteboardAction(payload); saveSnapshot(); };
   const uploadChatFile = async (file) => {
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) return setNotice("Chat files are limited to 20 MB.");
@@ -867,7 +928,7 @@ export default function Classroom() {
           const p = msg.payload || {};
           if (p.action_id) { if (seenWhiteboardActionIdsRef.current.has(p.action_id)) return; seenWhiteboardActionIdsRef.current.add(p.action_id); if (seenWhiteboardActionIdsRef.current.size > 500) seenWhiteboardActionIdsRef.current.delete(seenWhiteboardActionIdsRef.current.values().next().value); }
           if (p.kind === "page" || p.kind === "slides" || p.kind === "pdf") return;
-          if (p.kind === "stroke_delete" && p.stroke_id) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter(s => s.id !== p.stroke_id)); liveRef.current.delete(p.stroke_id); committedRef.current.delete(p.stroke_id); deletedStrokeIdsRef.current.add(p.stroke_id); if (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value); if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); }
+          if (p.kind === "stroke_delete" && p.stroke_id) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter(s => s.id !== p.stroke_id)); liveRef.current.delete(p.stroke_id); committedRef.current.delete(p.stroke_id); deletedStrokeIdsRef.current.add(p.stroke_id);  if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); }
           if (p.kind === "stroke_update" && p.stroke) {
             if (deletedStrokeIdsRef.current.has(p.stroke.id)) return;
             const pageId = p.page_id || currentPageId(p.page_number || 1);
@@ -946,7 +1007,7 @@ export default function Classroom() {
             const pageId = p.page_id || currentPageId(pageNumber);
             const ids = new Set([...(Array.isArray(p.stroke_ids) ? p.stroke_ids : []), ...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id)]);
             ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); });
-            while (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value);
+            
             strokesByPageRef.current.set(pageId, []);
             if (pageId === currentPageId()) redraw();
             setThumbnailVersion((version) => version + 1);
@@ -1265,13 +1326,13 @@ export default function Classroom() {
           }
           if (msg.type === "classroom_control" && topic === CONTROL_TOPIC) {
             const control = msg.payload || {};
-            if ((control.kind === "whiteboard_undo" || control.kind === "whiteboard_delete") && control.stroke_id) { const pageNumber = Number(control.page_number) || 1; const pageId = control.page_id || currentPageId(pageNumber); const strokeId = control.stroke_id; const list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter((stroke) => stroke.id !== strokeId)); liveRef.current.delete(strokeId); committedRef.current.delete(strokeId); deletedStrokeIdsRef.current.add(strokeId); if (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value); if (pageId === currentPageId()) redraw(); setThumbnailVersion((version) => version + 1); return; }
+            if ((control.kind === "whiteboard_undo" || control.kind === "whiteboard_delete") && control.stroke_id) { const pageNumber = Number(control.page_number) || 1; const pageId = control.page_id || currentPageId(pageNumber); const strokeId = control.stroke_id; const list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter((stroke) => stroke.id !== strokeId)); liveRef.current.delete(strokeId); committedRef.current.delete(strokeId); deletedStrokeIdsRef.current.add(strokeId);  if (pageId === currentPageId()) redraw(); setThumbnailVersion((version) => version + 1); return; }
             if (control.kind === "whiteboard_clear") {
               const pageNumber = Number(control.page_number) || 1;
               const pageId = control.page_id || currentPageId(pageNumber);
               const ids = new Set([...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id)]);
               ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); });
-              while (deletedStrokeIdsRef.current.size > 1000) deletedStrokeIdsRef.current.delete(deletedStrokeIdsRef.current.values().next().value);
+              
               strokesByPageRef.current.set(pageId, []);
               if (pageId === currentPageId()) redraw();
               setThumbnailVersion((version) => version + 1);
