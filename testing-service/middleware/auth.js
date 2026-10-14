@@ -45,6 +45,12 @@ const authMiddleware = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET, { algorithms: [JWT_ALGORITHM] });
+    // Scoped tokens are issued only for the Testing Service. Legacy tokens
+    // without an audience remain accepted during rollout; any token that
+    // declares an audience must match this service and token purpose.
+    if (decoded.aud !== undefined && (decoded.aud !== "dexmy-testing-service" || decoded.token_use !== "testing")) {
+      return res.status(401).json({ message: "Token is not valid for the testing service" });
+    }
     const userId = decoded.sub || decoded.id || decoded.user_id;
     if (!userId) return res.status(401).json({ message: "Token does not contain a user id" });
     req.user = {
