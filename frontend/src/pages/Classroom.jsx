@@ -994,6 +994,9 @@ export default function Classroom() {
             committedRef.current.add(p.stroke.id);
             liveRef.current.delete(p.stroke.id);
             if (pageId === currentPageId()) redraw();
+            // Student strokes arrive through the committed WebSocket path.
+            // Trigger the teacher-only filmstrip thumbnails to redraw as well.
+            setThumbnailVersion((version) => version + 1);
           }
           if (p.kind === "undo" && (p.page_id || currentPageId(p.page_number || 1)) === currentPageId()) {
             const list = currentStrokes();
