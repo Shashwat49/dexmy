@@ -87,6 +87,7 @@ export default function StudentCalendarWidget() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const [selectedDate, setSelectedDate] = useState(() => tomorrowDate());
 
   useEffect(() => {
@@ -113,7 +114,7 @@ export default function StudentCalendarWidget() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   // Keep the student calendar aligned with the teacher calendar: show every assigned class on its date.
   const visibleBookings = useMemo(
@@ -170,7 +171,7 @@ export default function StudentCalendarWidget() {
         {error && (
           <div role="alert" className="mb-6 rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">
             {error}
-            <button type="button" onClick={() => window.location.reload()} className="ml-3 underline">
+            <button type="button" onClick={() => setReloadKey((current) => current + 1)} className="ml-3 underline">
               Retry
             </button>
           </div>
