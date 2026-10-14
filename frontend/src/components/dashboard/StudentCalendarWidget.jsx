@@ -44,10 +44,21 @@ export default function StudentCalendarWidget() {
     return () => { active = false; };
   }, []);
 
+  // Keep completed history visible, but only expose confirmed upcoming classes for tomorrow.
+  const visibleBookings = useMemo(() => {
+    const tomorrow = new Date();
+    tomorrow.setHours(0, 0, 0, 0);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return bookings.filter((booking) =>
+      booking.status !== "confirmed" ||
+      (booking.scheduled_at && sameDay(booking.scheduled_at, tomorrow))
+    );
+  }, [bookings]);
+
   const days = useMemo(() => monthDays(month), [month]);
-  const selectedBookings = useMemo(() => bookings
+  const selectedBookings = useMemo(() => visibleBookings
     .filter((booking) => booking.scheduled_at && sameDay(booking.scheduled_at, selectedDate))
-    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [bookings, selectedDate]);
+    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [visibleBookings, selectedDate]);
 
   const moveMonth = (offset) => setMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1));
   const goToday = () => {
@@ -88,7 +99,7 @@ export default function StudentCalendarWidget() {
               </div>
               <div className="grid grid-cols-7">
                 {days.map(({ date, inMonth }) => {
-                  const dayBookings = bookings.filter((booking) => booking.scheduled_at && sameDay(booking.scheduled_at, date));
+                  const dayBookings = visibleBookings.filter((booking) => booking.scheduled_at && sameDay(booking.scheduled_at, date));
                   const scheduled = dayBookings.filter((booking) => booking.status === "confirmed").length;
                   const completed = dayBookings.filter((booking) => booking.status === "completed").length;
                   const selected = sameDay(date, selectedDate);
