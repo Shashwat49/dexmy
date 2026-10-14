@@ -179,14 +179,11 @@ export default function TeacherCalendar() {
     loadBookings();
   }, []);
 
-  // Keep completed history visible, but only expose confirmed upcoming classes for tomorrow.
-  const visibleBookings = useMemo(() => {
-    const tomorrow = tomorrowDate();
-    return bookings.filter((booking) =>
-      statusOf(booking) !== "confirmed" ||
-      (booking.scheduled_at && sameDay(new Date(booking.scheduled_at), tomorrow))
-    );
-  }, [bookings]);
+  // Show every assigned booking so recurring package classes remain visible on their actual dates.
+  const visibleBookings = useMemo(
+    () => bookings.filter((booking) => booking?.scheduled_at),
+    [bookings]
+  );
 
   const calendarDays = useMemo(
     () =>
