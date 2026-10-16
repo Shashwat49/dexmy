@@ -1,4 +1,8 @@
+import logging
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -19,6 +23,7 @@ from app.models.teacher import TeacherProfile
 from app.models.user import User, UserRole
 from app.models.user_session import UserSession
 from app.schemas.user import TokenResponse, UserCreate, UserLogin
+from app.services.account_security_email import find_valid_action_token, issue_action_token, send_password_reset_email
 from app.services.auth_session import (
     RefreshTokenConcurrentUseError,
     RefreshTokenReuseError,
@@ -28,6 +33,32 @@ from app.services.auth_session import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+class ForgotPasswordPayload(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordPayload(BaseModel):
+    token: str = Field(min_length=20, max_length=256)
+    new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        if value.strip() != value:
+            raise ValueError("Password cannot start or end with spaces")
+        if not any(char.isupper() for char in value):
+            raise ValueError("Password must contain at least one uppercase letter")
+        if not any(char.islower() for char in value):
+            raise ValueError("Password must contain at least one lowercase letter")
+        if not any(char.isdigit() for char in value):
+            raise ValueError("Password must contain at least one number")
+        return value
+
+
+PUBLIC_ACCOUNT_ROLES = {UserRole.student, UserRole.teacher, UserRole.parent}
 
 
 @router.get("/csrf")
@@ -192,3 +223,54 @@ def get_testing_token(
     # bearer token scoped to that service instead of persisting the main token.
     token = create_testing_access_token(str(current_user.id), current_user.role.value)
     return {"access_token": token, "expires_in": settings.TESTING_ACCESS_TOKEN_EXPIRE_MINUTES * 60}
+
+
+
+@router.post("/password/forgot")
+def forgot_password(
+    request: Request,
+    payload: ForgotPasswordPayload,
+    db: Session = Depends(get_db),
+):
+    validate_csrf(request)
+    # Always return the same response to avoid disclosing which email addresses
+    # have Dexmy accounts. Password recovery is limited to student/teacher/parent.
+    email = str(payload.email).lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+    if user and user.role in PUBLIC_ACCOUNT_ROLES and settings.SMTP_PASSWORD:
+        try:
+            token = issue_action_token(db, user_id=user.id, purpose="password_reset", lifetime_minutes=60)
+            db.commit()
+            send_password_reset_email(user.email, user.full_name, token)
+        except Exception:
+            db.rollback()
+            logger.exception("Unable to process a password recovery email")
+    return {"message": "If an eligible Dexmy account exists for that email, password recovery instructions will be sent shortly."}
+
+
+@router.post("/password/reset")
+def reset_password(
+    request: Request,
+    response: Response,
+    payload: ResetPasswordPayload,
+    db: Session = Depends(get_db),
+):
+    validate_csrf(request)
+    action = find_valid_action_token(db, payload.token, "password_reset")
+    if action is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This password reset link is invalid or has expired.")
+    user = db.get(User, action.user_id)
+    if user is None or user.role not in PUBLIC_ACCOUNT_ROLES or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This password reset link is invalid or has expired.")
+
+    now = datetime.now(timezone.utc)
+    action.used_at = now
+    user.password_hash = hash_password(payload.new_password)
+    # Revoke all refresh sessions so a password reset signs out other devices.
+    db.query(UserSession).filter(
+        UserSession.user_id == user.id,
+        UserSession.revoked_at.is_(None),
+    ).update({"revoked_at": now}, synchronize_session=False)
+    db.commit()
+    clear_auth_cookies(response)
+    return {"message": "Password reset successfully. Please log in with your new password."}

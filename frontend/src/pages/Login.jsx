@@ -96,6 +96,7 @@ export default function Login() {
         <button type="submit" disabled={loading} className="w-full bg-brand-red hover:bg-brand-red-dark transition-colors rounded-lg py-2.5 font-semibold text-sm disabled:opacity-50">{loading ? "Logging in…" : "Log in"}</button>
       </form>
 
+      <p className="text-center text-sm mt-4"><Link to="/forgot-password" className="text-brand-gold font-medium hover:underline">Forgot password?</Link></p>
       <p className="text-center text-sm text-chalk-muted mt-6">New to Dexmy? <Link to="/signup" className="text-brand-gold font-medium hover:underline">Create an account</Link></p>
     </AuthLayout>
   );

@@ -22,6 +22,7 @@ const STUDENT_NAV = [
   ] },
   { label: "Account", items: [
     { path: "/dashboard/student/account", label: "My account", icon: "profile" },
+    { path: "/dashboard/account-security", label: "Account security", icon: "profile" },
   ] },
   { label: "Explore Packages", items: [
     { path: "/dashboard/student/packages", label: "Packages", icon: "records" },
@@ -51,7 +52,16 @@ export default function DashboardLayout({ navItems = [], children }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const isAdmin = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"].includes(user?.role);
   const isStudent = user?.role === "student";
-  const effectiveNav = isAdmin ? ADMIN_NAV : isStudent ? STUDENT_NAV : navItems.map((section) => ({ ...section, items: [...section.items] }));
+  const effectiveNav = isAdmin
+    ? ADMIN_NAV
+    : isStudent
+      ? STUDENT_NAV
+      : [
+          ...navItems.map((section) => ({ ...section, items: [...section.items] })),
+          ...(["teacher", "parent"].includes(user?.role)
+            ? [{ label: "Account", items: [{ path: "/dashboard/account-security", label: "Account security", icon: "profile" }] }]
+            : []),
+        ];
 
   const loadNotifications = async () => {
     if (!isAdmin) return;
