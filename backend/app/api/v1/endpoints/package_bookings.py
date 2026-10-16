@@ -82,6 +82,12 @@ def create_package_aware_booking(
             db,
             student_id=current_user.id,
         )
+        if package is None:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail="You’ve exhausted your 2 free classes. Please choose a package to continue booking classes.",
+            )
         plan = db.get(PackagePlan, package.package_plan_id)
         if plan is None:
             db.rollback()
