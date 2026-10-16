@@ -1,11 +1,13 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.cookies import clear_auth_cookies
+from app.core.csrf import validate_csrf
 from app.core.dependencies import get_current_user
 from app.core.security import verify_password
 from app.db.session import get_db
@@ -91,10 +93,10 @@ def request_email_change(
 @router.post("/email/confirm")
 def confirm_email_change(
     request: Request,
+    response: Response,
     payload: ConfirmEmailChangePayload,
     db: Session = Depends(get_db),
 ):
-    from app.core.csrf import validate_csrf
     validate_csrf(request)
     action = find_valid_action_token(db, payload.token, "email_change")
     if action is None or not action.target_email:
@@ -115,6 +117,7 @@ def confirm_email_change(
         UserSession.revoked_at.is_(None),
     ).update({"revoked_at": now}, synchronize_session=False)
     db.commit()
+    clear_auth_cookies(response)
     return {"message": "Email address updated successfully. Please log in again.", "email": new_email}
 
 
