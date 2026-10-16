@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -56,6 +56,12 @@ def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_c
     is_teacher = current_user.id == booking.teacher_id
     is_student = current_user.id == booking.student_id
     if not (is_teacher or is_student): raise HTTPException(status_code=403, detail="You are not part of this classroom")
+    scheduled_at = booking.scheduled_at
+    if scheduled_at is not None:
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) < scheduled_at - timedelta(minutes=5):
+            raise HTTPException(status_code=403, detail="Classroom access opens 5 minutes before the scheduled class start")
     sources = None if is_teacher else _student_publish_sources(payload.session_id, current_user.id, db)
     token = create_join_token(room_name=session.livekit_room_name, identity=str(current_user.id), name=current_user.full_name, can_publish=is_teacher or bool(sources), publish_sources=sources, can_publish_data=True)
     return JoinTokenResponse(livekit_token=token, livekit_url=settings.LIVEKIT_URL, room_name=session.livekit_room_name)
