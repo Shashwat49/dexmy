@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import DashboardLayout from "../../components/dashboard/DashboardLayout";
@@ -9,6 +9,14 @@ const BUTTON = "rounded-xl bg-brand-red px-5 py-3 text-sm font-semibold transiti
 
 export default function AccountSecurity() {
   const { user } = useAuth();
+  const roleNav = user?.role === "teacher"
+    ? [
+        { label: "Teaching", items: [{ path: "/dashboard/teacher", label: "Dashboard", icon: "dashboard" }, { path: "/dashboard/teacher/calendar", label: "Calendar", icon: "calendar" }, { path: "/dashboard/teacher/class-records", label: "Class Records", icon: "records" }] },
+        { label: "Profile", items: [{ path: "/dashboard/teacher/profile", label: "Teacher Profile", icon: "profile" }] },
+      ]
+    : user?.role === "parent"
+      ? [{ label: "Parent", items: [{ path: "/dashboard/parent", label: "My children", icon: "profile" }] }]
+      : [];
   const [email, setEmail] = useState("");
   const [newPhone, setNewPhone] = useState("");
   const [emailPassword, setEmailPassword] = useState("");
@@ -45,7 +53,7 @@ export default function AccountSecurity() {
     } finally { setPhoneBusy(false); }
   }
 
-  return <DashboardLayout>
+  return <DashboardLayout navItems={roleNav}>
     <div className="border-b border-chalk-faint px-5 py-6 sm:px-8">
       <p className="text-sm text-chalk-muted">Account</p>
       <h1 className="mt-1 text-2xl font-semibold">Account security</h1>
@@ -154,19 +162,22 @@ export function ResetPassword() {
 
 export function ConfirmEmailChange() {
   const token = new URLSearchParams(window.location.search).get("token") || "";
-  const [state, setState] = useState({ busy: true, message: "", error: "" });
-  useEffect(() => {
-    let active = true;
-    if (!token) { setState({ busy: false, message: "", error: "Confirmation token is missing." }); return () => { active = false; }; }
-    confirmEmailChange(token).then((result) => {
-      if (active) setState({ busy: false, message: result.message, error: "" });
-    }).catch((err) => {
-      if (active) setState({ busy: false, message: "", error: err.response?.data?.detail || "This confirmation link is invalid or expired." });
-    });
-    return () => { active = false; };
-  }, [token]);
-  return <AuthShell title="Confirm email address" subtitle="Finish updating your Dexmy sign-in email.">
-    {state.busy ? <p className="text-sm text-chalk-muted">Verifying your link…</p> : state.error ? <p role="alert" className="text-sm text-brand-red">{state.error}</p> : <p role="status" className="text-sm text-green-400">{state.message}</p>}
+  const [state, setState] = useState({ busy: false, attempted: false, message: "", error: "" });
+  async function confirm() {
+    if (!token) {
+      setState({ busy: false, attempted: true, message: "", error: "Confirmation token is missing." });
+      return;
+    }
+    setState({ busy: true, attempted: true, message: "", error: "" });
+    try {
+      const result = await confirmEmailChange(token);
+      setState({ busy: false, attempted: true, message: result.message, error: "" });
+    } catch (err) {
+      setState({ busy: false, attempted: true, message: "", error: err.response?.data?.detail || "This confirmation link is invalid or expired." });
+    }
+  }
+  return <AuthShell title="Confirm email address" subtitle="Confirm that you control the new email address for your Dexmy account.">
+    {!state.attempted ? <button className={BUTTON + " w-full"} type="button" onClick={confirm} disabled={!token}>Confirm email address</button> : state.busy ? <p className="text-sm text-chalk-muted">Verifying your link…</p> : state.error ? <p role="alert" className="text-sm text-brand-red">{state.error}</p> : <p role="status" className="text-sm text-green-400">{state.message}</p>}
     <p className="mt-5 text-sm text-chalk-muted"><Link to="/login" className="text-brand-gold hover:underline">Go to login</Link></p>
   </AuthShell>;
 }
