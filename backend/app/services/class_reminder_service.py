@@ -161,6 +161,7 @@ def _render_message(*, recipient_type: str, recipient_name: str, other_name: str
 <img src="https://dexmyedu.com/dexmy-logo-bg-removed.png" alt="Dexmy" width="142" style="display:block;width:142px;max-width:100%;height:auto;margin:0 auto 20px;">
 <div style="display:inline-block;padding:7px 12px;border-radius:999px;background:#3A171B;color:#F06A72;font-size:11px;font-weight:bold;letter-spacing:1.4px;text-transform:uppercase;">Class reminder</div>
 <h1 style="margin:18px 0 10px;color:#FFFFFF;font-size:25px;line-height:1.3;">Your class starts in 30 minutes</h1>
+<p style="margin:0 0 10px;color:#FFFFFF;font-size:15px;line-height:1.7;">{escape(greeting)}</p>
 <p style="margin:0;color:#C4C4CC;font-size:15px;line-height:1.7;">{escape(opening)}</p>
 </td></tr>
 <tr><td style="padding:8px 30px 24px;">
