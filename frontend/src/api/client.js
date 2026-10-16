@@ -1,6 +1,8 @@
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+// Use a same-origin API proxy in production so Safari/iOS can persist auth and CSRF cookies.
+// Direct cross-site cookies from the Railway host may be blocked by mobile privacy protections.
+const API_BASE_URL = import.meta.env.PROD ? "/api/v1" : import.meta.env.VITE_API_BASE_URL;
 export const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
