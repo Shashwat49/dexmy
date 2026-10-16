@@ -142,6 +142,7 @@ export function ResetPassword() {
     if (password !== confirm) { setBusy(false); setError("The passwords do not match."); return; }
     try {
       const result = await resetPassword(token, password);
+      window.dispatchEvent(new Event("dexmy:auth-expired"));
       setMessage(result.message);
     } catch (err) {
       setError(err.response?.data?.detail || "This reset link is invalid or expired. Request a new one.");
@@ -171,6 +172,7 @@ export function ConfirmEmailChange() {
     setState({ busy: true, attempted: true, message: "", error: "" });
     try {
       const result = await confirmEmailChange(token);
+      window.dispatchEvent(new Event("dexmy:auth-expired"));
       setState({ busy: false, attempted: true, message: result.message, error: "" });
     } catch (err) {
       setState({ busy: false, attempted: true, message: "", error: err.response?.data?.detail || "This confirmation link is invalid or expired." });
