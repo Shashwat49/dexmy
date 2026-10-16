@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -68,7 +69,7 @@ def request_email_change(
     new_email = str(payload.email).lower().strip()
     if new_email == current_user.email.lower():
         raise HTTPException(status_code=400, detail="This is already your current email address.")
-    if db.query(User).filter(User.email == new_email).first():
+    if db.query(User).filter(func.lower(User.email) == new_email).first():
         raise HTTPException(status_code=409, detail="That email address is already registered.")
     if not settings.SMTP_PASSWORD:
         raise HTTPException(status_code=503, detail="Email verification is temporarily unavailable. Please try again later.")
@@ -105,7 +106,7 @@ def confirm_email_change(
     if user is None or user.role not in ACCOUNT_ROLES or not user.is_active:
         raise HTTPException(status_code=400, detail="This email confirmation link is invalid or has expired.")
     new_email = action.target_email.lower().strip()
-    if db.query(User).filter(User.email == new_email, User.id != user.id).first():
+    if db.query(User).filter(func.lower(User.email) == new_email, User.id != user.id).first():
         raise HTTPException(status_code=409, detail="That email address is already registered. Please request a new change with another address.")
     now = datetime.now(timezone.utc)
     action.used_at = now
