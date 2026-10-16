@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -133,7 +134,10 @@ def change_phone_number(
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=401, detail="Current password is incorrect.")
     phone = payload.phone.strip()
-    if len(phone) < 7 or len(phone) > 20:
+    if not re.fullmatch(r"\+[0-9][0-9\s().-]{5,18}[0-9]", phone):
+        raise HTTPException(status_code=422, detail="Enter a valid phone number including its country code (for example, +91 98765 43210).")
+    phone = re.sub(r"[\s().-]", "", phone)
+    if len(phone) < 8 or len(phone) > 16:
         raise HTTPException(status_code=422, detail="Enter a valid phone number including its country code.")
     if phone == (current_user.phone or ""):
         raise HTTPException(status_code=400, detail="This is already your current phone number.")
