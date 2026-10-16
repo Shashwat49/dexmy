@@ -18,7 +18,6 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.models.admin_notification import AdminNotification
-from app.models.account_action_token import AccountActionToken
 from app.models.student import StudentProfile
 from app.models.teacher import TeacherProfile
 from app.models.user import User, UserRole
