@@ -17,11 +17,20 @@ export function AuthProvider({ children }) {
     let active = true;
 
     async function restoreSession() {
+      // Only probe the protected profile endpoint when this browser previously
+      // had a Dexmy session. Public visitors should not trigger an expected 401
+      // (or an unnecessary refresh request) on every homepage visit.
+      const hadPreviousSession = Boolean(localStorage.getItem("dexmy_user"));
+
       // Remove legacy browser-stored access tokens as the cookie session becomes authoritative.
       localStorage.removeItem("dexmy_token");
       localStorage.removeItem("token");
       localStorage.removeItem("teacherToken");
       try {
+        if (!hadPreviousSession) {
+          if (active) setUser(null);
+          return;
+        }
         await authApi.getCsrfToken();
         const currentUser = await authApi.getMe();
         if (!active) return;
