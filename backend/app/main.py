@@ -1,9 +1,44 @@
+import asyncio
+import logging
+from contextlib import asynccontextmanager, suppress
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.services.class_reminder_service import process_due_class_reminders
 
-app = FastAPI(title=settings.APP_NAME)
+logger = logging.getLogger(__name__)
+
+
+async def _class_reminder_loop():
+    interval = max(15, settings.CLASS_REMINDER_INTERVAL_SECONDS)
+    while True:
+        try:
+            await asyncio.to_thread(process_due_class_reminders)
+        except Exception:
+            logger.exception("Class reminder cycle failed")
+        await asyncio.sleep(interval)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    reminder_task = None
+    if settings.CLASS_REMINDERS_ENABLED and settings.SMTP_PASSWORD:
+        reminder_task = asyncio.create_task(_class_reminder_loop())
+        logger.info("Automatic class reminders enabled (checks every %s seconds)", settings.CLASS_REMINDER_INTERVAL_SECONDS)
+    else:
+        logger.info("Automatic class reminders are disabled until SMTP credentials and the feature flag are configured")
+    try:
+        yield
+    finally:
+        if reminder_task is not None:
+            reminder_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await reminder_task
+
+
+app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
 # The frontend is served from the production custom domain, the Vercel
 # deployment domain, and localhost during development. Keep the configured

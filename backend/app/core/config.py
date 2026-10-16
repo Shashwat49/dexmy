@@ -44,6 +44,19 @@ class Settings(BaseSettings):
     # accepts the production custom domain and Vercel domain in main.py.
     FRONTEND_ORIGIN: str = "https://dexmyedu.com"
 
+    # Scheduled class reminder email delivery. Disabled until production SMTP
+    # credentials and the reminder-delivery SQL migration are configured.
+    CLASS_REMINDERS_ENABLED: bool = False
+    CLASS_REMINDER_INTERVAL_SECONDS: int = 60
+    CLASS_REMINDER_MINUTES_BEFORE: int = 30
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USE_TLS: bool = True
+    SMTP_USERNAME: str = "dexmyedu@gmail.com"
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "dexmyedu@gmail.com"
+    SMTP_FROM_NAME: str = "Dexmy"
+
     class Config:
         env_file = ".env"
 
