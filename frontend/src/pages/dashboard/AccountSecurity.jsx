@@ -185,5 +185,5 @@ export function ConfirmEmailChange() {
 }
 
 function AuthShell({ title, subtitle, children }) {
-  return <div className="min-h-screen bg-void text-chalk flex items-center justify-center px-4 py-10"><div className="w-full max-w-md rounded-2xl border border-chalk-faint bg-panel p-6 sm:p-8"><Link to="/" className="text-sm font-bold tracking-wide text-brand-gold">DEXMY</Link><h1 className="mt-5 text-2xl font-semibold">{title}</h1><p className="mt-2 mb-6 text-sm text-chalk-muted">{subtitle}</p>{children}</div></div>;
+  return <div className="min-h-screen bg-void text-chalk flex items-center justify-center px-4 py-10"><div className="w-full max-w-md rounded-2xl border border-chalk-faint bg-panel p-6 sm:p-8"><Link to="/" aria-label="Dexmy home" className="inline-flex items-center"><img src="/dexmy-logo-bg-removed.png" alt="Dexmy" className="block h-10 w-auto object-contain" /></Link><h1 className="mt-5 text-2xl font-semibold">{title}</h1><p className="mt-2 mb-6 text-sm text-chalk-muted">{subtitle}</p>{children}</div></div>;
 }
