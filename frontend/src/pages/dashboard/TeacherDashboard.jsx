@@ -8,13 +8,14 @@ import { getTeacherClassRecords } from "../../api/classRecords";
 const formatDate = (v) => new Date(v).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 const formatTime = (v) => new Date(v).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 const getEndTime = (start, minutes) => { const d = new Date(start); d.setMinutes(d.getMinutes() + minutes); return formatTime(d); };
-const isUpcoming = (b) => new Date(b.scheduled_at) > new Date() && b.status === "confirmed";
+const isUpcoming = (b, now = new Date()) => new Date(b.scheduled_at) > now && b.status === "confirmed";
 const isSameDay = (v) => { const d = new Date(v), t = new Date(); return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate(); };
 
 export default function TeacherDashboard() {
   const navigate = useNavigate();
   const [bookings, setBookings] = useState([]), [classRecords, setClassRecords] = useState([]), [profile, setProfile] = useState(null), [loading, setLoading] = useState(true), [error, setError] = useState(""), [profileError, setProfileError] = useState("");
   const [joiningBookingId, setJoiningBookingId] = useState(null);
+  const [clockNow, setClockNow] = useState(Date.now());
   const load = async () => {
     setLoading(true); setError(""); setProfileError("");
     getMyBookings()
@@ -29,7 +30,8 @@ export default function TeacherDashboard() {
       .catch(() => {});
   };
   useEffect(() => { load(); }, []);
-  const upcoming = useMemo(() => bookings.filter(isUpcoming).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [bookings]);
+  useEffect(() => { const interval = setInterval(() => setClockNow(Date.now()), 15000); return () => clearInterval(interval); }, []);
+  const upcoming = useMemo(() => bookings.filter((b) => isUpcoming(b, new Date(clockNow))).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [bookings, clockNow]);
   const today = useMemo(() => bookings.filter((b) => isSameDay(b.scheduled_at)).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [bookings]);
   const completed = useMemo(() => classRecords.filter((r) => r.status === "completed"), [classRecords]);
   const join = async (booking) => { if (joiningBookingId) return; setJoiningBookingId(booking.id); setError(""); try { const session = await getBookingSession(booking.id); navigate(`/classroom/${session.id}`); } catch (e) { setError(e.response?.data?.detail || "This classroom is not ready yet."); } finally { setJoiningBookingId(null); } };
@@ -44,4 +46,4 @@ export default function TeacherDashboard() {
 function SectionTitle({ title, subtitle }) { return <div><h2 className="text-xl font-semibold tracking-tight">{title}</h2><p className="mt-1 text-sm text-chalk-muted">{subtitle}</p></div>; }
 function Stat({ label, value }) { return <div className="rounded-2xl border border-chalk-faint bg-panel p-4 shadow-sm transition hover:border-chalk-muted/30 sm:p-5"><p className="text-xs font-medium uppercase tracking-wide text-chalk-muted">{label}</p><p className="mt-2 text-2xl font-semibold sm:text-3xl">{value}</p></div>; }
 function Empty({ text }) { return <div className="rounded-2xl border border-dashed border-chalk-faint bg-panel/60 p-7 sm:p-8"><p className="text-sm text-chalk-muted">{text}</p></div>; }
-function BookingCard({ booking, onJoin, joining }) { return <article className="rounded-2xl border border-chalk-faint bg-panel p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-chalk-muted/30 hover:shadow-lg sm:p-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-semibold">{booking.subject_name}</h3>{booking.teacher_assignment_status === "assigned" && <span className="rounded-full bg-green-500/10 px-2.5 py-1 text-[11px] font-medium text-green-400">Assigned</span>}</div><p className="mt-2 text-sm text-chalk-muted">Student: {booking.student_name}</p><p className="mt-1 text-sm text-chalk-muted">{formatDate(booking.scheduled_at)} · {formatTime(booking.scheduled_at)} – {getEndTime(booking.scheduled_at, booking.duration_minutes)}</p></div><div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end"><span className="rounded-full bg-green-500/10 px-3 py-1.5 text-xs font-medium capitalize text-green-400">{booking.status}</span><button disabled={!!joining} onClick={() => onJoin(booking)} className="min-w-32 rounded-lg bg-brand-red px-4 py-2.5 text-xs font-semibold transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60">{joining ? "Opening…" : "Join classroom"}</button></div></div></article>; }
+function BookingCard({ booking, onJoin, joining }) { const joinLocked = booking.status !== "confirmed" || Date.now() < new Date(booking.scheduled_at).getTime() - 5 * 60 * 1000; return <article className="rounded-2xl border border-chalk-faint bg-panel p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-chalk-muted/30 hover:shadow-lg sm:p-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-semibold">{booking.subject_name}</h3>{booking.teacher_assignment_status === "assigned" && <span className="rounded-full bg-green-500/10 px-2.5 py-1 text-[11px] font-medium text-green-400">Assigned</span>}</div><p className="mt-2 text-sm text-chalk-muted">Student: {booking.student_name}</p><p className="mt-1 text-sm text-chalk-muted">{formatDate(booking.scheduled_at)} · {formatTime(booking.scheduled_at)} – {getEndTime(booking.scheduled_at, booking.duration_minutes)}</p></div><div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end"><span className="rounded-full bg-green-500/10 px-3 py-1.5 text-xs font-medium capitalize text-green-400">{booking.status}</span><button disabled={!!joining || joinLocked} onClick={() => onJoin(booking)} className="min-w-32 rounded-lg bg-brand-red px-4 py-2.5 text-xs font-semibold transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60">{joining ? "Opening…" : "Join classroom"}</button></div></div></article>; }
