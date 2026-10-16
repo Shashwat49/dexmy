@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import json
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -95,6 +98,39 @@ def _finish_delivery(db, delivery_id, *, sent: bool, error: str | None = None):
 
 
 def _send_email(recipient: str, subject: str, plain_text: str, html_body: str):
+    # Prefer HTTPS delivery on Railway plans where outbound SMTP is disabled.
+    if settings.RESEND_API_KEY:
+        sender = settings.RESEND_FROM_EMAIL.strip() or formataddr(
+            (settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL)
+        )
+        payload = json.dumps({
+            "from": sender, "to": [recipient], "subject": subject,
+            "text": plain_text, "html": html_body,
+        }).encode("utf-8")
+        request = UrlRequest(
+            "https://api.resend.com/emails", data=payload,
+            headers={
+                "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                "Content-Type": "application/json", "User-Agent": "Dexmy/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=20) as response:
+                if response.status < 200 or response.status >= 300:
+                    raise RuntimeError(f"Resend email API returned HTTP {response.status}")
+                return
+        except HTTPError as exc:
+            detail = exc.read(1000).decode("utf-8", errors="replace")
+            logger.error("Resend reminder API rejected delivery (HTTP %s): %s", exc.code, detail)
+            raise RuntimeError(f"Resend email API rejected delivery (HTTP {exc.code})") from exc
+        except URLError as exc:
+            logger.error("Unable to reach the Resend email API: %s", exc.reason)
+            raise RuntimeError("Unable to reach the Resend email API") from exc
+
+    if not settings.SMTP_PASSWORD:
+        raise RuntimeError("Configure RESEND_API_KEY for Railway email delivery; SMTP_PASSWORD alone cannot bypass Railway SMTP restrictions")
+
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
