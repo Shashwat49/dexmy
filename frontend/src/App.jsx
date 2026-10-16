@@ -46,6 +46,10 @@ const CourseDetails = lazy(() => import("./pages/dashboard/CourseDetails"));
 const Packages = lazy(() => import("./pages/Packages"));
 const PackageCheckout = lazy(() => import("./pages/dashboard/PackageCheckout"));
 const Classroom = lazy(() => import("./pages/ClassroomMediaGuard"));
+const AccountSecurity = lazy(() => import("./pages/dashboard/AccountSecurity"));
+const ForgotPassword = lazy(() => import("./pages/dashboard/AccountSecurity").then((module) => ({ default: module.ForgotPassword })));
+const ResetPassword = lazy(() => import("./pages/dashboard/AccountSecurity").then((module) => ({ default: module.ResetPassword })));
+const ConfirmEmailChange = lazy(() => import("./pages/dashboard/AccountSecurity").then((module) => ({ default: module.ConfirmEmailChange })));
 
 // Task 3: Test Creator & Student Tests
 const TestCreatorDashboard = lazy(() => import("./pages/dashboard/test-creator/TestCreatorDashboard"));
@@ -109,12 +113,16 @@ export default function App() {
         {/* Normal user authentication */}
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/confirm-email-change" element={<ConfirmEmailChange />} />
 
         {/* Separate restricted authentication portals for internal roles */}
         <Route path="/admin/signin" element={<PortalLogin portal="admin" />} />
         <Route path="/test-creator/signin" element={<PortalLogin portal="testCreator" />} />
 
         <Route path="/dashboard" element={<ProtectedRoute><DashboardRedirect /></ProtectedRoute>} />
+        <Route path="/dashboard/account-security" element={<ProtectedRoute roles={["student", "teacher", "parent"]}><AccountSecurity /></ProtectedRoute>} />
         <Route path="/classroom/:sessionId" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
         <Route path="/classroom" element={<ProtectedRoute roles={["teacher", "student"]}><Classroom /></ProtectedRoute>} />
         <Route path="/dashboard/teacher" element={<ProtectedRoute roles={["teacher"]}><TeacherProfileGuard><TeacherDashboard /></TeacherProfileGuard></ProtectedRoute>} />
