@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import DashboardLayout from "../../components/dashboard/DashboardLayout";
-import { requestEmailChange, changePhoneNumber } from "../../api/accountSecurity";
+import { requestPasswordRecovery, resetPassword, confirmEmailChange, requestEmailChange, changePhoneNumber } from "../../api/accountSecurity";
 
 const INPUT = "mt-1.5 w-full rounded-xl border border-chalk-faint bg-panel-2 px-3.5 py-3 text-sm text-chalk outline-none focus:border-brand-gold";
 const BUTTON = "rounded-xl bg-brand-red px-5 py-3 text-sm font-semibold transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60";
@@ -155,7 +155,7 @@ export function ResetPassword() {
 export function ConfirmEmailChange() {
   const token = new URLSearchParams(window.location.search).get("token") || "";
   const [state, setState] = useState({ busy: true, message: "", error: "" });
-  useState(() => {
+  useEffect(() => {
     let active = true;
     if (!token) { setState({ busy: false, message: "", error: "Confirmation token is missing." }); return () => { active = false; }; }
     confirmEmailChange(token).then((result) => {
@@ -164,7 +164,7 @@ export function ConfirmEmailChange() {
       if (active) setState({ busy: false, message: "", error: err.response?.data?.detail || "This confirmation link is invalid or expired." });
     });
     return () => { active = false; };
-  });
+  }, [token]);
   return <AuthShell title="Confirm email address" subtitle="Finish updating your Dexmy sign-in email.">
     {state.busy ? <p className="text-sm text-chalk-muted">Verifying your link…</p> : state.error ? <p role="alert" className="text-sm text-brand-red">{state.error}</p> : <p role="status" className="text-sm text-green-400">{state.message}</p>}
     <p className="mt-5 text-sm text-chalk-muted"><Link to="/login" className="text-brand-gold hover:underline">Go to login</Link></p>
