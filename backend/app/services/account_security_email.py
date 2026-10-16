@@ -4,6 +4,9 @@ import hashlib
 import logging
 import secrets
 import smtplib
+import json
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -63,8 +66,39 @@ def find_valid_action_token(db: Session, token: str, purpose: str):
 
 
 def send_account_email(recipient: str, subject: str, plain_text: str, html_body: str) -> None:
+    # Railway Hobby/Trial/Free blocks outbound SMTP. Prefer Resend's HTTPS API
+    # whenever configured; HTTPS egress works without upgrading Railway.
+    if settings.RESEND_API_KEY:
+        sender = settings.RESEND_FROM_EMAIL.strip() or formataddr(
+            (settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL)
+        )
+        payload = json.dumps({
+            "from": sender, "to": [recipient], "subject": subject,
+            "text": plain_text, "html": html_body,
+        }).encode("utf-8")
+        request = UrlRequest(
+            "https://api.resend.com/emails", data=payload,
+            headers={
+                "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                "Content-Type": "application/json", "User-Agent": "Dexmy/1.0",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=20) as response:
+                if response.status < 200 or response.status >= 300:
+                    raise RuntimeError(f"Resend email API returned HTTP {response.status}")
+                return
+        except HTTPError as exc:
+            detail = exc.read(1000).decode("utf-8", errors="replace")
+            logger.error("Resend email API rejected delivery (HTTP %s): %s", exc.code, detail)
+            raise RuntimeError(f"Resend email API rejected delivery (HTTP {exc.code})") from exc
+        except URLError as exc:
+            logger.error("Unable to reach the Resend email API: %s", exc.reason)
+            raise RuntimeError("Unable to reach the Resend email API") from exc
+
     if not settings.SMTP_PASSWORD:
-        raise RuntimeError("SMTP_PASSWORD is not configured for account security emails")
+        raise RuntimeError("Configure RESEND_API_KEY for Railway email delivery; SMTP_PASSWORD alone cannot bypass Railway SMTP restrictions")
 
     message = EmailMessage()
     message["Subject"] = subject
