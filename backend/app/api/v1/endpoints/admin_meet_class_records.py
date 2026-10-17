@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from app.core.dependencies import get_current_admin
 from app.db.session import get_db
@@ -11,10 +11,7 @@ from app.schemas.external_class_record import ExternalClassRecordRead
 router = APIRouter()
 
 
-def _record_read(record: ExternalClassRecord, db: Session) -> ExternalClassRecordRead:
-    student = db.get(User, record.student_id)
-    teacher = db.get(User, record.teacher_id)
-    admin = db.get(User, record.created_by_admin_id) if record.created_by_admin_id else None
+def _record_read(record: ExternalClassRecord, student: User | None, teacher: User | None, admin: User | None) -> ExternalClassRecordRead:
     return ExternalClassRecordRead(
         id=record.id,
         student_id=record.student_id,
@@ -43,8 +40,22 @@ def list_meet_class_records(
     current_user: User = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    records = db.scalars(
-        select(ExternalClassRecord)
+    # Join user details in one query instead of issuing up to three additional
+    # database queries per record. The old N+1 pattern made this endpoint take
+    # 20+ seconds for the admin portal to load.
+    student_user = aliased(User)
+    teacher_user = aliased(User)
+    admin_user = aliased(User)
+
+    rows = db.execute(
+        select(ExternalClassRecord, student_user, teacher_user, admin_user)
+        .outerjoin(student_user, student_user.id == ExternalClassRecord.student_id)
+        .outerjoin(teacher_user, teacher_user.id == ExternalClassRecord.teacher_id)
+        .outerjoin(admin_user, admin_user.id == ExternalClassRecord.created_by_admin_id)
         .order_by(ExternalClassRecord.started_at.desc())
     ).all()
-    return [_record_read(record, db) for record in records]
+
+    return [
+        _record_read(record, student, teacher, admin)
+        for record, student, teacher, admin in rows
+    ]
