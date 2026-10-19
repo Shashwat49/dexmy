@@ -70,3 +70,18 @@ def test_schedule_request_rejects_start_times_not_on_five_minute_increments():
             weekdays=[1],
             class_count=1,
         )
+
+
+
+@pytest.mark.parametrize("start_time", ["00:00", "06:30", "18:25", "23:55"])
+def test_schedule_request_accepts_times_across_full_day(start_time):
+    payload = ScheduleRequest(
+        student_package_id="00000000-0000-0000-0000-000000000001",
+        subject_id=1,
+        teacher_id="00000000-0000-0000-0000-000000000002",
+        start_date=(datetime.now(IST).date() + timedelta(days=1)).isoformat(),
+        start_time=start_time,
+        weekdays=[1],
+        class_count=1,
+    )
+    assert payload.start_time.strftime("%H:%M") == start_time
