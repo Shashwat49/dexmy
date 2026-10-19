@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
-from app.core.constants import BOOKING_END_HOUR, BOOKING_START_HOUR, CLASS_DURATION_MINUTES, SLOT_DURATION_MINUTES
+from app.core.constants import CLASS_DURATION_MINUTES, SLOT_DURATION_MINUTES
 from app.core.dependencies import get_current_admin
 from app.db.session import get_db
 from app.models.booking import Booking, BookingStatus, TeacherAssignmentStatus
@@ -47,11 +47,11 @@ class ScheduleRequest(BaseModel):
 
     @field_validator("start_time")
     @classmethod
-    def validate_hourly_start(cls, value: time) -> time:
-        if value.minute != 0 or value.second != 0 or value.microsecond != 0:
-            raise ValueError("Classes must start on the hour to match Dexmy's existing slot system.")
-        if not BOOKING_START_HOUR <= value.hour < BOOKING_END_HOUR:
-            raise ValueError("Class start time must be between 10:00 AM and 9:00 PM IST.")
+    def validate_start_time(cls, value: time) -> time:
+        if value.second != 0 or value.microsecond != 0:
+            raise ValueError("Class start time must use whole-minute precision.")
+        if value.minute % 5 != 0:
+            raise ValueError("Choose a start time in 5-minute increments.")
         return value
 
 
