@@ -222,14 +222,12 @@ export default function AdminPackageSchedules() {
                   <input
                     required
                     type="time"
-                    min="10:00"
-                    max="21:00"
                     step="300"
                     className={inputClass}
                     value={form.start_time}
                     onChange={(e) => setField("start_time", e.target.value)}
                   />
-                  <span className="mt-1 block text-xs text-chalk-muted">Choose any start time from 10:00 AM to 9:00 PM, in 5-minute increments.</span>
+                  <span className="mt-1 block text-xs text-chalk-muted">Choose any time of day in 5-minute increments (24-hour range).</span>
                 </label>
                 <label className={labelClass}>Class duration
                   <select className={inputClass} value={form.duration_minutes} onChange={(e) => setField("duration_minutes", Number(e.target.value))}>
