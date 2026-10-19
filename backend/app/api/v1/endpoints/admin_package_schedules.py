@@ -50,10 +50,6 @@ class ScheduleRequest(BaseModel):
     def validate_start_time(cls, value: time) -> time:
         if value.second != 0 or value.microsecond != 0:
             raise ValueError("Class start time must use whole-minute precision.")
-        earliest = time(BOOKING_START_HOUR, 0)
-        latest = time(BOOKING_END_HOUR - 1, 0)
-        if not earliest <= value <= latest:
-            raise ValueError("Class start time must be between 10:00 AM and 9:00 PM IST.")
         if value.minute % 5 != 0:
             raise ValueError("Choose a start time in 5-minute increments.")
         return value
