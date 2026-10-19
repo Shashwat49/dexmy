@@ -219,13 +219,17 @@ export default function AdminPackageSchedules() {
                   <input required type="date" min={tomorrowLocal()} className={inputClass} value={form.start_date} onChange={(e) => setField("start_date", e.target.value)} />
                 </label>
                 <label className={labelClass}>Start time (IST)
-                  <select required className={inputClass} value={form.start_time} onChange={(e) => setField("start_time", e.target.value)}>
-                    {Array.from({ length: 12 }, (_, i) => i + 10).filter((hour) => hour < 22).map((hour) => {
-                      const value = `${String(hour).padStart(2, "0")}:00`;
-                      const label = new Date(`2000-01-01T${value}:00+05:30`).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" });
-                      return <option key={value} value={value}>{label}</option>;
-                    })}
-                  </select>
+                  <input
+                    required
+                    type="time"
+                    min="10:00"
+                    max="21:00"
+                    step="300"
+                    className={inputClass}
+                    value={form.start_time}
+                    onChange={(e) => setField("start_time", e.target.value)}
+                  />
+                  <span className="mt-1 block text-xs text-chalk-muted">Choose any start time from 10:00 AM to 9:00 PM, in 5-minute increments.</span>
                 </label>
                 <label className={labelClass}>Class duration
                   <select className={inputClass} value={form.duration_minutes} onChange={(e) => setField("duration_minutes", Number(e.target.value))}>
