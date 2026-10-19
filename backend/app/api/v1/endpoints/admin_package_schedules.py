@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
-from app.core.constants import BOOKING_END_HOUR, BOOKING_START_HOUR, CLASS_DURATION_MINUTES, SLOT_DURATION_MINUTES
+from app.core.constants import CLASS_DURATION_MINUTES, SLOT_DURATION_MINUTES
 from app.core.dependencies import get_current_admin
 from app.db.session import get_db
 from app.models.booking import Booking, BookingStatus, TeacherAssignmentStatus
