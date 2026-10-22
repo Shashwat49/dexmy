@@ -55,7 +55,6 @@ const ConfirmEmailChange = lazy(() => import("./pages/dashboard/AccountSecurity"
 const TestCreatorDashboard = lazy(() => import("./pages/dashboard/test-creator/TestCreatorDashboard"));
 const TestCreatorMyTests = lazy(() => import("./pages/dashboard/test-creator/Tests/MyTests"));
 const TestCreatorCreateExam = lazy(() => import("./pages/dashboard/test-creator/CreateExam"));
-const TestCreatorPdfImport = lazy(() => import("./pages/dashboard/test-creator/Tests/PdfTestImport"));
 const TestCreatorEditTest = lazy(() => import("./pages/dashboard/test-creator/Tests/EditTest"));
 const TestCreatorAddQuestions = lazy(() => import("./pages/dashboard/test-creator/Tests/AddTestQuestions"));
 const TestCreatorPreview = lazy(() => import("./pages/dashboard/test-creator/Tests/TestPreview"));
@@ -161,7 +160,6 @@ export default function App() {
         <Route path="/test-creator" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorDashboard /></ProtectedRoute>} />
         <Route path="/test-creator/tests" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorMyTests /></ProtectedRoute>} />
         <Route path="/test-creator/tests/create" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorCreateExam /></ProtectedRoute>} />
-        <Route path="/test-creator/tests/create-from-pdf" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorPdfImport /></ProtectedRoute>} />
         <Route path="/test-creator/tests/:testId/edit" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorEditTest /></ProtectedRoute>} />
         <Route path="/test-creator/tests/:testId/questions" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorAddQuestions /></ProtectedRoute>} />
         <Route path="/test-creator/tests/:testId/preview" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorPreview /></ProtectedRoute>} />
