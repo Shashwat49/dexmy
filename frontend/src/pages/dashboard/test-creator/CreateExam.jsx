@@ -53,7 +53,7 @@ function CreateExam() {
 
   const addOption = (questionIndex) => {
     setQuestions((current) => current.map((question, i) =>
-      i === questionIndex && question.options.length < 6
+      i === questionIndex && question.options.length < 5
         ? { ...question, options: [...question.options, ""] }
         : question
     ));
@@ -229,7 +229,7 @@ function CreateExam() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="font-semibold text-lg">2. Add questions</h2>
-                  <p className="mt-1 text-sm text-chalk-muted">Write your questions below and select the correct answer. Each question supports 2–6 options.</p>
+                  <p className="mt-1 text-sm text-chalk-muted">Write your questions below and select the correct answer. Each question supports 2–5 options.</p>
                 </div>
                 <button type="button" onClick={() => setQuestions((current) => [...current, emptyQuestion()])} className={`${buttonClass} border border-brand-gold/40 text-brand-gold hover:bg-brand-gold/10`}>
                   <PlusIcon size={15} /> Add question
