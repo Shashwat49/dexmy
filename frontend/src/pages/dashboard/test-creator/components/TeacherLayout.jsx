@@ -2,15 +2,7 @@ import { useEffect, useState } from "react";
 import { logout as logoutApi } from "../../../../api/auth";
 import { NavLink, Link, useNavigate, useLocation } from "react-router-dom";
 import {
-  DashboardIcon,
-  TestsIcon,
-  PlusIcon,
-  QuestionIcon,
-  AnalyticsIcon,
-  UserIcon,
-  LogoutIcon,
-  MenuIcon,
-  CloseIcon,
+  DashboardIcon, TestsIcon, PlusIcon, AnalyticsIcon, UserIcon, LogoutIcon, MenuIcon, CloseIcon,
 } from "./Icons";
 
 // --- Dexmy palette ---
@@ -35,13 +27,6 @@ const NAV_SECTIONS = [
       { path: "/test-creator", label: "Dashboard", Icon: DashboardIcon },
       { path: "/test-creator/tests/create", label: "Create Test", Icon: PlusIcon },
       { path: "/test-creator/tests", label: "My Tests", Icon: TestsIcon },
-    ],
-  },
-  {
-    label: "Question Bank",
-    items: [
-      { path: "/test-creator/questions", label: "Repository", Icon: QuestionIcon },
-      { path: "/test-creator/questions/add", label: "New Question", Icon: PlusIcon },
     ],
   },
   {
