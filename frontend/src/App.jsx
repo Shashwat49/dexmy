@@ -59,10 +59,6 @@ const TestCreatorEditTest = lazy(() => import("./pages/dashboard/test-creator/Te
 const TestCreatorAddQuestions = lazy(() => import("./pages/dashboard/test-creator/Tests/AddTestQuestions"));
 const TestCreatorPreview = lazy(() => import("./pages/dashboard/test-creator/Tests/TestPreview"));
 const TestCreatorResults = lazy(() => import("./pages/dashboard/test-creator/Questions/ReportPage/StudentsReport"));
-const TestCreatorAllQuestions = lazy(() => import("./pages/dashboard/test-creator/Questions/AllQuestions/AllQuestions"));
-const TestCreatorAddQuestion = lazy(() => import("./pages/dashboard/test-creator/Questions/Add Question/AddQuestion"));
-const TestCreatorEditQuestion = lazy(() => import("./pages/dashboard/test-creator/Questions/Edit/EditQuestion"));
-const TestCreatorQuestionPreview = lazy(() => import("./pages/dashboard/test-creator/Questions/Preview/QuestionPreview"));
 const StudentTests = lazy(() => import("./pages/dashboard/student/StudentTests"));
 
 const ADMIN_ROLES = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"];
