@@ -292,6 +292,13 @@ function MyTests() {
 
                       <div className="flex flex-wrap items-center gap-2">
                         <Link
+                          to={`/test-creator/tests/${testId}/questions/manage`}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-brand-gold/10 hover:bg-brand-gold/20 border border-brand-gold/30 text-brand-gold transition"
+                        >
+                          <span>Manage Questions</span>
+                        </Link>
+
+                        <Link
                           to={`/test-creator/tests/${testId}/preview`}
                           className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-panel-2 hover:bg-panel-3 border border-chalk-faint text-chalk transition"
                         >
