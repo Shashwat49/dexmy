@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import TeacherLayout from "./components/TeacherLayout";
-import { fetchWithAuth } from "./src/api";
-import { ArrowLeftIcon, PlusIcon, CloseIcon, CheckIcon } from "./components/Icons";
+import TeacherLayout from "../components/TeacherLayout";
+import { fetchWithAuth } from "../src/api";
+import { ArrowLeftIcon, PlusIcon, CloseIcon, CheckIcon } from "../components/Icons";
 
 const emptyQuestion = () => ({
   questionText: "",
