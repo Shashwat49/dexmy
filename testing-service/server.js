@@ -34,19 +34,6 @@ app.use("/api/tests", testRoutes);
 app.use("/api/test-creation", testRoutes);
 app.use("/api/test-submissions", testSubmissionRoutes);
 
-// Normalize upload and route errors so clients receive predictable JSON responses.
-app.use((error, req, res, next) => {
-  if (res.headersSent) return next(error);
-  if (error?.code === "LIMIT_FILE_SIZE") {
-    return res.status(413).json({ success: false, message: "The PDF must be 15 MB or smaller." });
-  }
-  if (error instanceof Error && /upload a PDF file/i.test(error.message)) {
-    return res.status(400).json({ success: false, message: error.message });
-  }
-  console.error("Testing service request error:", error?.message || "Unknown error");
-  return res.status(500).json({ success: false, message: "The request could not be processed." });
-});
-
 const getApiOverview = (req, res) => {
   res.json({
     success: true,
@@ -57,7 +44,6 @@ const getApiOverview = (req, res) => {
       tests: {
         listAll: "GET /api/tests",
         create: "POST /api/tests",
-        importPdf: "POST /api/tests/import-pdf (multipart field: pdf)",
         published: "GET /api/tests/published",
         getById: "GET /api/tests/:id",
         update: "PUT /api/tests/:id",
