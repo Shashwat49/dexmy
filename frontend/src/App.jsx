@@ -56,13 +56,8 @@ const TestCreatorDashboard = lazy(() => import("./pages/dashboard/test-creator/T
 const TestCreatorMyTests = lazy(() => import("./pages/dashboard/test-creator/Tests/MyTests"));
 const TestCreatorCreateExam = lazy(() => import("./pages/dashboard/test-creator/CreateExam"));
 const TestCreatorEditTest = lazy(() => import("./pages/dashboard/test-creator/Tests/EditTest"));
-const TestCreatorAddQuestions = lazy(() => import("./pages/dashboard/test-creator/Tests/AddTestQuestions"));
 const TestCreatorPreview = lazy(() => import("./pages/dashboard/test-creator/Tests/TestPreview"));
 const TestCreatorResults = lazy(() => import("./pages/dashboard/test-creator/Questions/ReportPage/StudentsReport"));
-const TestCreatorAllQuestions = lazy(() => import("./pages/dashboard/test-creator/Questions/AllQuestions/AllQuestions"));
-const TestCreatorAddQuestion = lazy(() => import("./pages/dashboard/test-creator/Questions/Add Question/AddQuestion"));
-const TestCreatorEditQuestion = lazy(() => import("./pages/dashboard/test-creator/Questions/Edit/EditQuestion"));
-const TestCreatorQuestionPreview = lazy(() => import("./pages/dashboard/test-creator/Questions/Preview/QuestionPreview"));
 const StudentTests = lazy(() => import("./pages/dashboard/student/StudentTests"));
 
 const ADMIN_ROLES = ["admin", "super_admin", "academic_manager", "teacher_manager", "finance_manager", "support_agent"];
@@ -161,14 +156,9 @@ export default function App() {
         <Route path="/test-creator/tests" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorMyTests /></ProtectedRoute>} />
         <Route path="/test-creator/tests/create" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorCreateExam /></ProtectedRoute>} />
         <Route path="/test-creator/tests/:testId/edit" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorEditTest /></ProtectedRoute>} />
-        <Route path="/test-creator/tests/:testId/questions" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorAddQuestions /></ProtectedRoute>} />
         <Route path="/test-creator/tests/:testId/preview" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorPreview /></ProtectedRoute>} />
         <Route path="/test-creator/tests/:testId/results" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorResults /></ProtectedRoute>} />
         <Route path="/test-creator/results" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorResults /></ProtectedRoute>} />
-        <Route path="/test-creator/questions" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorAllQuestions /></ProtectedRoute>} />
-        <Route path="/test-creator/questions/add" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorAddQuestion /></ProtectedRoute>} />
-        <Route path="/test-creator/questions/:id/edit" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorEditQuestion /></ProtectedRoute>} />
-        <Route path="/test-creator/questions/:id/preview" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorQuestionPreview /></ProtectedRoute>} />
 
         {/* Task 3: Student Tests Routes */}
         <Route path="/tests" element={<ProtectedRoute><RestrictedStudentTests /></ProtectedRoute>} />

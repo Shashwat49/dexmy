@@ -56,7 +56,6 @@ function TestCreatorDashboard() {
         setMessage("");
 
         let tests = [];
-        let questions = [];
 
         try {
           const testRes = await fetchWithAuth("/api/tests");
@@ -74,15 +73,6 @@ function TestCreatorDashboard() {
           console.warn("Tests fetch error, falling back:", e.message);
         }
 
-        try {
-          const qRes = await fetchWithAuth("/api/questions");
-          if (qRes.ok) {
-            const qData = await qRes.json();
-            questions = qData.questions || [];
-          }
-        } catch (e) {
-          console.warn("Questions fetch error:", e.message);
-        }
 
         setExams(tests);
         const publishedExams = tests.filter(
@@ -91,7 +81,7 @@ function TestCreatorDashboard() {
 
         setStats({
           totalExams: tests.length,
-          totalQuestions: questions.length,
+          totalQuestions: tests.reduce((sum, test) => sum + Number(test.totalQuestions || test.total_questions || test.questions?.length || 0), 0),
           publishedExams: publishedExams.length,
           draftExams: Math.max(0, tests.length - publishedExams.length),
         });
@@ -156,7 +146,7 @@ function TestCreatorDashboard() {
 
             <div className="rounded-2xl border border-chalk-faint bg-panel p-5 hover:border-chalk-muted/30 transition">
               <div className="flex items-center justify-between">
-                <p className="text-xs sm:text-sm font-medium text-chalk-muted">Question Bank</p>
+                <p className="text-xs sm:text-sm font-medium text-chalk-muted">Questions in Tests</p>
                 <span className="w-8 h-8 rounded-lg bg-brand-gold-soft text-brand-gold flex items-center justify-center">
                   <QuestionIcon size={16} />
                 </span>
@@ -164,7 +154,7 @@ function TestCreatorDashboard() {
               <p className="mt-2 text-2xl sm:text-3xl font-semibold text-chalk">
                 {loading ? "…" : stats.totalQuestions}
               </p>
-              <p className="mt-2 text-xs text-chalk-muted/70">Questions in repository</p>
+              <p className="mt-2 text-xs text-chalk-muted/70">Questions attached to your tests</p>
             </div>
 
             <div className="rounded-2xl border border-chalk-faint bg-panel p-5 hover:border-chalk-muted/30 transition">
@@ -274,12 +264,6 @@ function TestCreatorDashboard() {
 
                         <div className="flex items-center gap-2 shrink-0">
                           <Link
-                            to={`/test-creator/tests/${testId}/questions`}
-                            className="px-3 py-1.5 rounded-lg bg-panel-2 hover:bg-panel-3 border border-chalk-faint text-xs font-medium text-chalk transition"
-                          >
-                            Questions
-                          </Link>
-                          <Link
                             to={`/test-creator/tests/${testId}/preview`}
                             className="px-3 py-1.5 rounded-lg bg-panel-2 hover:bg-panel-3 border border-chalk-faint text-xs font-medium text-chalk transition"
                           >
@@ -316,19 +300,6 @@ function TestCreatorDashboard() {
                     <div>
                       <p className="text-sm font-semibold text-chalk">Create New Test</p>
                       <p className="text-xs text-chalk-muted">Draft a new mock test</p>
-                    </div>
-                  </Link>
-
-                  <Link
-                    to="/test-creator/questions/add"
-                    className="flex items-center gap-3.5 p-3.5 rounded-xl border border-chalk-faint bg-panel-2/60 hover:bg-panel-2 hover:border-chalk-muted/30 transition group"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-brand-gold-soft text-brand-gold flex items-center justify-center shrink-0">
-                      <QuestionIcon size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-chalk">Add Question</p>
-                      <p className="text-xs text-chalk-muted">Expand your question bank</p>
                     </div>
                   </Link>
 
