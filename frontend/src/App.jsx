@@ -161,10 +161,6 @@ export default function App() {
         <Route path="/test-creator/tests/:testId/preview" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorPreview /></ProtectedRoute>} />
         <Route path="/test-creator/tests/:testId/results" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorResults /></ProtectedRoute>} />
         <Route path="/test-creator/results" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorResults /></ProtectedRoute>} />
-        <Route path="/test-creator/questions" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorAllQuestions /></ProtectedRoute>} />
-        <Route path="/test-creator/questions/add" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorAddQuestion /></ProtectedRoute>} />
-        <Route path="/test-creator/questions/:id/edit" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorEditQuestion /></ProtectedRoute>} />
-        <Route path="/test-creator/questions/:id/preview" element={<ProtectedRoute roles={TEST_CREATOR_ROLES}><TestCreatorQuestionPreview /></ProtectedRoute>} />
 
         {/* Task 3: Student Tests Routes */}
         <Route path="/tests" element={<ProtectedRoute><RestrictedStudentTests /></ProtectedRoute>} />
