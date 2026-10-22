@@ -9,14 +9,12 @@ const questionSchema = {
   properties: {
     questions: {
       type: "array",
-      minItems: 1,
-      maxItems: MAX_QUESTIONS,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
           questionText: { type: "string" },
-          options: { type: "array", minItems: 2, maxItems: 5, items: { type: "string" } },
+          options: { type: "array", items: { type: "string" } },
           correctAnswer: { type: ["integer", "null"] },
           answerSource: { type: "string", enum: ["provided", "ai_suggested", "needs_manual"] },
           explanation: { type: "string" },
@@ -28,7 +26,7 @@ const questionSchema = {
         required: ["questionText", "options", "correctAnswer", "answerSource", "explanation", "marks", "negativeMarks", "subject", "difficulty"],
       },
     },
-    notes: { type: "array", items: { type: "string" }, maxItems: 20 },
+    notes: { type: "array", items: { type: "string" } },
   },
   required: ["questions", "notes"],
 };
