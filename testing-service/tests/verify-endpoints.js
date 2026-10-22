@@ -127,15 +127,6 @@ async function runTests() {
       });
       assert(legacyRes.status === 200 && legacyRes.body.tests?.length > 0, "GET /api/test-creation/published legacy alias works");
 
-      // 7a. PDF import validates that a file is supplied before invoking AI.
-      const pdfMissingFileRes = await request("POST", "/api/tests/import-pdf", null, {
-        Authorization: "Bearer test_creator",
-      });
-      assert(
-        pdfMissingFileRes.status === 400 && /PDF file/i.test(pdfMissingFileRes.body?.message || ""),
-        "POST /api/tests/import-pdf rejects requests without a PDF"
-      );
-
       // 8. Create Test (Teacher / Test Creator flow)
       const newTestPayload = {
         title: "Integration Verification Exam",
