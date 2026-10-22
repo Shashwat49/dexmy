@@ -129,13 +129,22 @@ function MyTests() {
             </p>
           </div>
 
-          <Link
-            to="/test-creator/tests/create"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-red hover:bg-brand-red-dark px-4 sm:px-5 py-2.5 text-xs sm:text-sm font-semibold text-chalk transition shadow-sm self-start sm:self-auto"
-          >
-            <PlusIcon size={16} />
-            <span>Create Test</span>
-          </Link>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <Link
+              to="/test-creator/tests/create-from-pdf"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-brand-gold/40 bg-brand-gold-soft hover:bg-brand-gold/15 px-4 sm:px-5 py-2.5 text-xs sm:text-sm font-semibold text-brand-gold transition"
+            >
+              <span aria-hidden="true">PDF</span>
+              <span>Create from PDF</span>
+            </Link>
+            <Link
+              to="/test-creator/tests/create"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-red hover:bg-brand-red-dark px-4 sm:px-5 py-2.5 text-xs sm:text-sm font-semibold text-chalk transition shadow-sm"
+            >
+              <PlusIcon size={16} />
+              <span>Create Test</span>
+            </Link>
+          </div>
         </div>
 
         {/* Content */}
