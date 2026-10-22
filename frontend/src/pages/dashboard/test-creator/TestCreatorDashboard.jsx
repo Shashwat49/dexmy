@@ -264,12 +264,6 @@ function TestCreatorDashboard() {
 
                         <div className="flex items-center gap-2 shrink-0">
                           <Link
-                            to={`/test-creator/tests/${testId}/questions`}
-                            className="px-3 py-1.5 rounded-lg bg-panel-2 hover:bg-panel-3 border border-chalk-faint text-xs font-medium text-chalk transition"
-                          >
-                            Questions
-                          </Link>
-                          <Link
                             to={`/test-creator/tests/${testId}/preview`}
                             className="px-3 py-1.5 rounded-lg bg-panel-2 hover:bg-panel-3 border border-chalk-faint text-xs font-medium text-chalk transition"
                           >
@@ -306,19 +300,6 @@ function TestCreatorDashboard() {
                     <div>
                       <p className="text-sm font-semibold text-chalk">Create New Test</p>
                       <p className="text-xs text-chalk-muted">Draft a new mock test</p>
-                    </div>
-                  </Link>
-
-                  <Link
-                    to="/test-creator/questions/add"
-                    className="flex items-center gap-3.5 p-3.5 rounded-xl border border-chalk-faint bg-panel-2/60 hover:bg-panel-2 hover:border-chalk-muted/30 transition group"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-brand-gold-soft text-brand-gold flex items-center justify-center shrink-0">
-                      <QuestionIcon size={18} />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-chalk">Add Question</p>
-                      <p className="text-xs text-chalk-muted">Expand your question bank</p>
                     </div>
                   </Link>
 
