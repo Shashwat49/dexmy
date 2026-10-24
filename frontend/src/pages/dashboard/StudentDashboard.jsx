@@ -57,11 +57,18 @@ export default function StudentDashboard() {
   todayStart.setHours(0, 0, 0, 0);
   const dayAfterTomorrowStart = new Date(todayStart);
   dayAfterTomorrowStart.setDate(dayAfterTomorrowStart.getDate() + 2);
+  const isOngoing = (b) => {
+    const start = new Date(b.scheduled_at).getTime();
+    const end = start + Math.max(1, Number(b.duration_minutes) || 55) * 60 * 1000;
+    return ["confirmed", "in_progress", "ongoing"].includes(b.status) && start <= now.getTime() && end > now.getTime();
+  };
+  const ongoing = bookings.filter(isOngoing).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
+  const ongoingIds = new Set(ongoing.map((b) => b.id));
   const upcoming = bookings.filter((b) => {
     const scheduledAt = new Date(b.scheduled_at);
-    return b.status === "confirmed" && scheduledAt >= now && scheduledAt < dayAfterTomorrowStart;
+    return b.status === "confirmed" && !ongoingIds.has(b.id) && scheduledAt >= now && scheduledAt < dayAfterTomorrowStart;
   }).sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at));
-  const past = bookings.filter((b) => b.status === "completed" || b.status === "cancelled" || b.status === "no_show" || new Date(b.scheduled_at) < now).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
+  const past = bookings.filter((b) => !ongoingIds.has(b.id) && (b.status === "completed" || b.status === "cancelled" || b.status === "no_show" || new Date(b.scheduled_at) < now)).sort((a, b) => new Date(b.scheduled_at) - new Date(a.scheduled_at));
   const noShowCount = bookings.filter((b) => b.status === "no_show").length;
 
   async function handleJoin(booking) {
@@ -99,6 +106,7 @@ export default function StudentDashboard() {
       {error && <div className="mb-5 rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">{error}<button onClick={load} className="ml-3 underline">Retry</button></div>}
       {!dismissNoShowNotice && noShowCount > 0 && <div className="mb-5 flex items-start justify-between gap-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-100"><div><strong>No-show notice:</strong> {noShowCount === 1 ? "One class was marked as a no-show" : `${noShowCount} classes were marked as no-shows`} because the student did not join within 15 minutes. The package has been charged for {noShowCount === 1 ? "one class" : `${noShowCount} classes`}; the teacher was not credited for a completed class. See Past classes for details.</div><button type="button" aria-label="Dismiss no-show notice" onClick={() => setDismissNoShowNotice(true)} className="shrink-0 rounded px-2 py-1 text-amber-200 hover:bg-amber-400/10">×</button></div>}
 
+      {tab === "upcoming" && ongoing.length > 0 && <section className="mb-7"><div className="mb-3 flex items-center gap-2"><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-green-400" /><h2 className="text-lg font-semibold">Ongoing Classes</h2><span className="rounded-full bg-green-500/10 px-2.5 py-1 text-xs font-semibold text-green-400">{ongoing.length} live</span></div><p className="mb-4 text-sm text-chalk-muted">Classes currently within their scheduled time window. Join or return to your classroom.</p><div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">{ongoing.map((b) => <div key={b.id} className="relative"><span className="absolute right-3 top-3 z-10 rounded-full bg-green-500/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-green-400">Ongoing</span><ClassCard booking={b} otherPartyName={b.teacher_name} onJoin={handleJoin} /></div>)}</div></section>}
       {tab === "upcoming" && nextClass && <div className="bg-gradient-to-r from-panel-2 to-panel-3 border border-chalk-faint border-l-[3px] border-l-brand-gold rounded-xl px-6 py-5 flex items-center justify-between mb-7"><div><h3 className="text-base font-semibold mb-1">Your next class</h3><p className="text-[13.5px] text-chalk-muted">{nextClass.subject_name} with {nextClass.teacher_name}</p></div><button disabled={!!joiningBookingId || clockNow < new Date(nextClass.scheduled_at).getTime() - 5 * 60 * 1000} onClick={() => handleJoin(nextClass)} className="bg-brand-gold text-[#2C1E04] text-sm font-bold px-5 py-2.5 rounded-lg disabled:opacity-60">{joiningBookingId === nextClass.id ? "Opening…" : "Join classroom"}</button></div>}
 
       {loading ? <p className="text-chalk-muted text-sm">Loading your classes…</p> : <>
