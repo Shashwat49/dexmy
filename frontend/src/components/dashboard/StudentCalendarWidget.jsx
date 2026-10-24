@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { getMyBookings } from "../../api/bookings";
+import { useNavigate } from "react-router-dom";
+import { getBookingSession, getMyBookings } from "../../api/bookings";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -80,6 +81,7 @@ function getCalendarDays(monthDate) {
 }
 
 export default function StudentCalendarWidget() {
+  const navigate = useNavigate();
   const [currentMonth, setCurrentMonth] = useState(() => {
     const date = tomorrowDate();
     return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -89,6 +91,37 @@ export default function StudentCalendarWidget() {
   const [error, setError] = useState("");
   const [reloadKey, setReloadKey] = useState(0);
   const [selectedDate, setSelectedDate] = useState(() => tomorrowDate());
+  const [joiningBookingId, setJoiningBookingId] = useState(null);
+  const [joinError, setJoinError] = useState("");
+  const [clockNow, setClockNow] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setClockNow(Date.now()), 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  function canJoinClass(booking) {
+    const status = statusOf(booking);
+    if (!["confirmed", "in_progress", "ongoing"].includes(status)) return false;
+    const start = new Date(booking.scheduled_at).getTime();
+    const end = start + Math.max(1, Number(booking.duration_minutes) || 55) * 60 * 1000;
+    return clockNow >= start - 5 * 60 * 1000 && clockNow < end;
+  }
+
+  async function joinClass(booking) {
+    if (!canJoinClass(booking) || joiningBookingId) return;
+    setJoiningBookingId(booking.id);
+    setJoinError("");
+    try {
+      const session = await getBookingSession(booking.id);
+      if (!session?.id) throw new Error("The classroom session is not ready yet.");
+      navigate(`/classroom/${session.id}`);
+    } catch (err) {
+      setJoinError(err.response?.data?.detail || err.message || "Unable to open this classroom. Please try again.");
+    } finally {
+      setJoiningBookingId(null);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -290,6 +323,8 @@ export default function StudentCalendarWidget() {
           </div>
         </div>
 
+        {joinError && <div role="alert" className="mt-6 rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">{joinError}<button type="button" onClick={() => setJoinError("")} className="ml-3 underline">Dismiss</button></div>}
+
         <section className="mt-8">
           <div className="mb-4">
             <h3 className="text-xl font-semibold">
@@ -337,10 +372,12 @@ export default function StudentCalendarWidget() {
                         </span>
                         <button
                           type="button"
-                          disabled
-                          className="rounded-xl bg-brand-red px-4 py-2 text-sm font-semibold opacity-50"
+                          onClick={() => joinClass(booking)}
+                          disabled={!canJoinClass(booking) || joiningBookingId !== null}
+                          className="rounded-xl bg-brand-red px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                          title={!canJoinClass(booking) ? "Join is available 5 minutes before class and during its scheduled duration." : "Join classroom"}
                         >
-                          Classroom
+                          {joiningBookingId === booking.id ? "Joining…" : canJoinClass(booking) ? "Join Class" : status === "completed" ? "Class Completed" : status === "cancelled" ? "Class Cancelled" : "Join Class"}
                         </button>
                       </div>
                     </div>
