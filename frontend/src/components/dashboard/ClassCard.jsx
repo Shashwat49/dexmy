@@ -20,7 +20,7 @@ const initials = (name) =>
 function getJoinState(booking) {
   if (booking.status === "completed") return { canJoin: false, label: "Class completed" };
   if (booking.status === "cancelled") return { canJoin: false, label: "Class cancelled" };
-  if (booking.status !== "confirmed") return { canJoin: false, label: "Awaiting payment" };
+  if (!["confirmed", "in_progress", "ongoing"].includes(booking.status)) return { canJoin: false, label: "Awaiting payment" };
   if (Date.now() < new Date(booking.scheduled_at).getTime() - 5 * 60 * 1000) return { canJoin: false, label: "Join class" };
   return { canJoin: true, label: "Join class" };
 }
