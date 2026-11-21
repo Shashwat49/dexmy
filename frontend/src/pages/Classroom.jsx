@@ -108,6 +108,7 @@ const detachMedia = (track, publication) => {
 const W = 1600, H = 900;
 const CONTROL_TOPIC = "dexmy-classroom-control";
 const LIVE_TOPIC = "dexmy-whiteboard-live";
+const CHAT_TOPIC = "dexmy-classroom-chat";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const whiteboardGeometry = (stroke) => {
@@ -298,6 +299,13 @@ export default function Classroom() {
   const localStrokeEditGenerationRef = useRef(new Map());
   const whiteboardActionEditVersionRef = useRef(new Map());
   const seenWhiteboardActionIdsRef = useRef(new Set()), deletedStrokeIdsRef = useRef(new Set());
+  const undoHistoryRef = useRef([]);
+  const undoHistoryIdsRef = useRef(new Set());
+  const pendingSlideIdsRef = useRef(new Set());
+  const confirmedPageIdsRef = useRef(new Set());
+  const deletedPageIdsRef = useRef(new Set());
+  const slidePersistenceQueueRef = useRef(Promise.resolve());
+  const chatMessageIdsRef = useRef(new Set());
   const micStateRef = useRef(false);
   const cameraStateRef = useRef(false);
   const gridRef = useRef(false);
@@ -324,6 +332,17 @@ export default function Classroom() {
   const enterClassroom = () => { previewStreamRef.current?.getTracks().forEach((track) => track.stop()); previewStreamRef.current = null; setHasEntered(true); };
   const wsUrl = useMemo(() => { const base = import.meta.env.VITE_API_BASE_URL; if (!base || !sessionId) return null; const url = new URL(base); url.protocol = url.protocol === "https:" ? "wss:" : "ws:"; return `${url.origin}/ws/classroom/${sessionId}`; }, [sessionId]);
   const canAnnotate = isTeacher || permissions.annotate;
+  const recordUndoEntry = (entry) => {
+    const id = entry.action_id || `${entry.kind}:${entry.page_id}:${entry.stroke?.id || entry.strokes?.map((item) => item.stroke?.id).join(",")}`;
+    if (!id || undoHistoryIdsRef.current.has(id)) return;
+    undoHistoryIdsRef.current.add(id);
+    undoHistoryRef.current.push({ ...entry, id });
+  };
+  const removeUndoEntry = (id) => {
+    if (!id) return;
+    const index = undoHistoryRef.current.findIndex((entry) => entry.id === id);
+    if (index >= 0) undoHistoryRef.current.splice(index, 1);
+  };
   useEffect(() => { slidesRef.current = slides; }, [slides]); useEffect(() => { slideRef.current = slide; }, [slide]);
   useEffect(() => { gridRef.current = grid; }, [grid]);
   useEffect(() => {
@@ -354,17 +373,84 @@ export default function Classroom() {
   useEffect(() => { if (!deadline) return; const tick = () => setTimer(Math.max(0, Math.floor((new Date(deadline).getTime() - Date.now()) / 1000))); tick(); const id = setInterval(tick, 1000); return () => clearInterval(id); }, [deadline]);
   useEffect(() => { let active = true; api.get(`/classroom/sessions/${sessionId}`).then(({ data }) => { if (!active) return; if (["ended", "cancelled"].includes(String(data.status || "").toLowerCase())) { classFinalizedRef.current = true; setEnding(true); if (String(data.booking_status || "").toLowerCase() === "completed") { setShowReview(true); api.get(`/classroom/sessions/${sessionId}/notes`).then((r) => setNotesUrl(r.data.pdf_url)).catch(() => { }); } else { navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"); } return; } setClassTitle(data.subject_name || "Class"); }).catch(() => { }); return () => { active = false; }; }, [sessionId, isTeacher, navigate]);
   useEffect(() => { if (!sessionId || !hasEntered) return; const state = { dexmyClassroom: true, sessionId }; window.history.pushState(state, "", window.location.href); const onPopState = () => { window.history.pushState(state, "", window.location.href); setNotice("Browser Back is disabled in the classroom. Use the class review to return to your dashboard."); }; window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, [sessionId, hasEntered]);
+  useEffect(() => {
+    if (!hasEntered) return;
+    const preventContextMenu = (event) => event.preventDefault();
+    const preventSelectionAndKeys = (event) => {
+      if (event.type === "selectstart") event.preventDefault();
+      if (event.type !== "keydown") return;
+      const key = event.key.toUpperCase();
+      if (
+        event.key === "F12" ||
+        (event.ctrlKey && event.shiftKey && ["I", "J", "C"].includes(key)) ||
+        (event.ctrlKey && key === "U")
+      ) event.preventDefault();
+    };
+    document.addEventListener("contextmenu", preventContextMenu);
+    document.addEventListener("selectstart", preventSelectionAndKeys);
+    document.addEventListener("keydown", preventSelectionAndKeys);
+    return () => {
+      document.removeEventListener("contextmenu", preventContextMenu);
+      document.removeEventListener("selectstart", preventSelectionAndKeys);
+      document.removeEventListener("keydown", preventSelectionAndKeys);
+    };
+  }, [hasEntered]);
   // Refreshing or closing the tab must not end a class. The classroom WebSocket
   // disconnect/reconnect lifecycle pauses and resumes the session timer; only
   // the explicit End class action finalizes the session.
 
   useEffect(() => { const root = document.querySelector(".dexmy-classroom-shell"); const toolbar = root?.querySelector("main section > div:first-child"); if (!toolbar) return; toolbar.classList.add("classroom-toolbar"); let dragging = false, startX = 0, startY = 0, originX = 0, originY = 0; const onDown = (event) => { if (event.target.closest("button,input,label")) return; dragging = true; toolbar.classList.add("is-dragging"); startX = event.clientX; startY = event.clientY; const r = toolbar.getBoundingClientRect(); originX = r.left; originY = r.top; toolbar.setPointerCapture?.(event.pointerId); }; const onMove = (event) => { if (!dragging) return; const x = clamp(originX + event.clientX - startX, 8, window.innerWidth - toolbar.offsetWidth - 8); const y = clamp(originY + event.clientY - startY, 58, window.innerHeight - toolbar.offsetHeight - 8); toolbar.style.left = `${x}px`; toolbar.style.top = `${y}px`; }; const onUp = () => { dragging = false; toolbar.classList.remove("is-dragging"); }; toolbar.addEventListener("pointerdown", onDown); toolbar.addEventListener("pointermove", onMove); toolbar.addEventListener("pointerup", onUp); toolbar.addEventListener("pointercancel", onUp); return () => { toolbar.removeEventListener("pointerdown", onDown); toolbar.removeEventListener("pointermove", onMove); toolbar.removeEventListener("pointerup", onUp); toolbar.removeEventListener("pointercancel", onUp); }; }, []);
   const send = useCallback((payload) => { if (wsRef.current?.readyState !== WebSocket.OPEN) return false; try { wsRef.current.send(JSON.stringify(payload)); return true; } catch { return false; } }, []);
+  const rememberChatMessage = (messageId) => {
+    if (!messageId) return true;
+    if (chatMessageIdsRef.current.has(messageId)) return false;
+    chatMessageIdsRef.current.add(messageId);
+    if (chatMessageIdsRef.current.size > 500) chatMessageIdsRef.current.delete(chatMessageIdsRef.current.values().next().value);
+    return true;
+  };
+  const appendChatMessage = (msg) => {
+    if (!rememberChatMessage(msg.message_id)) return;
+    setChat((items) => [...items, {
+      mine: msg.sender_id === String(user?.id || ""),
+      text: msg.message_text || "",
+      file_url: msg.file_url,
+      file_name: msg.file_name,
+    }]);
+  };
+  const publishChatMessage = (payload) => {
+    const message = {
+      ...payload,
+      message_text: String(payload.message_text || "").slice(0, 4000),
+      message_id: payload.message_id || newId(),
+      sender_id: String(user?.id || ""),
+    };
+    rememberChatMessage(message.message_id);
+    const participant = roomRef.current?.localParticipant;
+    if (!participant || roomRef.current?.state !== "connected") {
+      return send({ type: "chat", ...message });
+    }
+    const encodedMessage = encoder.encode(JSON.stringify({ type: "classroom_chat", payload: message }));
+    if (encodedMessage.byteLength > 12 * 1024) return send({ type: "chat", ...message });
+    const fallbackToWebSocket = () => {
+      if (!send({ type: "chat", ...message })) setNotice("Chat could not be delivered. Please try again.");
+    };
+    try {
+      participant.publishData(
+        encodedMessage,
+        { reliable: true, topic: CHAT_TOPIC },
+      ).catch(fallbackToWebSocket);
+    } catch {
+      return send({ type: "chat", ...message });
+    }
+    return true;
+  };
   const sendWhiteboardQueue = useCallback(() => {
     const socket = wsRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     for (const [actionId, payload] of whiteboardQueueRef.current) {
       if (whiteboardSentOnSocketRef.current.has(actionId)) continue;
+      const pageId = payload.page_id || payload.stroke?.page_id;
+      if (pageId && pendingSlideIdsRef.current.has(pageId)) continue;
       try {
         socket.send(JSON.stringify({ type: "whiteboard_event", payload }));
         whiteboardSentOnSocketRef.current.add(actionId);
@@ -415,11 +501,23 @@ export default function Classroom() {
     const id = requestAnimationFrame(() => { redraw(); });
     return () => cancelAnimationFrame(id);
   }, [screen, redraw]);
-  const saveSnapshot = useCallback(() => { clearTimeout(snapshotTimerRef.current); snapshotTimerRef.current = setTimeout(() => { const pageNumber = slideRef.current; send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, page_id: currentPageId(pageNumber) }); }, 500); }, [send, strokesFor, currentPageId]);
+  const saveSnapshot = useCallback((requestedPageNumber, requestedPageId) => {
+    clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = setTimeout(() => {
+      const pageNumber = Number(requestedPageNumber) || slideRef.current;
+      const pageId = requestedPageId || currentPageId(pageNumber);
+      send({
+        type: "save_snapshot",
+        page_number: pageNumber,
+        canvas_json: { strokes: (strokesByPageRef.current.get(pageId) || []).map((stroke) => ({ ...stroke })) },
+        page_id: pageId,
+      });
+    }, 500);
+  }, [send, currentPageId]);
   const saveSnapshotNow = useCallback((pageNumber) => { clearTimeout(snapshotTimerRef.current); const imageBase64 = canvasRef.current?.toDataURL("image/png"); send({ type: "save_snapshot", page_number: pageNumber, canvas_json: { strokes: strokesFor(pageNumber).map((s) => ({ ...s })) }, image_base64: imageBase64, page_id: currentPageId(pageNumber) }); }, [send, strokesFor, currentPageId]);
   // Send transient strokes directly over LiveKit to avoid WebSocket/database
   // traffic delaying the live preview. Final edits still commit over the WebSocket.
-  const publishLive = useCallback((stroke, points, pageNumber, final = false, replace = false) => {
+  const publishLive = useCallback((stroke, points, pageNumber, final = false, replace = false, pageId = null) => {
     const room = roomRef.current;
     const participant = room?.localParticipant;
     if (!participant || room.state !== "connected" || !stroke?.id || !Array.isArray(points) || !points.length) return;
@@ -435,7 +533,7 @@ export default function Classroom() {
           points
         },
         page_number: pageNumber,
-        page_id: currentPageId(pageNumber),
+        page_id: pageId || currentPageId(pageNumber),
         final,
         replace,
         revision: stroke._whiteboard_revision || Date.now(),
@@ -474,8 +572,8 @@ export default function Classroom() {
         stroke: { id: stroke.id, tool: stroke.tool, color: stroke.color, width: stroke.width, text: stroke.text, _whiteboard_revision: stroke._whiteboard_revision || Date.now(), _whiteboard_base_revision: Number(stroke._whiteboard_base_revision ?? stroke._whiteboard_revision) || 0 },
         points: replace ? [...points] : (isShape ? [points[0], points[points.length - 1]] : [...points]),
         replace,
-        page_number: slideRef.current,
-        page_id: currentPageId(),
+        page_number: Number(stroke.page_number) || slideRef.current,
+        page_id: stroke.page_id || currentPageId(),
         final
       };
     }
@@ -495,7 +593,7 @@ export default function Classroom() {
     const points = pending.points.splice(0, pending.replace ? pending.points.length : 32);
     if (!points.length) return;
     if (isReplacementPreview) lastShapePreviewPublishedAtRef.current = now;
-    publishLive(pending.stroke, points, pending.page_number, pending.final && pending.points.length === 0, pending.replace);
+    publishLive(pending.stroke, points, pending.page_number, pending.final && pending.points.length === 0, pending.replace, pending.page_id);
     if (!pending.points.length) pendingLiveRef.current = null;
   }, [publishLive]);
 
@@ -513,22 +611,157 @@ export default function Classroom() {
     };
   }, [flushLive]);
   const point = (event, allowOutside = false) => { const r = canvasRef.current.getBoundingClientRect(); if (!r.width || !r.height) return null; const boardX = (event.clientX - r.left) * W / r.width; const boardY = (event.clientY - r.top) * H / r.height; const content = getSlideContentRect(); if (!allowOutside && (boardX < content.x || boardX > content.x + content.width || boardY < content.y || boardY > content.y + content.height)) return null; return { x: clamp((boardX - content.x) * W / content.width, 0, W), y: clamp((boardY - content.y) * H / content.height, 0, H) }; };
-  const onPointerDown = (event) => { if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you."); const p = point(event); if (!p) return; if (tool === "text") { const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p)); if (hit) { setTextDraft(hit.text || ""); setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id }); } else { setTextDraft(""); setTextModal({ x: p.x, y: p.y, strokeId: null }); } redraw(); return; } if (tool === "eraser") { const list = currentStrokes(); const hit = [...list].reverse().find(s => strokeHit(s, p)); if (!hit) return; strokesByPageRef.current.set(currentPageId(), list.filter(s => s.id !== hit.id)); liveRef.current.delete(hit.id); committedRef.current.delete(hit.id); deletedStrokeIdsRef.current.add(hit.id);  const action = { kind: "stroke_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: currentPageId() }; publishControl({ kind: "whiteboard_delete", stroke_id: hit.id, page_number: action.page_number, page_id: action.page_id }); queueWhiteboardAction(action); redraw(); setThumbnailVersion(v => v + 1); saveSnapshot(); return; } if (!DRAW_TOOLS.has(tool)) return; const ctx = canvasRef.current?.getContext("2d"); drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null; drawRef.current = { id: newId(), tool, color, width, points: [p], page_number: slideRef.current, page_id: currentPageId() }; canvasRef.current.setPointerCapture(event.pointerId); if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]); };
+  const onPointerDown = (event) => {
+    const pageId = currentPageId();
+    if (!canAnnotate) return setNotice("The teacher has not enabled annotation for you.");
+    const p = point(event);
+    if (!p) return;
+    if (tool === "text") {
+      const hit = [...currentStrokes()].reverse().find((stroke) => stroke.tool === "text" && strokeHit(stroke, p));
+      if (hit) {
+        setTextDraft(hit.text || "");
+        setTextModal({ x: hit.points[0].x, y: hit.points[0].y, strokeId: hit.id, page_number: slideRef.current, page_id: pageId });
+      } else {
+        setTextDraft("");
+        setTextModal({ x: p.x, y: p.y, strokeId: null, page_number: slideRef.current, page_id: pageId });
+      }
+      redraw();
+      return;
+    }
+    if (tool === "eraser") {
+      const list = currentStrokes();
+      const hit = [...list].reverse().find((stroke) => strokeHit(stroke, p));
+      if (!hit) return;
+      const index = list.findIndex((stroke) => stroke.id === hit.id);
+      const action = queueWhiteboardAction({ kind: "stroke_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: pageId });
+      recordUndoEntry({ kind: "delete", strokes: [{ stroke: { ...hit }, index }], page_number: slideRef.current, page_id: pageId, action_id: action.action_id });
+      strokesByPageRef.current.set(pageId, list.filter((stroke) => stroke.id !== hit.id));
+      liveRef.current.delete(hit.id);
+      committedRef.current.delete(hit.id);
+      deletedStrokeIdsRef.current.add(hit.id);
+      publishControl({ kind: "whiteboard_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: pageId, action_id: action.action_id });
+      redraw();
+      setThumbnailVersion((version) => version + 1);
+      saveSnapshot();
+      return;
+    }
+    if (!DRAW_TOOLS.has(tool)) return;
+    const ctx = canvasRef.current?.getContext("2d");
+    drawBaseRef.current = ctx?.getImageData(0, 0, W, H) || null;
+    drawRef.current = { id: newId(), tool, color, width, points: [p], page_number: slideRef.current, page_id: pageId };
+    canvasRef.current.setPointerCapture(event.pointerId);
+    if (["pen", "highlighter", "eraser"].includes(tool)) queueLive(drawRef.current, [p]);
+  };
   const onPointerMove = (event) => { const d = drawRef.current; if (!d) return; const nextPoint = point(event, true); if (!nextPoint) return; d.points.push(nextPoint); if (["pen", "highlighter", "eraser"].includes(d.tool)) { const n = d.points.length; renderStroke({ ...d, points: [d.points[n - 2], d.points[n - 1]] }); queueLive(d, [d.points[n - 1]]); } else { const ctx = canvasRef.current?.getContext("2d"); if (ctx && drawBaseRef.current) ctx.putImageData(drawBaseRef.current, 0, 0); renderStroke(d); queueLive(d, [d.points[0], d.points[d.points.length - 1]]); } };
-  const onPointerUp = (event) => { canvasRef.current?.releasePointerCapture?.(event.pointerId); const d = drawRef.current; drawRef.current = null; if (!d) return; const pageNumber = slideRef.current; const pageId = currentPageId(pageNumber); if (!["pen", "highlighter", "eraser"].includes(d.tool)) { if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0); queueLive(d, d.points, true); flushLive(true); } else { queueLive(d, [], true); flushLive(true); } renderStroke(d, true); drawBaseRef.current = null; queueWhiteboardAction({ kind: "stroke", stroke: d, page_number: pageNumber, page_id: pageId }); setThumbnailVersion((version) => version + 1); saveSnapshot(); };
-  const saveTextModal = () => { if (!textModal) return; const text = textDraft.trim(); if (!text) { setTextModal(null); setTextDraft(""); redraw(); return; } const list = currentStrokes(); let stroke; if (textModal.strokeId) { const index = list.findIndex((item) => item.id === textModal.strokeId); if (index >= 0) { stroke = { ...list[index], text }; list[index] = stroke; } } if (!stroke) { stroke = { id: newId(), tool: "text", color, width, text, points: [{ x: textModal.x, y: textModal.y }] }; list.push(stroke); } else if (textModal.strokeId) { const generation = Math.max(Number(localStrokeEditGenerationRef.current.get(stroke.id)) || 0, Number(stroke._whiteboard_edit_generation) || 0) + 1; localStrokeEditGenerationRef.current.set(stroke.id, generation); stroke = { ...stroke, _whiteboard_base_revision: Number(stroke._whiteboard_revision) || 0, _whiteboard_edit_generation: generation, _whiteboard_editor_id: String(user?.id || "") }; const index = list.findIndex((item) => item.id === stroke.id); if (index >= 0) list[index] = stroke; } queueLive(stroke, stroke.points, true, true); flushLive(true); const action = { kind: textModal.strokeId ? "stroke_update" : "stroke", stroke, page_number: slideRef.current, page_id: currentPageId() }; queueWhiteboardAction(action); setTextModal(null); setTextDraft(""); setThumbnailVersion((version) => version + 1); redraw(); saveSnapshot(); };
-  const changeSlide = (target) => { if (!isTeacher) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(currentPageId(next), strokesByPageRef.current.get(currentPageId(next)) || []); publishControl({ kind: "page", page_number: next, page_id: currentPageId(next) }); };
-  const addSlide = async () => {
-    if (!isTeacher) return;
+  const onPointerUp = (event) => {
+    canvasRef.current?.releasePointerCapture?.(event.pointerId);
+    const stroke = drawRef.current;
+    drawRef.current = null;
+    if (!stroke) return;
+    const pageNumber = Number(stroke.page_number) || slideRef.current;
+    const pageId = stroke.page_id || currentPageId(pageNumber);
+    if (!["pen", "highlighter", "eraser"].includes(stroke.tool)) {
+      if (drawBaseRef.current) canvasRef.current?.getContext("2d")?.putImageData(drawBaseRef.current, 0, 0);
+      queueLive(stroke, stroke.points, true);
+      flushLive(true);
+    } else {
+      queueLive(stroke, [], true);
+      flushLive(true);
+    }
+    const pageStrokes = strokesByPageRef.current.get(pageId) || [];
+    if (!pageStrokes.some((item) => item.id === stroke.id)) pageStrokes.push(stroke);
+    strokesByPageRef.current.set(pageId, pageStrokes);
+    if (pageId === currentPageId()) renderStroke(stroke);
+    else redraw();
+    drawBaseRef.current = null;
+    const action = queueWhiteboardAction({ kind: "stroke", stroke, page_number: pageNumber, page_id: pageId });
+    recordUndoEntry({ kind: "create", stroke: { ...stroke }, page_number: pageNumber, page_id: pageId, action_id: action.action_id });
+    setThumbnailVersion((version) => version + 1);
+    saveSnapshot(pageNumber, pageId);
+  };
+  const saveTextModal = () => {
+    if (!textModal) return;
+    const text = textDraft.trim();
+    if (!text) {
+      setTextModal(null);
+      setTextDraft("");
+      redraw();
+      return;
+    }
+    const pageNumber = Number(textModal.page_number) || slideRef.current;
+    const pageId = textModal.page_id || currentPageId(pageNumber);
+    const list = strokesByPageRef.current.get(pageId) || [];
+    let stroke;
+    let created = false;
+    if (textModal.strokeId) {
+      const index = list.findIndex((item) => item.id === textModal.strokeId);
+      if (index >= 0) {
+        stroke = { ...list[index], text, page_number: pageNumber, page_id: pageId };
+        list[index] = stroke;
+      }
+    }
+    if (!stroke) {
+      created = true;
+      stroke = { id: newId(), tool: "text", color, width, text, points: [{ x: textModal.x, y: textModal.y }], page_number: pageNumber, page_id: pageId };
+      list.push(stroke);
+    } else if (textModal.strokeId) {
+      const generation = Math.max(Number(localStrokeEditGenerationRef.current.get(stroke.id)) || 0, Number(stroke._whiteboard_edit_generation) || 0) + 1;
+      localStrokeEditGenerationRef.current.set(stroke.id, generation);
+      stroke = { ...stroke, _whiteboard_base_revision: Number(stroke._whiteboard_revision) || 0, _whiteboard_edit_generation: generation, _whiteboard_editor_id: String(user?.id || "") };
+      const index = list.findIndex((item) => item.id === stroke.id);
+      if (index >= 0) list[index] = stroke;
+    }
+    strokesByPageRef.current.set(pageId, list);
+    queueLive(stroke, stroke.points, true, true);
+    flushLive(true);
+    const action = queueWhiteboardAction({ kind: created ? "stroke" : "stroke_update", stroke, page_number: pageNumber, page_id: pageId });
+    if (created) recordUndoEntry({ kind: "create", stroke: { ...stroke }, page_number: pageNumber, page_id: pageId, action_id: action.action_id });
+    setTextModal(null);
+    setTextDraft("");
+    setThumbnailVersion((version) => version + 1);
+    redraw();
+    saveSnapshot(pageNumber, pageId);
+  };
+  const setLocalPages = (pages, preferredPageId, fallbackPageNumber = 1) => {
+    const next = normalizePages(pages);
+    const activeIndex = next.findIndex((item) => item.page_id === preferredPageId);
+    const nextSlide = activeIndex >= 0 ? activeIndex + 1 : clamp(fallbackPageNumber, 1, next.length);
+    slidesRef.current = next;
+    slideRef.current = nextSlide;
+    setSlides(next);
+    setSlide(nextSlide);
+    strokesByPageRef.current = new Map(next.map((item) => [item.page_id, strokesByPageRef.current.get(item.page_id) || []]));
+    setThumbnailVersion((version) => version + 1);
+    setTimeout(redraw, 0);
+    return { pages: next, slide: nextSlide };
+  };
+  const enqueueSlidePersistence = (operation) => {
+    const queued = slidePersistenceQueueRef.current.catch(() => {}).then(operation);
+    slidePersistenceQueueRef.current = queued.catch(() => {});
+  };
+  const retrySlideRequestOnce = async (request) => {
+    try {
+      return await request();
+    } catch (error) {
+      if (error.response && error.response.status < 500) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return request();
+    }
+  };
+  const changeSlide = (target) => { if (!isTeacher || drawRef.current) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(currentPageId(next), strokesByPageRef.current.get(currentPageId(next)) || []); publishControl({ kind: "page", page_number: next, page_id: currentPageId(next) }); };
+  const addSlide = () => {
+    if (!isTeacher || drawRef.current) return;
     const current = slideRef.current;
     const beforePages = slidesRef.current;
-    const beforeStrokes = strokesByPageRef.current;
+    const activePageId = beforePages[current - 1]?.page_id;
     const insertAt = current;
     const clientPageId = newId();
     const optimisticPage = { page_id: clientPageId, page_number: insertAt + 1, page_type: "whiteboard", image_url: null };
     const optimisticPages = normalizePages([...beforePages.slice(0, insertAt), optimisticPage, ...beforePages.slice(insertAt)]);
-    strokesByPageRef.current = new Map(optimisticPages.map((page) => [page.page_id, beforeStrokes.get(page.page_id) || []]));
+    strokesByPageRef.current = new Map(optimisticPages.map((item) => [item.page_id, strokesByPageRef.current.get(item.page_id) || []]));
     strokesByPageRef.current.set(clientPageId, []);
+    pendingSlideIdsRef.current.add(clientPageId);
+    confirmedPageIdsRef.current.delete(clientPageId);
     slidesRef.current = optimisticPages;
     slideRef.current = insertAt + 1;
     setSlides(optimisticPages);
@@ -537,60 +770,167 @@ export default function Classroom() {
     setThumbnailVersion((version) => version + 1);
     publishControl({ kind: "slide_added", page: optimisticPage, insert_at: insertAt, page_number: insertAt + 1 });
     setNotice("Slide added.");
-    try {
-      const afterPageId = currentPageId(current);
-      const { data } = await api.post(
-        `/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(afterPageId || "")}&page_id=${encodeURIComponent(clientPageId)}`
-      );
-      if (data?.page_id !== clientPageId) throw new Error("The server did not confirm the new slide.");
-    } catch (error) {
-      strokesByPageRef.current = beforeStrokes;
-      slidesRef.current = beforePages;
-      slideRef.current = current;
-      setSlides(beforePages);
-      setSlide(current);
-      publishControl({ kind: "slides", pages: beforePages, page_number: current, page_id: beforePages[current - 1]?.page_id });
-      setThumbnailVersion((version) => version + 1);
-      setNotice(error.response?.data?.detail || error.message || "Could not add slide.");
-    }
+
+    enqueueSlidePersistence(async () => {
+      try {
+        const { data } = await retrySlideRequestOnce(() => api.post(
+          `/classroom/sessions/${sessionId}/whiteboard-pages?after_page_id=${encodeURIComponent(activePageId || "")}&page_id=${encodeURIComponent(clientPageId)}`
+        ));
+        if (data?.page_id !== clientPageId) throw new Error("The server did not confirm the new slide.");
+        pendingSlideIdsRef.current.delete(clientPageId);
+        confirmedPageIdsRef.current.add(clientPageId);
+        sendWhiteboardQueue();
+        send({ type: "save_snapshot", page_number: data.page_number || insertAt + 1, canvas_json: { strokes: [] }, page_id: clientPageId });
+      } catch (error) {
+        pendingSlideIdsRef.current.delete(clientPageId);
+        confirmedPageIdsRef.current.delete(clientPageId);
+        const currentPages = slidesRef.current;
+        const currentPageIdBeforeRollback = currentPageId();
+        const nextPages = currentPages.filter((item) => item.page_id !== clientPageId);
+        strokesByPageRef.current.delete(clientPageId);
+        undoHistoryRef.current = undoHistoryRef.current.filter((entry) => entry.page_id !== clientPageId);
+        const updated = setLocalPages(nextPages, currentPageIdBeforeRollback === clientPageId ? activePageId : currentPageIdBeforeRollback, current);
+        publishControl({ kind: "slides", pages: updated.pages, page_number: updated.slide, page_id: currentPageId(updated.slide), confirmed_page_ids: Array.from(confirmedPageIdsRef.current) });
+        sendWhiteboardQueue();
+        setNotice(error.response?.data?.detail || error.message || "Could not add slide.");
+      }
+    });
   };
 
-  const deleteSlide = async (page) => {
-    if (!isTeacher || slidesRef.current.length <= 1) return;
+  const deleteSlide = (page) => {
+    if (!isTeacher || slidesRef.current.length <= 1 || drawRef.current) return;
     const beforePages = slidesRef.current;
-    const beforeStrokes = strokesByPageRef.current;
     const targetIndex = beforePages.findIndex((item) => item.page_id === page.page_id);
     if (targetIndex < 0) return;
-    const current = slideRef.current;
-    const currentPage = beforePages[current - 1];
+    deletedPageIdsRef.current.add(page.page_id);
+    const previousPageId = beforePages[targetIndex - 1]?.page_id;
+    const nextPageId = beforePages[targetIndex + 1]?.page_id;
+    const activePage = beforePages[slideRef.current - 1];
+    const pageStrokes = strokesByPageRef.current.get(page.page_id) || [];
+    const removedLiveStrokes = Array.from(liveRef.current.entries()).filter(([, stroke]) =>
+      stroke.page_id === page.page_id || (!stroke.page_id && Number(stroke.page_number) === targetIndex + 1)
+    );
+    const removedPendingLive = pendingLiveRef.current &&
+      (pendingLiveRef.current.page_id === page.page_id || (!pendingLiveRef.current.page_id && Number(pendingLiveRef.current.page_number) === targetIndex + 1))
+      ? { ...pendingLiveRef.current }
+      : null;
     const optimisticPages = beforePages.filter((item) => item.page_id !== page.page_id);
-    const optimisticSlide = current > optimisticPages.length ? optimisticPages.length : (targetIndex < current ? current - 1 : current);
-    strokesByPageRef.current = new Map(optimisticPages.map((item) => [item.page_id, beforeStrokes.get(item.page_id) || []]));
-    slidesRef.current = optimisticPages;
-    slideRef.current = optimisticSlide;
-    setSlides(optimisticPages);
-    setSlide(optimisticSlide);
+    const optimisticSlide = slideRef.current > optimisticPages.length ? optimisticPages.length : (targetIndex + 1 < slideRef.current ? slideRef.current - 1 : slideRef.current);
+    const optimisticActivePageId = optimisticPages[optimisticSlide - 1]?.page_id;
+    const optimistic = setLocalPages(optimisticPages, optimisticActivePageId, optimisticSlide);
+    removedLiveStrokes.forEach(([strokeId]) => liveRef.current.delete(strokeId));
+    if (removedPendingLive) pendingLiveRef.current = null;
     slideControlActiveRef.current = true;
-    setThumbnailVersion((version) => version + 1);
-    publishControl({ kind: "slide_deleted", page_id: page.page_id, deleted_index: targetIndex, page_number: optimisticSlide, active_page_id: optimisticPages[optimisticSlide - 1]?.page_id || null });
+    publishControl({ kind: "slide_deleted", page_id: page.page_id, deleted_index: targetIndex, page_number: optimistic.slide, active_page_id: optimisticActivePageId || null });
     setNotice("Slide deleted.");
-    try {
-      const query = currentPage?.page_id ? `?active_page_id=${encodeURIComponent(currentPage.page_id)}` : "";
-      const { data } = await api.delete(`/classroom/sessions/${sessionId}/whiteboard-pages/${page.page_id}${query}`);
-      if (data?.deleted_page_id !== page.page_id) throw new Error("The server did not confirm the deleted slide.");
-    } catch (error) {
-      strokesByPageRef.current = beforeStrokes;
-      slidesRef.current = beforePages;
-      slideRef.current = current;
-      setSlides(beforePages);
-      setSlide(current);
-      publishControl({ kind: "slides", pages: beforePages, page_number: current, page_id: beforePages[current - 1]?.page_id });
-      setThumbnailVersion((version) => version + 1);
-      setNotice(error.response?.data?.detail || "Could not delete slide.");
-    }
+
+    enqueueSlidePersistence(async () => {
+      try {
+        const query = activePage?.page_id ? `?active_page_id=${encodeURIComponent(activePage.page_id)}` : "";
+        const { data } = await retrySlideRequestOnce(() => api.delete(`/classroom/sessions/${sessionId}/whiteboard-pages/${page.page_id}${query}`));
+        if (data?.deleted_page_id !== page.page_id) throw new Error("The server did not confirm the deleted slide.");
+        undoHistoryRef.current = undoHistoryRef.current.filter((entry) => entry.page_id !== page.page_id);
+        confirmedPageIdsRef.current.delete(page.page_id);
+      } catch (error) {
+        deletedPageIdsRef.current.delete(page.page_id);
+        const currentPages = slidesRef.current;
+        const selectedPageId = currentPageId();
+        if (!currentPages.some((item) => item.page_id === page.page_id)) {
+          let insertionIndex = currentPages.findIndex((item) => item.page_id === nextPageId);
+          if (insertionIndex < 0) {
+            const previousIndex = currentPages.findIndex((item) => item.page_id === previousPageId);
+            insertionIndex = previousIndex >= 0 ? previousIndex + 1 : Math.min(targetIndex, currentPages.length);
+          }
+          const restoredPages = [...currentPages.slice(0, insertionIndex), page, ...currentPages.slice(insertionIndex)];
+          strokesByPageRef.current.set(page.page_id, pageStrokes);
+          const fallbackId = selectedPageId || page.page_id;
+          const updated = setLocalPages(restoredPages, fallbackId, targetIndex + 1);
+          confirmedPageIdsRef.current.add(page.page_id);
+          publishControl({ kind: "slides", pages: updated.pages, page_number: updated.slide, page_id: currentPageId(updated.slide), confirmed_page_ids: Array.from(confirmedPageIdsRef.current) });
+        }
+        removedLiveStrokes.forEach(([strokeId, stroke]) => liveRef.current.set(strokeId, stroke));
+        if (removedPendingLive) pendingLiveRef.current = removedPendingLive;
+        setNotice(error.response?.data?.detail || "Could not delete slide.");
+      }
+    });
   };
-  const undo = () => { if (!canAnnotate) return; const list = currentStrokes(); if (!list.length) return; const removed = list[list.length - 1]; if (pendingLiveRef.current?.id === removed.id) pendingLiveRef.current = null; if (drawRef.current?.id === removed.id) { drawRef.current = null; drawBaseRef.current = null; } strokesByPageRef.current.set(currentPageId(), list.filter((stroke) => stroke.id !== removed.id)); liveRef.current.delete(removed.id); committedRef.current.delete(removed.id); deletedStrokeIdsRef.current.add(removed.id);  redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "stroke_delete", stroke_id: removed.id, page_number: slideRef.current, page_id: currentPageId() }; publishControl({ kind: "whiteboard_undo", stroke_id: removed.id, page_number: payload.page_number, page_id: payload.page_id }); queueWhiteboardAction(payload); saveSnapshot(); };
-  const clearBoard = () => { if (!isTeacher) return; const pageId = currentPageId(), pageNumber = slideRef.current; const activeDraw = drawRef.current && (drawRef.current.page_id === pageId || Number(drawRef.current.page_number) === pageNumber) ? drawRef.current : null; const ids = new Set([...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id), ...(activeDraw?.id ? [activeDraw.id] : [])]); if (activeDraw) { drawRef.current = null; drawBaseRef.current = null; } if (pendingLiveRef.current && (pendingLiveRef.current.page_id === pageId || Number(pendingLiveRef.current.page_number) === pageNumber)) pendingLiveRef.current = null; clearTimeout(reliableStrokeTimerRef.current); ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); });  strokesByPageRef.current.set(pageId, []); redraw(); setThumbnailVersion((version) => version + 1); const payload = { kind: "clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids) }; publishControl({ kind: "whiteboard_clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids) }); queueWhiteboardAction(payload); saveSnapshot(); };
+  const undo = () => {
+    if (!canAnnotate) return;
+    const history = undoHistoryRef.current;
+    const pageId = currentPageId();
+    let historyIndex = history.length - 1;
+    while (historyIndex >= 0 && history[historyIndex].page_id !== pageId) historyIndex -= 1;
+    if (historyIndex < 0) return;
+    const [entry] = history.splice(historyIndex, 1);
+    const list = strokesByPageRef.current.get(pageId) || [];
+    if (entry.kind === "create") {
+      const strokeIndex = list.findIndex((stroke) => stroke.id === entry.stroke.id);
+      if (strokeIndex >= 0) list.splice(strokeIndex, 1);
+      if (pendingLiveRef.current?.id === entry.stroke.id) pendingLiveRef.current = null;
+      if (drawRef.current?.id === entry.stroke.id) { drawRef.current = null; drawBaseRef.current = null; }
+      liveRef.current.delete(entry.stroke.id);
+      committedRef.current.delete(entry.stroke.id);
+      deletedStrokeIdsRef.current.add(entry.stroke.id);
+      queueWhiteboardAction({
+        kind: "stroke_delete",
+        stroke_id: entry.stroke.id,
+        page_number: entry.page_number,
+        page_id: pageId,
+        undo_entry_id: entry.id,
+      });
+      publishControl({ kind: "whiteboard_undo", stroke_id: entry.stroke.id, page_number: entry.page_number, page_id: pageId, undo_entry_id: entry.id });
+    } else {
+      entry.strokes.forEach(({ stroke, index }) => {
+        deletedStrokeIdsRef.current.delete(stroke.id);
+        if (!list.some((item) => item.id === stroke.id)) list.splice(Math.max(0, Math.min(index, list.length)), 0, stroke);
+        queueWhiteboardAction({
+          kind: "stroke_restore",
+          stroke,
+          stroke_index: index,
+          page_number: entry.page_number,
+          page_id: pageId,
+          undo_entry_id: entry.id,
+        });
+      });
+    }
+    strokesByPageRef.current.set(pageId, list);
+    redraw();
+    setThumbnailVersion((version) => version + 1);
+    saveSnapshot();
+  };
+  const clearBoard = () => {
+    if (!isTeacher) return;
+    const pageId = currentPageId(), pageNumber = slideRef.current;
+    const activeDraw = drawRef.current && (drawRef.current.page_id === pageId || Number(drawRef.current.page_number) === pageNumber) ? drawRef.current : null;
+    const removed = [
+      ...(strokesByPageRef.current.get(pageId) || []),
+      ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber),
+      ...(activeDraw ? [activeDraw] : []),
+    ].filter((stroke, index, list) => stroke?.id && list.findIndex((item) => item.id === stroke.id) === index);
+    const action = queueWhiteboardAction({
+      kind: "clear",
+      page_number: pageNumber,
+      page_id: pageId,
+      stroke_ids: removed.map((stroke) => stroke.id),
+    });
+    recordUndoEntry({
+      kind: "delete",
+      strokes: removed.map((stroke) => ({ stroke: { ...stroke }, index: (strokesByPageRef.current.get(pageId) || []).findIndex((item) => item.id === stroke.id) })),
+      page_number: pageNumber,
+      page_id: pageId,
+      action_id: action.action_id,
+    });
+    const ids = new Set(removed.map((stroke) => stroke.id));
+    if (activeDraw) { drawRef.current = null; drawBaseRef.current = null; }
+    if (pendingLiveRef.current && (pendingLiveRef.current.page_id === pageId || Number(pendingLiveRef.current.page_number) === pageNumber)) pendingLiveRef.current = null;
+    clearTimeout(reliableStrokeTimerRef.current);
+    ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); });
+    strokesByPageRef.current.set(pageId, []);
+    redraw();
+    setThumbnailVersion((version) => version + 1);
+    publishControl({ kind: "whiteboard_clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids), action_id: action.action_id });
+    saveSnapshot();
+  };
   const uploadChatFile = async (file) => {
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) return setNotice("Chat files are limited to 20 MB.");
@@ -605,7 +945,8 @@ export default function Classroom() {
           setChatUpload((current) => current?.id === uploadId ? { ...current, progress } : current);
         },
       });
-      send({ type: "chat", file_url: data.file_url, file_name: data.file_name, message_text: "" });
+      const chatMessage = { message_id: newId(), file_url: data.file_url, file_name: data.file_name, message_text: "" };
+      if (!publishChatMessage(chatMessage)) throw new Error("Chat is reconnecting. Please try again in a moment.");
       setChat((items) => [...items, { mine: true, file_url: data.file_url, file_name: data.file_name }]);
     } catch (error) {
       setNotice(error.response?.data?.detail || "Upload failed.");
@@ -666,12 +1007,14 @@ export default function Classroom() {
             if (revision > 0) incoming._whiteboard_base_revision = revision;
             const list = strokesByPageRef.current.get(pageId) || [];
             const index = list.findIndex((stroke) => stroke.id === incoming.id);
+            const canonicalIndex = Number(canonical.stroke_index);
             const existingRevision = Number(index >= 0 ? list[index]._whiteboard_revision : 0) || 0;
             const hasNewerLocalEdit = index >= 0 && actionEdit?.strokeId === incoming.id &&
               (localStrokeEditGenerationRef.current.get(incoming.id) || 0) > actionEdit.generation;
             whiteboardTrace("ws-ack-received", { actionId, kind: canonical.kind, pageId, incoming: whiteboardGeometry(incoming), current: index >= 0 ? whiteboardGeometry(list[index]) : null, incomingRevision: revision, existingRevision, hasNewerLocalEdit, decision: index < 0 ? "insert" : hasNewerLocalEdit ? "keep-newer-local-geometry" : (!revision || revision > existingRevision) ? "apply-ack-geometry" : revision === existingRevision ? "keep-same-revision-geometry" : "keep-current-geometry" });
             if (index < 0) {
-              list.push(incoming);
+              const insertIndex = Math.max(0, Math.min(Number.isInteger(canonicalIndex) ? canonicalIndex : list.length, list.length));
+              list.splice(insertIndex, 0, incoming);
               strokesByPageRef.current.set(pageId, list);
               committedRef.current.add(incoming.id);
               liveRef.current.delete(incoming.id);
@@ -688,9 +1031,23 @@ export default function Classroom() {
                   revision,
                 ),
               };
+              if (canonical.kind === "stroke" && Number.isInteger(canonicalIndex)) {
+                const currentIndex = list.findIndex((stroke) => stroke.id === incoming.id);
+                if (currentIndex >= 0) {
+                  const [committedStroke] = list.splice(currentIndex, 1);
+                  list.splice(Math.max(0, Math.min(canonicalIndex, list.length)), 0, committedStroke);
+                }
+              }
               strokesByPageRef.current.set(pageId, list);
             } else if (!revision || revision > existingRevision) {
               list[index] = incoming;
+              if (canonical.kind === "stroke" && Number.isInteger(canonicalIndex)) {
+                const currentIndex = list.findIndex((stroke) => stroke.id === incoming.id);
+                if (currentIndex >= 0) {
+                  const [committedStroke] = list.splice(currentIndex, 1);
+                  list.splice(Math.max(0, Math.min(canonicalIndex, list.length)), 0, committedStroke);
+                }
+              }
               strokesByPageRef.current.set(pageId, list);
               committedRef.current.add(incoming.id);
               liveRef.current.delete(incoming.id);
@@ -708,6 +1065,13 @@ export default function Classroom() {
                   revision,
                 ),
               };
+              if (canonical.kind === "stroke" && Number.isInteger(canonicalIndex)) {
+                const currentIndex = list.findIndex((stroke) => stroke.id === incoming.id);
+                if (currentIndex >= 0) {
+                  const [committedStroke] = list.splice(currentIndex, 1);
+                  list.splice(Math.max(0, Math.min(canonicalIndex, list.length)), 0, committedStroke);
+                }
+              }
               strokesByPageRef.current.set(pageId, list);
             }
           }
@@ -742,7 +1106,7 @@ export default function Classroom() {
           setPeerName(msg.name || "Student");
         }
         if (msg.type === "participant_info") setPeerName(msg.name || "Participant");
-        if (msg.type === "chat") setChat((items) => [...items, { mine: msg.sender_id === String(user.id), text: msg.message_text || "", file_url: msg.file_url, file_name: msg.file_name }]);
+        if (msg.type === "chat") appendChatMessage(msg);
         if (msg.type === "permissions_state") setPermissions((p) => ({ ...p, ...(msg.permissions || {}) }));
         if (msg.type === "permission_sync_failed") {
           setNotice(`Could not apply the ${msg.permission || "classroom"} permission. Please try again.`);
@@ -768,6 +1132,12 @@ export default function Classroom() {
         }
         if (msg.type === "whiteboard_page_added") {
           const p = msg.page || {};
+          if (p.page_id && deletedPageIdsRef.current.has(p.page_id)) return;
+          if (p.page_id) {
+            pendingSlideIdsRef.current.delete(p.page_id);
+            confirmedPageIdsRef.current.add(p.page_id);
+            sendWhiteboardQueue();
+          }
           if (p.page_id && !slidesRef.current.some((item) => item.page_id === p.page_id)) {
             const currentPages = slidesRef.current;
             const insertAt = clamp(Number(msg.insert_at) || 0, 0, currentPages.length);
@@ -787,6 +1157,11 @@ export default function Classroom() {
         }
         if (msg.type === "whiteboard_page_deleted") {
           const deletedId = msg.deleted_page_id;
+          if (deletedId) {
+            deletedPageIdsRef.current.add(deletedId);
+            pendingSlideIdsRef.current.delete(deletedId);
+            confirmedPageIdsRef.current.delete(deletedId);
+          }
           liveRef.current.forEach((stroke, strokeId) => {
             if (stroke.page_id === deletedId) {
               liveRef.current.delete(strokeId);
@@ -812,8 +1187,13 @@ export default function Classroom() {
           return;
         }
         if (msg.type === "whiteboard_pages_updated") {
-          const p = normalizePages(msg.pages);
+          const p = normalizePages(msg.pages).filter((page) => !deletedPageIdsRef.current.has(page.page_id));
           const pageIds = new Set(p.map((item) => item.page_id));
+          confirmedPageIdsRef.current = pageIds;
+          pendingSlideIdsRef.current.forEach((pageId) => {
+            if (pageIds.has(pageId)) pendingSlideIdsRef.current.delete(pageId);
+          });
+          sendWhiteboardQueue();
           liveRef.current.forEach((stroke, strokeId) => {
             if (stroke.page_id && !pageIds.has(stroke.page_id)) liveRef.current.delete(strokeId);
           });
@@ -836,7 +1216,8 @@ export default function Classroom() {
           const wasInitialized = whiteboardStateInitializedRef.current;
           whiteboardStateInitializedRef.current = true;
           slideControlActiveRef.current = false;
-          const incomingPages = normalizePages(msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }]);
+          const incomingPages = normalizePages(msg.pages?.length ? msg.pages : [{ page_number: msg.page_number || 1, image_url: msg.image_url || null }])
+            .filter((page) => !deletedPageIdsRef.current.has(page.page_id));
           const pendingStrokes = new Map();
           const pendingDeletes = new Set(deletedStrokeIdsRef.current);
           for (const action of whiteboardQueueRef.current.values()) {
@@ -867,6 +1248,23 @@ export default function Classroom() {
             reconciledStrokes.set(page.page_id, strokes);
             return { ...page, strokes };
           });
+          confirmedPageIdsRef.current = new Set(reconciledPages.map((page) => page.page_id));
+          confirmedPageIdsRef.current.forEach((pageId) => pendingSlideIdsRef.current.delete(pageId));
+          sendWhiteboardQueue();
+          if (!wasInitialized) {
+            reconciledPages.forEach((page) => {
+              page.strokes.forEach((stroke, index) => {
+                recordUndoEntry({
+                  kind: "create",
+                  stroke: { ...stroke },
+                  index,
+                  page_number: page.page_number,
+                  page_id: page.page_id,
+                  action_id: `bootstrap:${page.page_id}:${stroke.id}`,
+                });
+              });
+            });
+          }
           // Never retain a local-only object merely because it was present before
           // disconnect: it may be a stale preview or a deletion already committed.
           // Only edits still in the reliable action queue are overlaid above.
@@ -944,7 +1342,42 @@ export default function Classroom() {
           const p = msg.payload || {};
           if (p.action_id) { if (seenWhiteboardActionIdsRef.current.has(p.action_id)) return; seenWhiteboardActionIdsRef.current.add(p.action_id); if (seenWhiteboardActionIdsRef.current.size > 500) seenWhiteboardActionIdsRef.current.delete(seenWhiteboardActionIdsRef.current.values().next().value); }
           if (p.kind === "page" || p.kind === "slides" || p.kind === "pdf") return;
-          if (p.kind === "stroke_delete" && p.stroke_id) { const pageId = p.page_id || currentPageId(p.page_number || 1), list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter(s => s.id !== p.stroke_id)); liveRef.current.delete(p.stroke_id); committedRef.current.delete(p.stroke_id); deletedStrokeIdsRef.current.add(p.stroke_id);  if (pageId === currentPageId()) redraw(); setThumbnailVersion(v => v + 1); }
+          if (p.kind === "stroke_delete" && p.stroke_id) {
+            const pageId = p.page_id || currentPageId(p.page_number || 1);
+            const list = strokesByPageRef.current.get(pageId) || [];
+            const index = list.findIndex((stroke) => stroke.id === p.stroke_id);
+            const [removed] = index >= 0 ? list.splice(index, 1) : [];
+            if (p.undo_entry_id) removeUndoEntry(p.undo_entry_id);
+            else if (removed) recordUndoEntry({
+              kind: "delete",
+              strokes: [{ stroke: { ...removed }, index: Number.isInteger(Number(p.stroke_index)) && Number(p.stroke_index) >= 0 ? Number(p.stroke_index) : index }],
+              page_number: Number(p.page_number) || 1,
+              page_id: pageId,
+              action_id: p.action_id,
+            });
+            strokesByPageRef.current.set(pageId, list);
+            liveRef.current.delete(p.stroke_id);
+            committedRef.current.delete(p.stroke_id);
+            deletedStrokeIdsRef.current.add(p.stroke_id);
+            if (pageId === currentPageId()) redraw();
+            setThumbnailVersion((v) => v + 1);
+          }
+          if (p.kind === "stroke_restore" && p.stroke) {
+            const pageNumber = Number(p.page_number) || 1;
+            const pageId = p.page_id || currentPageId(pageNumber);
+            const list = strokesByPageRef.current.get(pageId) || [];
+            if (!list.some((s) => s.id === p.stroke.id)) {
+              const incomingIndex = Number(p.stroke_index);
+              const index = Math.max(0, Math.min(Number.isInteger(incomingIndex) ? incomingIndex : list.length, list.length));
+              list.splice(index, 0, p.stroke);
+            }
+            if (p.undo_entry_id) removeUndoEntry(p.undo_entry_id);
+            strokesByPageRef.current.set(pageId, list);
+            deletedStrokeIdsRef.current.delete(p.stroke.id);
+            committedRef.current.add(p.stroke.id);
+            if (pageId === currentPageId()) redraw();
+            setThumbnailVersion((v) => v + 1);
+          }
           if (p.kind === "stroke_update" && p.stroke) {
             if (deletedStrokeIdsRef.current.has(p.stroke.id)) return;
             const pageId = p.page_id || currentPageId(p.page_number || 1);
@@ -992,7 +1425,17 @@ export default function Classroom() {
               } else if (index >= 0) {
                 list[index] = p.stroke;
               } else {
-                list.push(p.stroke);
+                const incomingIndex = Number(p.stroke_index);
+                const insertIndex = Math.max(0, Math.min(Number.isInteger(incomingIndex) ? incomingIndex : list.length, list.length));
+                list.splice(insertIndex, 0, p.stroke);
+                recordUndoEntry({
+                  kind: "create",
+                  stroke: { ...p.stroke },
+                  index: insertIndex,
+                  page_number: Number(p.page_number) || 1,
+                  page_id: pageId,
+                  action_id: p.action_id || `create:${pageId}:${p.stroke.id}`,
+                });
               }
               strokesByPageRef.current.set(pageId, list);
               committedRef.current.add(p.stroke.id);
@@ -1006,7 +1449,19 @@ export default function Classroom() {
             const pageNumber = Number(p.page_number) || 1; const pageId = p.page_id || currentPageId(pageNumber);
             const list = strokesByPageRef.current.get(pageId) || [];
             const isNewStroke = !list.some((s) => s.id === p.stroke.id);
-            if (isNewStroke) list.push(p.stroke);
+            if (isNewStroke) {
+              const incomingIndex = Number(p.stroke_index);
+              const index = Math.max(0, Math.min(Number.isInteger(incomingIndex) ? incomingIndex : list.length, list.length));
+              list.splice(index, 0, p.stroke);
+              recordUndoEntry({
+                kind: "create",
+                stroke: { ...p.stroke },
+                index,
+                page_number: pageNumber,
+                page_id: pageId,
+                action_id: p.action_id || `create:${pageId}:${p.stroke.id}`,
+              });
+            }
             strokesByPageRef.current.set(pageId, list);
             committedRef.current.add(p.stroke.id);
             liveRef.current.delete(p.stroke.id);
@@ -1024,7 +1479,11 @@ export default function Classroom() {
           if (p.kind === "clear") {
             const pageNumber = Number(p.page_number) || 1;
             const pageId = p.page_id || currentPageId(pageNumber);
-            const ids = new Set([...(Array.isArray(p.stroke_ids) ? p.stroke_ids : []), ...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id)]);
+            const current = strokesByPageRef.current.get(pageId) || [];
+            const deleted = current.map((stroke, index) => ({ stroke: { ...stroke }, index }));
+            if (p.undo_entry_id) removeUndoEntry(p.undo_entry_id);
+            else if (deleted.length) recordUndoEntry({ kind: "delete", strokes: deleted, page_number: pageNumber, page_id: pageId, action_id: p.action_id });
+            const ids = new Set([...(Array.isArray(p.stroke_ids) ? p.stroke_ids : []), ...current.map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id)]);
             ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); });
             
             strokesByPageRef.current.set(pageId, []);
@@ -1205,6 +1664,16 @@ export default function Classroom() {
           }
         });
         room.on(RoomEvent.Reconnecting, () => setStatus("Reconnecting video…"));
+        room.on(RoomEvent.ParticipantPermissionsChanged, (previousPermissions, participant) => {
+          if (participant !== room.localParticipant) return;
+          const sources = participant.permissions?.canPublishSources;
+          if (Array.isArray(sources) && sources.includes(Track.Source.ScreenShare)) {
+            setPermissions((current) => ({ ...current, screen_share: true }));
+            setNotice("Screen sharing permission enabled.");
+          } else if (Array.isArray(sources)) {
+            setPermissions((current) => ({ ...current, screen_share: false }));
+          }
+        });
         room.on(RoomEvent.Reconnected, () => {
           setStatus("Live");
           setTimeout(() => { restoreMediaState(); }, 0);
@@ -1285,11 +1754,15 @@ export default function Classroom() {
         });
         room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
           if (!participant || !topic) return;
+          let msg;
+          try { msg = JSON.parse(decoder.decode(payload)); } catch { return; }
+          if (msg.type === "classroom_chat" && topic === CHAT_TOPIC) {
+            appendChatMessage(msg.payload || {});
+            return;
+          }
           // LiveKit data is peer-to-peer; reject student previews unless the
           // teacher-authorized permission state allows annotation.
           if (isTeacher && !permissionsRef.current.annotate) return;
-          let msg;
-          try { msg = JSON.parse(decoder.decode(payload)); } catch { return; }
           if (msg.type === "whiteboard_live" && topic === LIVE_TOPIC) {
             const p = msg.payload || {};
             const stroke = p.stroke;
@@ -1345,11 +1818,50 @@ export default function Classroom() {
           }
           if (msg.type === "classroom_control" && topic === CONTROL_TOPIC) {
             const control = msg.payload || {};
-            if ((control.kind === "whiteboard_undo" || control.kind === "whiteboard_delete") && control.stroke_id) { const pageNumber = Number(control.page_number) || 1; const pageId = control.page_id || currentPageId(pageNumber); const strokeId = control.stroke_id; const list = strokesByPageRef.current.get(pageId) || []; strokesByPageRef.current.set(pageId, list.filter((stroke) => stroke.id !== strokeId)); liveRef.current.delete(strokeId); committedRef.current.delete(strokeId); deletedStrokeIdsRef.current.add(strokeId);  if (pageId === currentPageId()) redraw(); setThumbnailVersion((version) => version + 1); return; }
+            if ((control.kind === "whiteboard_undo" || control.kind === "whiteboard_delete") && control.stroke_id) {
+              const pageNumber = Number(control.page_number) || 1;
+              const pageId = control.page_id || currentPageId(pageNumber);
+              const strokeId = control.stroke_id;
+              const list = strokesByPageRef.current.get(pageId) || [];
+              const index = list.findIndex((stroke) => stroke.id === strokeId);
+              const [removed] = index >= 0 ? list.splice(index, 1) : [];
+              if (control.kind === "whiteboard_undo") {
+                removeUndoEntry(control.undo_entry_id);
+              } else if (removed) {
+                recordUndoEntry({
+                  kind: "delete",
+                  strokes: [{ stroke: { ...removed }, index }],
+                  page_number: pageNumber,
+                  page_id: pageId,
+                  action_id: control.action_id,
+                });
+              }
+              strokesByPageRef.current.set(pageId, list);
+              liveRef.current.delete(strokeId);
+              committedRef.current.delete(strokeId);
+              deletedStrokeIdsRef.current.add(strokeId);
+              if (pageId === currentPageId()) redraw();
+              setThumbnailVersion((version) => version + 1);
+              return;
+            }
             if (control.kind === "whiteboard_clear") {
               const pageNumber = Number(control.page_number) || 1;
               const pageId = control.page_id || currentPageId(pageNumber);
-              const ids = new Set([...(strokesByPageRef.current.get(pageId) || []).map((stroke) => stroke.id), ...Array.from(liveRef.current.values()).filter((stroke) => stroke.page_id === pageId || Number(stroke.page_number) === pageNumber).map((stroke) => stroke.id)]);
+              const current = strokesByPageRef.current.get(pageId) || [];
+              const deleted = [
+                ...current.map((stroke, index) => ({ stroke: { ...stroke }, index })),
+                ...Array.from(liveRef.current.values())
+                  .filter((stroke) => (stroke.page_id === pageId || Number(stroke.page_number) === pageNumber) && !current.some((item) => item.id === stroke.id))
+                  .map((stroke) => ({ stroke: { ...stroke }, index: -1 })),
+              ];
+              if (deleted.length) recordUndoEntry({
+                kind: "delete",
+                strokes: deleted,
+                page_number: pageNumber,
+                page_id: pageId,
+                action_id: control.action_id,
+              });
+              const ids = new Set([...deleted.map(({ stroke }) => stroke.id), ...(control.stroke_ids || [])]);
               ids.forEach((id) => { deletedStrokeIdsRef.current.add(id); liveRef.current.delete(id); committedRef.current.delete(id); });
               
               strokesByPageRef.current.set(pageId, []);
@@ -1364,6 +1876,8 @@ export default function Classroom() {
             }
             slideControlActiveRef.current = true;
             if (p.kind === "slide_added") {
+              if (p.page?.page_id && deletedPageIdsRef.current.has(p.page.page_id)) return;
+              if (p.page?.page_id && !confirmedPageIdsRef.current.has(p.page.page_id)) pendingSlideIdsRef.current.add(p.page.page_id);
               if (p.page?.page_id && !slidesRef.current.some((item) => item.page_id === p.page.page_id)) {
                 const currentPages = slidesRef.current;
                 const insertAt = clamp(Number(p.insert_at) || 0, 0, currentPages.length);
@@ -1382,6 +1896,11 @@ export default function Classroom() {
             }
             if (p.kind === "slide_deleted") {
               const deletedId = p.page_id;
+              if (deletedId) {
+                deletedPageIdsRef.current.add(deletedId);
+                pendingSlideIdsRef.current.delete(deletedId);
+                confirmedPageIdsRef.current.delete(deletedId);
+              }
               liveRef.current.forEach((stroke, strokeId) => {
                 if (stroke.page_id === deletedId) liveRef.current.delete(strokeId);
               });
@@ -1402,8 +1921,13 @@ export default function Classroom() {
               return;
             }
             if (p.kind === "slides") {
-              const next = normalizePages(p.pages);
+              const next = normalizePages(p.pages).filter((page) => !deletedPageIdsRef.current.has(page.page_id));
               const pageIds = new Set(next.map((item) => item.page_id));
+              const confirmedPageIds = new Set((p.confirmed_page_ids || Array.from(pageIds)).filter((pageId) => pageIds.has(pageId)));
+              confirmedPageIdsRef.current = confirmedPageIds;
+              pendingSlideIdsRef.current.forEach((pageId) => {
+                if (!pageIds.has(pageId) || confirmedPageIds.has(pageId)) pendingSlideIdsRef.current.delete(pageId);
+              });
               liveRef.current.forEach((stroke, strokeId) => {
                 if (stroke.page_id && !pageIds.has(stroke.page_id)) liveRef.current.delete(strokeId);
               });
@@ -1471,7 +1995,17 @@ export default function Classroom() {
       roomRef.current = null;
     };
   }, [hasEntered, sessionId, user, wsUrl, isTeacher, navigate, redraw, renderStroke, currentStrokes]);
-  const sendMessage = (event) => { event.preventDefault(); const text = message.trim(); if (!text) return; if (!send({ type: "chat", message_text: text })) { setNotice("Chat is reconnecting. Please try again in a moment."); return; } setChat((items) => [...items, { mine: true, text }]); setMessage(""); };
+  const sendMessage = (event) => {
+    event.preventDefault();
+    const text = message.trim().slice(0, 4000);
+    if (!text) return;
+    if (!publishChatMessage({ message_id: newId(), message_text: text })) {
+      setNotice("Chat is reconnecting. Please try again in a moment.");
+      return;
+    }
+    setChat((items) => [...items, { mine: true, text }]);
+    setMessage("");
+  };
   const setPermission = (permission, granted) => {
     if (!studentId) {
       setNotice("Waiting for the student to join.");

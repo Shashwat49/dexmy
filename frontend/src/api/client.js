@@ -7,7 +7,10 @@ export const api = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
   // Never leave auth screens spinning forever if the API or database stalls.
-  timeout: 20000,
+  // Classroom media, slide mutations, and database-backed operations may legitimately
+  // take longer than a normal API call. Keep a bounded timeout so stalls fail clearly
+  // instead of surfacing an unexplained 20-second limit.
+  timeout: 60000,
 });
 
 let csrfToken = null;
