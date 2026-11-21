@@ -93,19 +93,9 @@ export default function StudentCalendarWidget() {
   const [selectedDate, setSelectedDate] = useState(() => tomorrowDate());
   const [joiningBookingId, setJoiningBookingId] = useState(null);
   const [joinError, setJoinError] = useState("");
-  const [clockNow, setClockNow] = useState(Date.now());
-
-  useEffect(() => {
-    const interval = setInterval(() => setClockNow(Date.now()), 15000);
-    return () => clearInterval(interval);
-  }, []);
-
   function canJoinClass(booking) {
     const status = statusOf(booking);
-    if (!["confirmed", "in_progress", "ongoing"].includes(status)) return false;
-    const start = new Date(booking.scheduled_at).getTime();
-    const end = start + Math.max(1, Number(booking.duration_minutes) || 55) * 60 * 1000;
-    return clockNow >= start - 5 * 60 * 1000 && clockNow < end;
+    return ["confirmed", "in_progress", "ongoing"].includes(status);
   }
 
   async function joinClass(booking) {
@@ -375,7 +365,7 @@ export default function StudentCalendarWidget() {
                           onClick={() => joinClass(booking)}
                           disabled={!canJoinClass(booking) || joiningBookingId !== null}
                           className="rounded-xl bg-brand-red px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
-                          title={!canJoinClass(booking) ? "Join is available 5 minutes before class and during its scheduled duration." : "Join classroom"}
+                          title={!canJoinClass(booking) ? "This class is not available to join yet." : "Join classroom"}
                         >
                           {joiningBookingId === booking.id ? "Joining…" : canJoinClass(booking) ? "Join Class" : status === "completed" ? "Class Completed" : status === "cancelled" ? "Class Cancelled" : "Join Class"}
                         </button>

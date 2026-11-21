@@ -15,13 +15,10 @@ const formatDateTime = (iso) => {
 const initials = (name) =>
   name ? name.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase() : "?";
 
-// TESTING MODE: confirmed bookings are joinable immediately, regardless of
-// their scheduled start/end time. Restore production scheduling restrictions later.
 function getJoinState(booking) {
   if (booking.status === "completed") return { canJoin: false, label: "Class completed" };
   if (booking.status === "cancelled") return { canJoin: false, label: "Class cancelled" };
   if (!["confirmed", "in_progress", "ongoing"].includes(booking.status)) return { canJoin: false, label: "Awaiting payment" };
-  if (Date.now() < new Date(booking.scheduled_at).getTime() - 5 * 60 * 1000) return { canJoin: false, label: "Join class" };
   return { canJoin: true, label: "Join class" };
 }
 

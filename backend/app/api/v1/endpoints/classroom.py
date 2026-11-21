@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -56,12 +56,6 @@ def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_c
     is_teacher = current_user.id == booking.teacher_id
     is_student = current_user.id == booking.student_id
     if not (is_teacher or is_student): raise HTTPException(status_code=403, detail="You are not part of this classroom")
-    scheduled_at = booking.scheduled_at
-    if scheduled_at is not None:
-        if scheduled_at.tzinfo is None:
-            scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
-        if datetime.now(timezone.utc) < scheduled_at - timedelta(minutes=5):
-            raise HTTPException(status_code=403, detail="Classroom access opens 5 minutes before the scheduled class start")
     sources = None if is_teacher else _student_publish_sources(payload.session_id, current_user.id, db)
     token = create_join_token(room_name=session.livekit_room_name, identity=str(current_user.id), name=current_user.full_name, can_publish=is_teacher or bool(sources), publish_sources=sources, can_publish_data=True)
     return JoinTokenResponse(livekit_token=token, livekit_url=settings.LIVEKIT_URL, room_name=session.livekit_room_name)
@@ -203,7 +197,7 @@ async def _notify_page_change(session_id, payload):
 
 @router.post("/sessions/{session_id}/whiteboard-pages")
 async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | None = None, page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    cs = db.get(ClassSession, session_id)
+    cs = db.query(ClassSession).filter(ClassSession.id == session_id).with_for_update().first()
     if cs is None:
         raise HTTPException(status_code=404, detail="Session not found")
     booking = db.get(Booking, cs.booking_id)
@@ -228,7 +222,14 @@ async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | Non
             client_page_id = uuid.UUID(page_id)
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="Invalid page ID")
-        if db.get(ClassroomPage, client_page_id) is not None:
+        existing_page = db.get(ClassroomPage, client_page_id)
+        if existing_page is not None and existing_page.session_id == session_id:
+            return {
+                "page": _page_payload([existing_page], db)[0],
+                "page_id": str(existing_page.id),
+                "page_number": existing_page.position,
+            }
+        if existing_page is not None:
             raise HTTPException(status_code=409, detail="Page ID already exists")
 
     _reorder_pages_without_unique_conflicts(pages)
@@ -259,12 +260,12 @@ async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | Non
         "page_type": "whiteboard",
         "image_url": None,
     }
-    asyncio.create_task(_notify_page_change(session_id, {
+    await _notify_page_change(session_id, {
         "type": "whiteboard_page_added",
         "page": page_payload,
         "insert_at": insert_at,
         "page_number": insert_at + 1,
-    }))
+    })
     return {
         "page": page_payload,
         "page_id": str(page.id),
@@ -274,7 +275,7 @@ async def create_whiteboard_page(session_id: uuid.UUID, after_page_id: str | Non
 
 @router.delete("/sessions/{session_id}/whiteboard-pages/{page_id}")
 async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, background_tasks: BackgroundTasks, active_page_id: str | None = None, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    cs = db.get(ClassSession, session_id)
+    cs = db.query(ClassSession).filter(ClassSession.id == session_id).with_for_update().first()
     if cs is None:
         raise HTTPException(status_code=404, detail="Session not found")
     booking = db.get(Booking, cs.booking_id)
@@ -286,7 +287,7 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, back
     ).order_by(ClassroomPage.position.asc()).all()
     target = next((page for page in pages if page.id == page_id), None)
     if target is None:
-        raise HTTPException(status_code=404, detail="Slide not found")
+        return {"deleted_page_id": str(page_id), "page_number": 1, "page_id": str(pages[0].id) if pages else None}
     if len(pages) <= 1:
         raise HTTPException(status_code=409, detail="A classroom must keep at least one slide")
 
@@ -308,6 +309,11 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, back
     if active_page is None:
         active_page = remaining[min(target_index, len(remaining) - 1)]
 
+    # Move every row out of the positive position range before compacting it.
+    # Otherwise deleting a middle page can collide with the unique
+    # (session_id, position) constraint when a later page shifts into its slot.
+    _reorder_pages_without_unique_conflicts(pages)
+    db.flush()
     db.query(WhiteboardSnapshot).filter(
         WhiteboardSnapshot.page_id == target.id
     ).delete(synchronize_session=False)
@@ -323,13 +329,13 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, back
         background_tasks.add_task(delete_file, key)
 
     active_position = next(i for i, page in enumerate(remaining, 1) if page.id == active_page.id)
-    asyncio.create_task(_notify_page_change(session_id, {
+    await _notify_page_change(session_id, {
         "type": "whiteboard_page_deleted",
         "deleted_page_id": str(target.id),
         "deleted_index": target_index,
         "page_number": active_position,
         "page_id": str(active_page.id),
-    }))
+    })
     return {
         "deleted_page_id": str(target.id),
         "page_number": active_position,

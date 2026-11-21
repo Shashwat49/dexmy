@@ -157,16 +157,19 @@ async def _broadcast_timer_state(room) -> None:
 
 async def _update_timer_for_presence(room) -> None:
     # The teaching countdown starts only when both participants are present for
-    # the first time. After admission, disconnects must not pause the deadline:
-    # the timer task remains responsible for ending the class at that deadline.
+    # the first time. Disconnection by either participant freezes the remaining
+    # duration and reconnecting resumes from that remaining duration.
     now = datetime.now(timezone.utc)
     if room.student_ever_joined:
         if not room.timer_running and room.timer_started and room.teacher_ws and room.student_ws:
             room.remaining_seconds = max(0, float(room.remaining_seconds or 0))
             room.deadline = now + timedelta(seconds=room.remaining_seconds)
             room.timer_running = True
-        # Once the teaching timer has started, preserve its wall-clock deadline
-        # across refreshes, transient WebSocket drops, and participant reconnects.
+        if room.timer_running and (room.teacher_ws is None or room.student_ws is None):
+            if room.deadline:
+                room.remaining_seconds = max(0, (room.deadline - now).total_seconds())
+            room.deadline = None
+            room.timer_running = False
         room.no_show_deadline = None
         room.no_show_remaining_seconds = 0
     else:
@@ -219,7 +222,7 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
     last_error = None
     lkapi = api.LiveKitAPI(settings.LIVEKIT_URL, settings.LIVEKIT_API_KEY, settings.LIVEKIT_API_SECRET)
     try:
-        for attempt in range(6):
+        for attempt in range(20):
             try:
                 await lkapi.room.update_participant(
                     api.UpdateParticipantRequest(
@@ -238,8 +241,8 @@ async def _sync_livekit_permissions(class_session: ClassSession, user_id: uuid.U
                 return
             except Exception as exc:
                 last_error = exc
-                if attempt < 5:
-                    await asyncio.sleep(0.2)
+                if attempt < 19:
+                    await asyncio.sleep(0.1)
         raise last_error or RuntimeError("LiveKit permission synchronization failed")
     finally:
         await lkapi.aclose()
@@ -345,7 +348,13 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
                 return
     pages=[]
     for position,page in enumerate(pages_db,1):
-        snap=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
+        snap=db.query(WhiteboardSnapshot).filter(
+            WhiteboardSnapshot.session_id==session_id,
+            WhiteboardSnapshot.page_id==page.id,
+        ).order_by(
+            WhiteboardSnapshot.snapshot_data["revision"].as_integer().desc().nullslast(),
+            desc(WhiteboardSnapshot.created_at),
+        ).first()
         key = None
         if page.page_type == "pdf":
             # Keep the original PDF page image as the slide background. Older
@@ -550,7 +559,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
     if msg_type == "chat":
         if peer:
             try:
-                await peer.send_json({"type": "chat", "sender_id": str(user.id), "message_text": str(data.get("message_text") or "")[:4000], "file_url": data.get("file_url"), "file_name": data.get("file_name")})
+                await peer.send_json({"type": "chat", "sender_id": str(user.id), "message_id": data.get("message_id"), "message_text": str(data.get("message_text") or "")[:4000], "file_url": data.get("file_url"), "file_name": data.get("file_name")})
             except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError):
                 if is_teacher and room.student_ws is peer:
                     room.student_ws = None
@@ -578,7 +587,10 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     latest = db.query(WhiteboardSnapshot).filter(
                         WhiteboardSnapshot.session_id == session_id,
                         WhiteboardSnapshot.page_id == already_processed.page_id,
-                    ).order_by(desc(WhiteboardSnapshot.created_at)).first() if already_processed.page_id else already_processed
+                    ).order_by(
+                        WhiteboardSnapshot.snapshot_data["revision"].as_integer().desc().nullslast(),
+                        desc(WhiteboardSnapshot.created_at),
+                    ).first() if already_processed.page_id else already_processed
                     latest_strokes = ((latest.snapshot_data or {}).get("strokes") or []) if latest else []
                     current_stroke = next(
                         (item for item in latest_strokes if isinstance(item, dict) and item.get("id") == stroke_id),
@@ -587,6 +599,11 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     if current_stroke:
                         canonical_payload["stroke"] = dict(current_stroke)
                         canonical_payload["page_id"] = str(already_processed.page_id)
+                        canonical_payload["page_number"] = latest.page_number
+                        canonical_payload["stroke_index"] = next(
+                            (index for index, item in enumerate(latest_strokes) if isinstance(item, dict) and item.get("id") == stroke_id),
+                            len(latest_strokes),
+                        )
                         # A retried create can refer to an object that has since
                         # moved; relay it as an update so peers replace geometry.
                         if canonical_payload.get("kind") == "stroke":
@@ -602,69 +619,105 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 if should_relay:
                     await _relay_whiteboard_event(peer, canonical_payload)
                 return
-        if kind in {"stroke", "stroke_update", "stroke_delete", "undo", "clear"}:
+        if kind in {"stroke", "stroke_update", "stroke_restore", "stroke_delete", "undo", "clear"}:
             page_number = max(1, int(payload.get("page_number", 1) or 1))
+            has_page_id = bool(payload.get("page_id"))
             try:
                 page_id = uuid.UUID(str(payload.get("page_id"))) if payload.get("page_id") else None
             except (ValueError, TypeError):
                 page_id = None
             page = db.get(ClassroomPage, page_id) if page_id else None
-            # The client can briefly hold a stale page_id while slide state is
-            # being reconciled. The page number is the canonical ordering key,
-            # so recover the current server page instead of silently dropping
-            # the committed drawing event. Always send the canonical page_id
-            # back to the peer after resolving it.
-            if page is None or page.session_id != session_id:
+            # A page number can be reused after deletion. Never redirect an
+            # event carrying a deleted/stale page ID onto its replacement.
+            if has_page_id and (page is None or page.session_id != session_id):
+                if action_id:
+                    await websocket.send_json({
+                        "type": "whiteboard_event_ack",
+                        "action_id": str(action_id),
+                        "payload": None,
+                    })
+                return
+            if not has_page_id:
                 page = db.query(ClassroomPage).filter(
                     ClassroomPage.session_id == session_id,
                     ClassroomPage.position == page_number,
                 ).first()
             if page is None:
+                if action_id:
+                    await websocket.send_json({
+                        "type": "whiteboard_event_ack",
+                        "action_id": str(action_id),
+                        "payload": None,
+                    })
+                return
+            page = db.query(ClassroomPage).filter(
+                ClassroomPage.id == page.id,
+                ClassroomPage.session_id == session_id,
+            ).with_for_update().first()
+            if page is None:
+                if action_id:
+                    await websocket.send_json({
+                        "type": "whiteboard_event_ack",
+                        "action_id": str(action_id),
+                        "payload": None,
+                    })
                 return
             latest = db.query(WhiteboardSnapshot).filter(
                 WhiteboardSnapshot.session_id == session_id,
                 WhiteboardSnapshot.page_id == page.id,
-            ).order_by(desc(WhiteboardSnapshot.created_at)).first()
+            ).order_by(
+                WhiteboardSnapshot.snapshot_data["revision"].as_integer().desc().nullslast(),
+                desc(WhiteboardSnapshot.created_at),
+            ).first()
             # Do not trust a single "latest" snapshot as the complete canvas:
             # rapid strokes can create snapshots with tied timestamps, and the
             # selected row may omit strokes that were already committed. Merge
             # the page's history by stroke ID, preferring the highest server
             # revision for each stroke, while preserving each stroke's first
             # position in the drawing order.
-            page_snapshots = db.query(WhiteboardSnapshot).filter(
-                WhiteboardSnapshot.session_id == session_id,
-                WhiteboardSnapshot.page_id == page.id,
-            ).order_by(WhiteboardSnapshot.created_at.asc(), WhiteboardSnapshot.id.asc()).all()
-            deleted_stroke_ids = {
-                str(stroke_id)
-                for snapshot in page_snapshots
-                if isinstance(snapshot.snapshot_data, dict)
-                for stroke_id in (snapshot.snapshot_data.get("deleted_stroke_ids") or [])
-            }
-            strokes_by_id = {}
-            stroke_order = []
-            for snapshot in page_snapshots:
-                snapshot_data = snapshot.snapshot_data if isinstance(snapshot.snapshot_data, dict) else {}
-                for saved_stroke in snapshot_data.get("strokes") or []:
-                    if not isinstance(saved_stroke, dict) or not saved_stroke.get("id"):
-                        continue
-                    stroke_id = str(saved_stroke["id"])
-                    if stroke_id not in strokes_by_id:
-                        stroke_order.append(stroke_id)
-                        strokes_by_id[stroke_id] = saved_stroke
-                        continue
-                    try:
-                        current_revision = int(strokes_by_id[stroke_id].get("_whiteboard_revision") or 0)
-                        incoming_revision = int(saved_stroke.get("_whiteboard_revision") or 0)
-                    except (TypeError, ValueError):
-                        current_revision = incoming_revision = 0
-                    if incoming_revision > current_revision:
-                        strokes_by_id[stroke_id] = saved_stroke
-            strokes = [
-                strokes_by_id[stroke_id]
-                for stroke_id in stroke_order
-                if stroke_id in strokes_by_id and stroke_id not in deleted_stroke_ids
-            ]
+            latest_data = latest.snapshot_data if latest and isinstance(latest.snapshot_data, dict) else {}
+            try:
+                snapshot_revision = int(latest_data.get("revision") or 0) + 1
+            except (TypeError, ValueError):
+                snapshot_revision = 1
+            if latest_data.get("canonical") and isinstance(latest_data.get("strokes"), list):
+                strokes = [dict(stroke) for stroke in latest_data["strokes"] if isinstance(stroke, dict)]
+                deleted_stroke_ids = set(map(str, latest_data.get("deleted_stroke_ids") or []))
+            else:
+                page_snapshots = db.query(WhiteboardSnapshot).filter(
+                    WhiteboardSnapshot.session_id == session_id,
+                    WhiteboardSnapshot.page_id == page.id,
+                ).order_by(WhiteboardSnapshot.created_at.asc(), WhiteboardSnapshot.id.asc()).all()
+                deleted_stroke_ids = {
+                    str(stroke_id)
+                    for snapshot in page_snapshots
+                    if isinstance(snapshot.snapshot_data, dict)
+                    for stroke_id in (snapshot.snapshot_data.get("deleted_stroke_ids") or [])
+                }
+                strokes_by_id = {}
+                stroke_order = []
+                for snapshot in page_snapshots:
+                    snapshot_data = snapshot.snapshot_data if isinstance(snapshot.snapshot_data, dict) else {}
+                    for saved_stroke in snapshot_data.get("strokes") or []:
+                        if not isinstance(saved_stroke, dict) or not saved_stroke.get("id"):
+                            continue
+                        stroke_id = str(saved_stroke["id"])
+                        if stroke_id not in strokes_by_id:
+                            stroke_order.append(stroke_id)
+                            strokes_by_id[stroke_id] = saved_stroke
+                            continue
+                        try:
+                            current_revision = int(strokes_by_id[stroke_id].get("_whiteboard_revision") or 0)
+                            incoming_revision = int(saved_stroke.get("_whiteboard_revision") or 0)
+                        except (TypeError, ValueError):
+                            current_revision = incoming_revision = 0
+                        if incoming_revision > current_revision:
+                            strokes_by_id[stroke_id] = saved_stroke
+                strokes = [
+                    strokes_by_id[stroke_id]
+                    for stroke_id in stroke_order
+                    if stroke_id in strokes_by_id and stroke_id not in deleted_stroke_ids
+                ]
             stroke = payload.get("stroke")
             if kind in {"stroke", "stroke_update"} and isinstance(stroke, dict) and stroke.get("id") and str(stroke["id"]) in deleted_stroke_ids:
                 if action_id:
@@ -674,6 +727,24 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                         "payload": None,
                     })
                 return
+            if kind == "stroke_restore" and isinstance(stroke, dict) and stroke.get("id"):
+                stroke_id = str(stroke["id"])
+                deleted_stroke_ids.discard(stroke_id)
+                index = next(
+                    (i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == stroke_id),
+                    None,
+                )
+                if index is None:
+                    try:
+                        restore_index = int(payload.get("stroke_index", len(strokes)))
+                    except (TypeError, ValueError):
+                        restore_index = len(strokes)
+                    restore_index = max(0, min(restore_index, len(strokes)))
+                    strokes.insert(restore_index, stroke)
+                else:
+                    restore_index = index
+                    strokes[index] = stroke
+                payload["stroke_index"] = restore_index
             if kind == "stroke" and isinstance(stroke, dict) and stroke.get("id"):
                 existing_index = next(
                     (i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == stroke["id"]),
@@ -684,11 +755,13 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     # same committed base revision for future live previews.
                     stroke["_whiteboard_revision"] = 1
                     strokes.append(stroke)
+                    payload["stroke_index"] = len(strokes) - 1
                 else:
                     # Duplicate creation must return the already committed
                     # object, not a stale client copy.
                     payload["stroke"] = dict(strokes[existing_index])
                     stroke = payload["stroke"]
+                    payload["stroke_index"] = existing_index
             elif kind == "stroke_update" and isinstance(stroke, dict) and stroke.get("id"):
                 index = next((i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == stroke["id"]), None)
                 previous_revision = strokes[index].get("_whiteboard_revision", 0) if index is not None else 0
@@ -747,6 +820,8 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                         snapshot_data = {
                             "strokes": strokes,
                             "deleted_stroke_ids": sorted(deleted_stroke_ids),
+                            "canonical": True,
+                            "revision": snapshot_revision,
                         }
                         if action_id:
                             snapshot_data["action_id"] = str(action_id)
@@ -761,6 +836,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                         canonical_payload = dict(payload)
                         canonical_payload["stroke"] = dict(current_stroke)
                         canonical_payload["page_id"] = str(page.id)
+                        canonical_payload["page_number"] = page.position
                         if action_id:
                             await websocket.send_json({
                                 "type": "whiteboard_event_ack",
@@ -772,9 +848,15 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 stroke["_whiteboard_revision"] = previous_revision + 1
                 if index is None:
                     strokes.append(stroke)
+                    payload["stroke_index"] = len(strokes) - 1
                 else:
                     strokes[index] = stroke
+                    payload["stroke_index"] = index
             elif kind == "stroke_delete" and payload.get("stroke_id"):
+                payload["stroke_index"] = next(
+                    (i for i, item in enumerate(strokes) if isinstance(item, dict) and item.get("id") == payload["stroke_id"]),
+                    -1,
+                )
                 deleted_stroke_ids.add(str(payload["stroke_id"]))
                 strokes = [item for item in strokes if not isinstance(item, dict) or item.get("id") != payload["stroke_id"]]
             elif kind == "undo":
@@ -791,6 +873,8 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             snapshot_data = {
                 "strokes": strokes,
                 "deleted_stroke_ids": sorted(deleted_stroke_ids),
+                "canonical": True,
+                "revision": snapshot_revision,
             }
             if action_id:
                 snapshot_data["action_id"] = str(action_id)
@@ -802,6 +886,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 page_id=page.id,
             ))
             payload["page_id"] = str(page.id)
+            payload["page_number"] = page.position
             db.commit()
             if action_id:
                 # Return the canonical committed object/revision immediately so
@@ -883,14 +968,16 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     "reason": "Could not save the permission change. Please try again.",
                 })
                 return
-            # A revoke must take effect in the UI immediately. A grant is
-            # announced only after LiveKit confirms it in
-            # _finish_screen_share_permission_change, avoiding a publish race.
-            if not granted:
-                event = {"type": "permission_update", "permission": permission.value, "granted": False}
-                if peer:
-                    await peer.send_json(event)
-                await websocket.send_json(event)
+            # Announce both grants and revokes immediately so the student UI
+            # responds without waiting for LiveKit. LiveKit publication remains
+            # synchronized separately and is the server-authoritative publish guard.
+            event = {"type": "permission_update", "permission": permission.value, "granted": granted}
+            for ws in (room.teacher_ws, room.student_ws):
+                if ws:
+                    try:
+                        await ws.send_json(event)
+                    except Exception:
+                        pass
             asyncio.create_task(_finish_screen_share_permission_change(class_session, target_user_id, room, session_id, user.id, granted))
             return
 
@@ -954,7 +1041,20 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             page=db.query(ClassroomPage).filter(ClassroomPage.session_id==session_id,ClassroomPage.position==page_number).first()
         if page is None:
             page=ClassroomPage(session_id=session_id,position=page_number,page_type="whiteboard"); db.add(page); db.flush()
-        existing=db.query(WhiteboardSnapshot).filter(WhiteboardSnapshot.session_id==session_id,WhiteboardSnapshot.page_id==page.id).order_by(desc(WhiteboardSnapshot.created_at)).first()
+        page=db.query(ClassroomPage).filter(
+            ClassroomPage.id==page.id,
+            ClassroomPage.session_id==session_id,
+        ).with_for_update().first()
+        if page is None:
+            return
+        existing=db.query(WhiteboardSnapshot).filter(
+            WhiteboardSnapshot.session_id==session_id,
+            WhiteboardSnapshot.page_id==page.id,
+        ).order_by(
+            WhiteboardSnapshot.snapshot_data["revision"].as_integer().desc().nullslast(),
+            desc(WhiteboardSnapshot.created_at),
+            desc(WhiteboardSnapshot.id),
+        ).first()
         image_url=existing.image_url if existing else page.image_url
         if page.page_type == "pdf":
             # PDF page.image_url must remain the original stored PDF-page image;
@@ -1044,6 +1144,11 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     included_ids.add(stroke_id)
             snapshot_data["strokes"] = merged_strokes
         snapshot_data["deleted_stroke_ids"] = sorted(deleted_stroke_ids)
+        snapshot_data["canonical"] = True
+        try:
+            snapshot_data["revision"] = int((existing.snapshot_data or {}).get("revision") or 0) + 1
+        except (TypeError, ValueError):
+            snapshot_data["revision"] = 1
         db.add(WhiteboardSnapshot(session_id=session_id,snapshot_data=snapshot_data,image_url=image_url,page_number=page_number,page_id=page.id))
         db.commit()
         await websocket.send_json({"type":"snapshot_saved","page_number":page_number,"page_id":str(page.id)})
