@@ -311,6 +311,7 @@ export default function Classroom() {
   const gridRef = useRef(false);
   const [status, setStatus] = useState("Connecting…"), [notice, setNotice] = useState(""), [tool, setTool] = useState("pen"), [color, setColor] = useState("#111827"), [width, setWidth] = useState(3), [grid, setGrid] = useState(false);
   const [toolbarCollapsed, setToolbarCollapsed] = useState(false), [filmstripCollapsed, setFilmstripCollapsed] = useState(false);
+  const [whiteboardReady, setWhiteboardReady] = useState(false);
   const [slides, setSlides] = useState(() => [makeWhiteboardPage(1)]), [slide, setSlide] = useState(1), [chat, setChat] = useState([]), [message, setMessage] = useState("");
   const [chatImagePreview, setChatImagePreview] = useState(null), [chatImageZoom, setChatImageZoom] = useState(1), [chatUpload, setChatUpload] = useState(null);
   const [thumbnailVersion, setThumbnailVersion] = useState(0), [whiteboardCanvasEpoch, setWhiteboardCanvasEpoch] = useState(0);
@@ -331,7 +332,8 @@ export default function Classroom() {
   useEffect(() => { if (hasEntered || (!selectedCameraId && !selectedMicrophoneId)) return; let cancelled = false; let stream; const updatePreview = async () => { try { stream = await navigator.mediaDevices.getUserMedia({ video: selectedCameraId ? { deviceId: { exact: selectedCameraId } } : true, audio: selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : true }); if (cancelled) { stream.getTracks().forEach((track) => track.stop()); return; } previewStreamRef.current?.getTracks().forEach((track) => track.stop()); previewStreamRef.current = stream; if (previewRef.current) previewRef.current.srcObject = stream; } catch (error) { if (!cancelled) setDeviceError(error?.message || "Could not preview the selected devices."); } }; updatePreview(); return () => { cancelled = true; if (stream) stream.getTracks().forEach((track) => track.stop()); }; }, [selectedCameraId, selectedMicrophoneId, hasEntered]);
   const enterClassroom = () => { previewStreamRef.current?.getTracks().forEach((track) => track.stop()); previewStreamRef.current = null; setHasEntered(true); };
   const wsUrl = useMemo(() => { const base = import.meta.env.VITE_API_BASE_URL; if (!base || !sessionId) return null; const url = new URL(base); url.protocol = url.protocol === "https:" ? "wss:" : "ws:"; return `${url.origin}/ws/classroom/${sessionId}`; }, [sessionId]);
-  const canAnnotate = isTeacher || permissions.annotate;
+  const canAnnotate = whiteboardReady && (isTeacher || permissions.annotate);
+  const canManageWhiteboard = whiteboardReady && isTeacher;
   const recordUndoEntry = (entry) => {
     const id = entry.action_id || `${entry.kind}:${entry.page_id}:${entry.stroke?.id || entry.strokes?.map((item) => item.stroke?.id).join(",")}`;
     if (!id || undoHistoryIdsRef.current.has(id)) return;
@@ -445,6 +447,7 @@ export default function Classroom() {
     return true;
   };
   const sendWhiteboardQueue = useCallback(() => {
+    if (!whiteboardStateInitializedRef.current) return;
     const socket = wsRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     for (const [actionId, payload] of whiteboardQueueRef.current) {
@@ -639,7 +642,6 @@ export default function Classroom() {
       liveRef.current.delete(hit.id);
       committedRef.current.delete(hit.id);
       deletedStrokeIdsRef.current.add(hit.id);
-      publishControl({ kind: "whiteboard_delete", stroke_id: hit.id, page_number: slideRef.current, page_id: pageId, action_id: action.action_id });
       redraw();
       setThumbnailVersion((version) => version + 1);
       saveSnapshot();
@@ -748,9 +750,9 @@ export default function Classroom() {
       return request();
     }
   };
-  const changeSlide = (target) => { if (!isTeacher || drawRef.current) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(currentPageId(next), strokesByPageRef.current.get(currentPageId(next)) || []); publishControl({ kind: "page", page_number: next, page_id: currentPageId(next) }); };
+  const changeSlide = (target) => { if (!canManageWhiteboard || drawRef.current) return; const current = slideRef.current; const next = clamp(target, 1, slidesRef.current.length); if (next === current) return; saveSnapshotNow(current); slideControlActiveRef.current = true; slideRef.current = next; setSlide(next); strokesByPageRef.current.set(currentPageId(next), strokesByPageRef.current.get(currentPageId(next)) || []); publishControl({ kind: "page", page_number: next, page_id: currentPageId(next) }); };
   const addSlide = () => {
-    if (!isTeacher || drawRef.current) return;
+    if (!canManageWhiteboard || drawRef.current) return;
     const current = slideRef.current;
     const beforePages = slidesRef.current;
     const activePageId = beforePages[current - 1]?.page_id;
@@ -798,7 +800,7 @@ export default function Classroom() {
   };
 
   const deleteSlide = (page) => {
-    if (!isTeacher || slidesRef.current.length <= 1 || drawRef.current) return;
+    if (!canManageWhiteboard || slidesRef.current.length <= 1 || drawRef.current) return;
     const beforePages = slidesRef.current;
     const targetIndex = beforePages.findIndex((item) => item.page_id === page.page_id);
     if (targetIndex < 0) return;
@@ -878,7 +880,6 @@ export default function Classroom() {
         page_id: pageId,
         undo_entry_id: entry.id,
       });
-      publishControl({ kind: "whiteboard_undo", stroke_id: entry.stroke.id, page_number: entry.page_number, page_id: pageId, undo_entry_id: entry.id });
     } else {
       entry.strokes.forEach(({ stroke, index }) => {
         deletedStrokeIdsRef.current.delete(stroke.id);
@@ -899,7 +900,7 @@ export default function Classroom() {
     saveSnapshot();
   };
   const clearBoard = () => {
-    if (!isTeacher) return;
+    if (!canManageWhiteboard) return;
     const pageId = currentPageId(), pageNumber = slideRef.current;
     const activeDraw = drawRef.current && (drawRef.current.page_id === pageId || Number(drawRef.current.page_number) === pageNumber) ? drawRef.current : null;
     const removed = [
@@ -928,7 +929,6 @@ export default function Classroom() {
     strokesByPageRef.current.set(pageId, []);
     redraw();
     setThumbnailVersion((version) => version + 1);
-    publishControl({ kind: "whiteboard_clear", page_number: pageNumber, page_id: pageId, stroke_ids: Array.from(ids), action_id: action.action_id });
     saveSnapshot();
   };
   const uploadChatFile = async (file) => {
@@ -1250,7 +1250,6 @@ export default function Classroom() {
           });
           confirmedPageIdsRef.current = new Set(reconciledPages.map((page) => page.page_id));
           confirmedPageIdsRef.current.forEach((pageId) => pendingSlideIdsRef.current.delete(pageId));
-          sendWhiteboardQueue();
           if (!wasInitialized) {
             reconciledPages.forEach((page) => {
               page.strokes.forEach((stroke, index) => {
@@ -1277,6 +1276,8 @@ export default function Classroom() {
           const nextPage = selectedPage >= 0 ? selectedPage + 1 : clamp(Number(msg.page_number) || 1, 1, reconciledPages.length);
           slideRef.current = nextPage;
           setSlide(nextPage);
+          setWhiteboardReady(true);
+          sendWhiteboardQueue();
           setThumbnailVersion((version) => version + 1);
           setTimeout(redraw, 0);
         }
@@ -2049,21 +2050,21 @@ export default function Classroom() {
         {!toolbarCollapsed && <>
           {TOOLS.map(([id, label]) => <button key={id} type="button" title={label} aria-label={label} disabled={!canAnnotate} onClick={() => setTool(id)} className={`classroom-tool-button ${tool === id ? "active" : ""}`}><ToolIcon id={id} /></button>)}
           <button type="button" title="Undo" aria-label="Undo" disabled={!canAnnotate} onClick={undo} className="classroom-tool-button"><ToolIcon id="undo" /></button>
-          <button type="button" title="Clear board" aria-label="Clear board" disabled={!isTeacher} onClick={clearBoard} className="classroom-tool-button"><ToolIcon id="clear" /></button>
-          <button type="button" title="Grid" aria-label="Grid" disabled={!isTeacher} onClick={() => setGrid((v) => { const next = !v; publishControl({ kind: "grid", enabled: next }); return next; })} className={`classroom-tool-button ${grid ? "active" : ""}`}><ToolIcon id="grid" /></button>
-          <button type="button" title="Add slide" aria-label="Add slide" disabled={!isTeacher} onClick={addSlide} className="classroom-tool-button"><ToolIcon id="slide" /></button>
+          <button type="button" title="Clear board" aria-label="Clear board" disabled={!canManageWhiteboard} onClick={clearBoard} className="classroom-tool-button"><ToolIcon id="clear" /></button>
+          <button type="button" title="Grid" aria-label="Grid" disabled={!canManageWhiteboard} onClick={() => setGrid((v) => { const next = !v; publishControl({ kind: "grid", enabled: next }); return next; })} className={`classroom-tool-button ${grid ? "active" : ""}`}><ToolIcon id="grid" /></button>
+          <button type="button" title="Add slide" aria-label="Add slide" disabled={!canManageWhiteboard} onClick={addSlide} className="classroom-tool-button"><ToolIcon id="slide" /></button>
           {isTeacher && <button type="button" title="Permissions" aria-label="Permissions" onClick={() => setShowPermissions((v) => !v)} className={`classroom-tool-button ${showPermissions ? "active" : ""}`}><ToolIcon id="permissions" /></button>}
           <input type="color" title="Pen color" aria-label="Pen color" value={color} onChange={(e) => setColor(e.target.value)} disabled={!canAnnotate} className="classroom-tool-color disabled:opacity-40" />
           <input type="range" title="Stroke width" aria-label="Stroke width" min="1" max="18" value={width} onChange={(e) => setWidth(Number(e.target.value))} disabled={!canAnnotate} className="classroom-tool-width disabled:opacity-40" />
         </>}
       </div>
-      <div className="flex-1 min-h-0 flex items-center justify-center p-3 bg-[#070b16]"><div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl classroom-whiteboard-frame">{slides[slide - 1]?.image_url && <img src={slides[slide - 1].image_url} alt="PDF page" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />}<canvas key={whiteboardCanvasEpoch} ref={canvasRef} width={W} height={H} className={`absolute inset-0 w-full h-full touch-none ${!canAnnotate ? "cursor-default" : "cursor-crosshair"}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} /><div id="remote-screen" data-active="false" className="classroom-screen-overlay classroom-remote-screen" aria-label="Remote shared screen"><video muted autoPlay playsInline /></div><div id="local-screen" data-active="false" className="classroom-screen-overlay classroom-local-screen" aria-label="Your shared screen"><video muted autoPlay playsInline /></div>{hasEntered && !ending && !showReview && !classFinalizedRef.current && <div className="absolute inset-0 z-[70] pointer-events-none overflow-hidden" aria-hidden="true">
+      <div className="flex-1 min-h-0 flex items-center justify-center p-3 bg-[#070b16]"><div className="relative w-full max-w-[calc(100vh*1.777)] max-h-full aspect-video rounded-xl overflow-hidden bg-white shadow-2xl classroom-whiteboard-frame">{slides[slide - 1]?.image_url && <img src={slides[slide - 1].image_url} alt="PDF page" className="absolute inset-0 w-full h-full object-contain pointer-events-none" />}<canvas key={whiteboardCanvasEpoch} ref={canvasRef} width={W} height={H} className={`absolute inset-0 w-full h-full touch-none ${!canAnnotate ? "cursor-default" : "cursor-crosshair"}`} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} />{!whiteboardReady && <div className="absolute inset-0 z-10 grid place-items-center bg-white text-sm text-slate-500" aria-live="polite">Connecting to shared whiteboard…</div>}<div id="remote-screen" data-active="false" className="classroom-screen-overlay classroom-remote-screen" aria-label="Remote shared screen"><video muted autoPlay playsInline /></div><div id="local-screen" data-active="false" className="classroom-screen-overlay classroom-local-screen" aria-label="Your shared screen"><video muted autoPlay playsInline /></div>{hasEntered && !ending && !showReview && !classFinalizedRef.current && <div className="absolute inset-0 z-[70] pointer-events-none overflow-hidden" aria-hidden="true">
   <img src="/dexmy-logo-bg-removed.png" alt="" draggable="false" className="absolute left-[20px] top-[12px] h-[34px] w-auto max-w-[140px] object-contain opacity-90" />
 </div>}{slides.length > 1 && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex gap-2 bg-black/70 rounded-xl px-2 py-1.5"><button disabled={!isTeacher} onClick={() => changeSlide(slide - 1)} className="disabled:opacity-40">‹</button><span className="text-xs px-2">Slide {slide}/{slides.length}</span><button disabled={!isTeacher} onClick={() => changeSlide(slide + 1)} className="disabled:opacity-40">›</button></div>}</div></div>
       {isTeacher && <div className={`classroom-filmstrip-wrap shrink-0 border-t border-white/10 bg-[#111827] ${filmstripCollapsed ? "classroom-filmstrip-collapsed" : ""}`}>
         <button type="button" title={filmstripCollapsed ? "Expand pages" : "Collapse pages"} aria-label={filmstripCollapsed ? "Expand pages" : "Collapse pages"} onClick={() => setFilmstripCollapsed((value) => !value)} className="classroom-filmstrip-toggle"><ToolIcon id={filmstripCollapsed ? "expand" : "collapse"} /><ToolIcon id="film" /><span>{slide}/{slides.length}</span></button>
         {!filmstripCollapsed && <div className="h-[100px] px-3 py-2 flex items-center gap-3 overflow-x-auto classroom-page-filmstrip">
-          {slides.map((page, index) => <PageThumbnail key={page.page_id} page={page} number={index + 1} active={slide === index + 1} canSelect={true} canDelete={slides.length > 1} onSelect={() => changeSlide(index + 1)} onDelete={() => deleteSlide(page)} strokes={strokesByPageRef.current.get(page.page_id) || []} version={thumbnailVersion} />)}
+          {slides.map((page, index) => <PageThumbnail key={page.page_id} page={page} number={index + 1} active={slide === index + 1} canSelect={canManageWhiteboard} canDelete={canManageWhiteboard && slides.length > 1} onSelect={() => changeSlide(index + 1)} onDelete={() => deleteSlide(page)} strokes={strokesByPageRef.current.get(page.page_id) || []} version={thumbnailVersion} />)}
         </div>}
       </div>}
       <div className="h-16 shrink-0 border-t border-white/10 bg-[#111827] flex items-center justify-center gap-2 classroom-legacy-controls"><button onClick={() => media("mic")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{mic ? "Mute" : "Mic"}</button><button onClick={() => media("camera")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{camera ? "Camera off" : "Camera"}</button><button onClick={() => media("screen")} className="h-10 px-4 rounded-full bg-white/10 text-xs">{screen ? "Stop sharing" : "Share screen"}</button></div>
