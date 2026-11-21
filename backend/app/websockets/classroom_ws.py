@@ -371,6 +371,21 @@ async def _send_latest_whiteboard(session_id: uuid.UUID, websocket: WebSocket, d
     await websocket.send_json({"type":"whiteboard_state","page_number":cur["page_number"],"page_id":cur["page_id"],"canvas_json":{"strokes":cur["strokes"]},"image_url":cur["image_url"],"pages":pages})
 
 
+def _deleted_stroke_ids_for_snapshot(
+    page_snapshots: list[WhiteboardSnapshot],
+    latest_snapshot: WhiteboardSnapshot | None,
+) -> set[str]:
+    latest_data = latest_snapshot.snapshot_data if latest_snapshot and isinstance(latest_snapshot.snapshot_data, dict) else {}
+    if latest_data.get("canonical"):
+        return set(map(str, latest_data.get("deleted_stroke_ids") or []))
+    return {
+        str(stroke_id)
+        for snapshot in page_snapshots
+        if isinstance(snapshot.snapshot_data, dict)
+        for stroke_id in (snapshot.snapshot_data.get("deleted_stroke_ids") or [])
+    }
+
+
 @router.websocket("/ws/classroom/{session_id}")
 async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: str | None = Query(default=None)):
     db = SessionLocal()
@@ -1078,12 +1093,7 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             WhiteboardSnapshot.session_id == session_id,
             WhiteboardSnapshot.page_id == page.id,
         ).order_by(WhiteboardSnapshot.created_at.asc(), WhiteboardSnapshot.id.asc()).all()
-        deleted_stroke_ids = {
-            str(stroke_id)
-            for historical in page_snapshots
-            if isinstance(historical.snapshot_data, dict)
-            for stroke_id in (historical.snapshot_data.get("deleted_stroke_ids") or [])
-        }
+        deleted_stroke_ids = _deleted_stroke_ids_for_snapshot(page_snapshots, existing)
         history_by_id = {}
         history_order = []
         for historical in page_snapshots:
