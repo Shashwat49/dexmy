@@ -7,6 +7,9 @@ import bcrypt
 
 from app.core.config import settings
 
+CLASSROOM_WS_TOKEN_TTL_SECONDS = 60
+
+
 def _truncate_for_bcrypt(password: str) -> bytes:
     return password.encode("utf-8")[:72]
 
@@ -25,6 +28,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def create_access_token(subject: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": subject, "role": role, "exp": expire}
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def create_classroom_ws_token(subject: str, role: str, session_id: str) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(seconds=CLASSROOM_WS_TOKEN_TTL_SECONDS)
+    payload = {
+        "sub": subject,
+        "role": role,
+        "token_use": "classroom_websocket",
+        "session_id": session_id,
+        "exp": expire,
+    }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 

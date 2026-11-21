@@ -45,6 +45,11 @@ def get_current_user(
 
     try:
         payload = decode_access_token(token)
+        if payload.get("token_use") == "classroom_websocket":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token",
+            )
         user_id = uuid.UUID(payload["sub"])
     except (JWTError, KeyError, ValueError, TypeError):
         raise HTTPException(

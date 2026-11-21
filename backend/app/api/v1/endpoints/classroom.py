@@ -1,10 +1,11 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status, File, UploadFile
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dependencies import get_current_user
+from app.core.security import CLASSROOM_WS_TOKEN_TTL_SECONDS, create_classroom_ws_token
 from app.db.session import get_db
 from app.models.booking import Booking, BookingStatus
 from app.models.classroom import ClassSession, PermissionEvent, PermissionType, SessionStatus
@@ -24,6 +25,10 @@ router = APIRouter()
 class FileUploadResponse(BaseModel):
     file_url: str
     file_name: str
+
+class ClassroomWebSocketTokenResponse(BaseModel):
+    websocket_token: str
+    expires_in: int
 
 class WhiteboardPageResponse(BaseModel):
     page_id: str
@@ -59,6 +64,33 @@ def get_join_token(payload: JoinTokenRequest, current_user: User = Depends(get_c
     sources = None if is_teacher else _student_publish_sources(payload.session_id, current_user.id, db)
     token = create_join_token(room_name=session.livekit_room_name, identity=str(current_user.id), name=current_user.full_name, can_publish=is_teacher or bool(sources), publish_sources=sources, can_publish_data=True)
     return JoinTokenResponse(livekit_token=token, livekit_url=settings.LIVEKIT_URL, room_name=session.livekit_room_name)
+
+@router.post("/sessions/{session_id}/websocket-token", response_model=ClassroomWebSocketTokenResponse)
+def get_classroom_websocket_token(
+    session_id: uuid.UUID,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    session = db.get(ClassSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    booking = db.get(Booking, session.booking_id)
+    if booking is None:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if current_user.id not in (booking.teacher_id, booking.student_id):
+        raise HTTPException(status_code=403, detail="You are not part of this classroom")
+
+    response.headers["Cache-Control"] = "no-store"
+    token = create_classroom_ws_token(
+        subject=str(current_user.id),
+        role=current_user.role.value,
+        session_id=str(session_id),
+    )
+    return ClassroomWebSocketTokenResponse(
+        websocket_token=token,
+        expires_in=CLASSROOM_WS_TOKEN_TTL_SECONDS,
+    )
 
 @router.post("/sessions/{session_id}/end", response_model=ClassNotesRead)
 async def end_session(session_id: uuid.UUID, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

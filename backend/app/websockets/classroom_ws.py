@@ -117,11 +117,17 @@ async def _heartbeat(websocket: WebSocket) -> None:
         return
 
 
-def _authenticate(token: str | None, db) -> User | None:
+def _authenticate(token: str | None, db, session_id: uuid.UUID) -> User | None:
     if not token:
         return None
     try:
         payload = decode_access_token(token)
+        token_use = payload.get("token_use")
+        if token_use == "classroom_websocket":
+            if payload.get("session_id") != str(session_id):
+                return None
+        elif token_use is not None:
+            return None
         user_id = uuid.UUID(payload["sub"])
     except (JWTError, KeyError, ValueError, TypeError):
         return None
@@ -406,7 +412,7 @@ async def classroom_socket(websocket: WebSocket, session_id: uuid.UUID, token: s
         # Cookies are the primary auth path. The query token remains temporarily
         # accepted to avoid breaking already-open clients during a staggered deploy.
         access_token = websocket.cookies.get(settings.ACCESS_COOKIE_NAME) or token
-        user = _authenticate(access_token, db)
+        user = _authenticate(access_token, db, session_id)
         if user is None:
             await websocket.close(code=4401)
             return

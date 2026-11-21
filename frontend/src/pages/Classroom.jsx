@@ -979,9 +979,24 @@ export default function Classroom() {
     let reconnectTimer;
     let socket = null;
 
-    const connectWebSocket = () => {
+    const connectWebSocket = async () => {
       if (disposedRef.current) return;
-      const nextSocket = new WebSocket(wsUrl);
+      let nextSocket;
+      try {
+        const { data } = await api.post(`/classroom/sessions/${sessionId}/websocket-token`);
+        if (disposedRef.current) return;
+        if (!data?.websocket_token) throw new Error("The server did not issue a classroom connection token.");
+        const authenticatedUrl = new URL(wsUrl);
+        authenticatedUrl.searchParams.set("token", data.websocket_token);
+        nextSocket = new WebSocket(authenticatedUrl.toString());
+      } catch (error) {
+        if (disposedRef.current) return;
+        setNotice(error.response?.data?.detail || error.message || "Could not authorize the classroom connection.");
+        if (!error.response || error.response.status >= 500) {
+          reconnectTimer = setTimeout(connectWebSocket, 2500);
+        }
+        return;
+      }
       socket = nextSocket;
       wsRef.current = nextSocket;
 
@@ -1553,9 +1568,13 @@ export default function Classroom() {
           }).catch(() => navigate(isTeacher ? "/dashboard/teacher" : "/dashboard/student"));
           return;
         }
-        if (![4401, 4403, 4404].includes(event.code)) {
-          reconnectTimer = setTimeout(connectWebSocket, 2500);
+        if ([4401, 4403, 4404].includes(event.code)) {
+          setNotice(event.code === 4401
+            ? "Classroom authentication failed. Please refresh and rejoin."
+            : "This account cannot join the classroom session.");
+          return;
         }
+        reconnectTimer = setTimeout(connectWebSocket, 2500);
       };
     };
 
