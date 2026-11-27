@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
-from app.models.package import PackagePlan
+from app.models.package import PackagePlan, StudentPackage
 from app.models.payment import Payment, PaymentStatus
 from app.models.student import ParentStudentLink
 from app.models.user import User, UserRole
@@ -198,6 +198,29 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
             db.commit()
 
     return {"received": True}
+
+
+@router.get("/{payment_id}/status")
+def get_package_payment_status(
+    payment_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    payment = db.get(Payment, payment_id)
+    if (
+        payment is None
+        or payment.package_plan_id is None
+        or payment.package_id is None and payment.booking_id is not None
+        or not _can_access_payment(current_user, payment, db)
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package payment not found")
+
+    package = db.get(StudentPackage, payment.package_id) if payment.package_id else None
+    return {
+        "payment_id": str(payment.id),
+        "status": payment.status.value,
+        "package_active": package is not None and package.status == "active",
+    }
 
 
 @router.get("/history")
