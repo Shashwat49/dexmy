@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
-from app.websockets.classroom_ws import _deleted_stroke_ids_for_snapshot
+from app.websockets.classroom_ws import (
+    _apply_clear_action,
+    _deleted_stroke_ids_for_snapshot,
+)
 
 
 def test_restored_strokes_are_not_kept_as_historical_deletions():
@@ -27,3 +30,32 @@ def test_legacy_snapshots_still_contribute_deletion_tombstones():
     deleted_ids = _deleted_stroke_ids_for_snapshot([legacy_snapshot], legacy_snapshot)
 
     assert deleted_ids == {"stroke-1"}
+
+
+def test_clear_tombstones_client_strokes_not_yet_committed_to_server():
+    strokes = [{"id": "committed-stroke"}, {"id": "other-stroke"}]
+    deleted_ids = set()
+
+    remaining, deleted = _apply_clear_action(
+        strokes,
+        deleted_ids,
+        ["committed-stroke", "live-preview-stroke"],
+    )
+
+    assert remaining == []
+    assert deleted == {
+        "committed-stroke",
+        "other-stroke",
+        "live-preview-stroke",
+    }
+
+
+def test_clear_ignores_malformed_stroke_id_payload():
+    remaining, deleted = _apply_clear_action(
+        [{"id": "committed-stroke"}],
+        set(),
+        "not-a-list",
+    )
+
+    assert remaining == []
+    assert deleted == {"committed-stroke"}

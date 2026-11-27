@@ -295,6 +295,8 @@ export default function Classroom() {
   const whiteboardStateInitializedRef = useRef(false);
   const whiteboardQueueRef = useRef(new Map());
   const whiteboardSentOnSocketRef = useRef(new Set());
+  const whiteboardInFlightActionRef = useRef(null);
+  const whiteboardAckTimerRef = useRef(null);
   // Track local edits so a delayed acknowledgement cannot roll a newer drag back.
   const localStrokeEditGenerationRef = useRef(new Map());
   const whiteboardActionEditVersionRef = useRef(new Map());
@@ -316,6 +318,7 @@ export default function Classroom() {
   const [chatImagePreview, setChatImagePreview] = useState(null), [chatImageZoom, setChatImageZoom] = useState(1), [chatUpload, setChatUpload] = useState(null);
   const [thumbnailVersion, setThumbnailVersion] = useState(0), [whiteboardCanvasEpoch, setWhiteboardCanvasEpoch] = useState(0);
   const [textModal, setTextModal] = useState(null), [textDraft, setTextDraft] = useState("");
+  const [screenShareReady, setScreenShareReady] = useState(false);
   const activeBackground = slides[slide - 1]?.image_url || null;
   const [backgroundSize, setBackgroundSize] = useState(null);
   const backgroundSizeRef = useRef(null);
@@ -448,18 +451,27 @@ export default function Classroom() {
   };
   const sendWhiteboardQueue = useCallback(() => {
     if (!whiteboardStateInitializedRef.current) return;
+    if (whiteboardInFlightActionRef.current) return;
     const socket = wsRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     for (const [actionId, payload] of whiteboardQueueRef.current) {
       if (whiteboardSentOnSocketRef.current.has(actionId)) continue;
       const pageId = payload.page_id || payload.stroke?.page_id;
-      if (pageId && pendingSlideIdsRef.current.has(pageId)) continue;
+      if (pageId && pendingSlideIdsRef.current.has(pageId)) return;
       try {
         socket.send(JSON.stringify({ type: "whiteboard_event", payload }));
         whiteboardSentOnSocketRef.current.add(actionId);
+        whiteboardInFlightActionRef.current = actionId;
+        clearTimeout(whiteboardAckTimerRef.current);
+        whiteboardAckTimerRef.current = setTimeout(() => {
+          if (wsRef.current === socket && whiteboardInFlightActionRef.current === actionId) {
+            socket.close();
+          }
+        }, 10000);
       } catch {
-        break;
+        return;
       }
+      return;
     }
   }, []);
   const queueWhiteboardAction = useCallback((payload) => {
@@ -955,7 +967,7 @@ export default function Classroom() {
     }
   };
   const isChatImage = (fileName = "") => /\.(apng|avif|gif|jpe?g|png|webp|bmp|svg)$/i.test(fileName.split("?")[0]);
-  const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant || mediaBusyRef.current) return; if (kind === "mic" && !isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); if (kind === "camera" && !isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); if (kind === "screen" && !isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); mediaBusyRef.current = true; try { if (kind === "mic") { const publication = participant.getTrackPublication?.(Track.Source.Microphone); const next = !(publication?.track && !publication.isMuted); await participant.setMicrophoneEnabled(next, selectedMicrophoneId ? { deviceId: selectedMicrophoneId } : undefined); micStateRef.current = next; setMic(next); } else if (kind === "camera") { const publication = participant.getTrackPublication?.(Track.Source.Camera); const next = !(publication?.track && !publication.isMuted); await participant.setCameraEnabled(next, selectedCameraId ? { deviceId: selectedCameraId } : undefined); cameraStateRef.current = next; setCamera(next); } else if (kind === "screen") {
+  const media = async (kind) => { const participant = roomRef.current?.localParticipant; if (!participant || mediaBusyRef.current) return; if (kind === "mic" && !isTeacher && !permissions.mic) return setNotice("Microphone permission is disabled."); if (kind === "camera" && !isTeacher && !permissions.camera) return setNotice("Camera permission is disabled."); if (kind === "screen" && !isTeacher && !permissions.screen_share) return setNotice("Screen sharing is disabled."); if (kind === "screen" && !isTeacher && !screenShareReady) return setNotice("Screen sharing is approved and is still being enabled."); mediaBusyRef.current = true; try { if (kind === "mic") { const publication = participant.getTrackPublication?.(Track.Source.Microphone); const next = !(publication?.track && !publication.isMuted); await participant.setMicrophoneEnabled(next, selectedMicrophoneId ? { deviceId: selectedMicrophoneId } : undefined); micStateRef.current = next; setMic(next); } else if (kind === "camera") { const publication = participant.getTrackPublication?.(Track.Source.Camera); const next = !(publication?.track && !publication.isMuted); await participant.setCameraEnabled(next, selectedCameraId ? { deviceId: selectedCameraId } : undefined); cameraStateRef.current = next; setCamera(next); } else if (kind === "screen") {
         // The classroom WebSocket grant can arrive just before LiveKit's updated
         // publish-source permission reaches this SDK instance. Wait only while a
         // known source list still denies screen sharing; this avoids opening the
@@ -966,6 +978,10 @@ export default function Classroom() {
             const allowedSources = participant.permissions?.canPublishSources;
             if (!Array.isArray(allowedSources) || allowedSources.includes(Track.Source.ScreenShare)) break;
             await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          const allowedSources = participant.permissions?.canPublishSources;
+          if (Array.isArray(allowedSources) && !allowedSources.includes(Track.Source.ScreenShare)) {
+            throw new Error("Screen sharing permission is still syncing. Please try again.");
           }
         }
         const publication = participant.getTrackPublication?.(Track.Source.ScreenShare);
@@ -1001,6 +1017,9 @@ export default function Classroom() {
       wsRef.current = nextSocket;
 
       nextSocket.onopen = () => {
+        clearTimeout(whiteboardAckTimerRef.current);
+        whiteboardAckTimerRef.current = null;
+        whiteboardInFlightActionRef.current = null;
         whiteboardSentOnSocketRef.current.clear();
         sendWhiteboardQueue();
       };
@@ -1094,6 +1113,11 @@ export default function Classroom() {
             whiteboardQueueRef.current.delete(actionId);
             whiteboardSentOnSocketRef.current.delete(actionId);
             whiteboardActionEditVersionRef.current.delete(actionId);
+            clearTimeout(whiteboardAckTimerRef.current);
+            whiteboardAckTimerRef.current = null;
+            if (whiteboardInFlightActionRef.current === actionId) {
+              whiteboardInFlightActionRef.current = null;
+            }
             sendWhiteboardQueue();
           }
           return;
@@ -1122,8 +1146,19 @@ export default function Classroom() {
         }
         if (msg.type === "participant_info") setPeerName(msg.name || "Participant");
         if (msg.type === "chat") appendChatMessage(msg);
-        if (msg.type === "permissions_state") setPermissions((p) => ({ ...p, ...(msg.permissions || {}) }));
+        if (msg.type === "permissions_state") {
+          const nextPermissions = msg.permissions || {};
+          setPermissions((p) => ({ ...p, ...nextPermissions }));
+          if (Object.prototype.hasOwnProperty.call(nextPermissions, "screen_share")) {
+            const sources = roomRef.current?.localParticipant?.permissions?.canPublishSources;
+            setScreenShareReady(Boolean(
+              nextPermissions.screen_share &&
+              (!Array.isArray(sources) || sources.includes(Track.Source.ScreenShare))
+            ));
+          }
+        }
         if (msg.type === "permission_sync_failed") {
+          if (msg.permission === "screen_share") setScreenShareReady(false);
           setNotice(`Could not apply the ${msg.permission || "classroom"} permission. Please try again.`);
         }
         if (msg.type === "permission_denied") {
@@ -1131,8 +1166,13 @@ export default function Classroom() {
         }
         if (msg.type === "permission_update") {
           setPermissions((p) => ({ ...p, [msg.permission]: msg.granted }));
+          if (msg.permission === "screen_share") {
+            setScreenShareReady(Boolean(msg.granted && !msg.pending));
+          }
           const permissionLabel = msg.permission === "screen_share" ? "Screen sharing" : msg.permission === "annotate" ? "Whiteboard annotation" : msg.permission === "mic" ? "Microphone" : "Camera";
-          setNotice(`${permissionLabel} ${msg.granted ? "enabled" : "disabled"}.`);
+          setNotice(msg.permission === "screen_share" && msg.pending
+            ? "Screen sharing is approved and is being enabled…"
+            : `${permissionLabel} ${msg.granted ? "enabled" : "disabled"}.`);
           if (!isTeacher && !msg.granted && msg.permission === "mic") {
             micStateRef.current = false;
             roomRef.current?.localParticipant.setMicrophoneEnabled(false).then(() => setMic(false)).catch(() => { });
@@ -1553,6 +1593,9 @@ export default function Classroom() {
       };
 
       nextSocket.onclose = (event) => {
+        clearTimeout(whiteboardAckTimerRef.current);
+        whiteboardAckTimerRef.current = null;
+        whiteboardInFlightActionRef.current = null;
         whiteboardSentOnSocketRef.current.clear();
         if (disposedRef.current) return;
         if (event.code === 4409) {
@@ -1688,9 +1731,11 @@ export default function Classroom() {
           if (participant !== room.localParticipant) return;
           const sources = participant.permissions?.canPublishSources;
           if (Array.isArray(sources) && sources.includes(Track.Source.ScreenShare)) {
+            setScreenShareReady(true);
             setPermissions((current) => ({ ...current, screen_share: true }));
             setNotice("Screen sharing permission enabled.");
           } else if (Array.isArray(sources)) {
+            setScreenShareReady(false);
             setPermissions((current) => ({ ...current, screen_share: false }));
           }
         });
@@ -2008,6 +2053,7 @@ export default function Classroom() {
       disposedRef.current = true;
       clearTimeout(reconnectTimer);
       clearTimeout(snapshotTimerRef.current);
+      clearTimeout(whiteboardAckTimerRef.current);
       clearInterval(reliableStrokeTimerRef.current);
       socket?.close();
       if (wsRef.current === socket) wsRef.current = null;

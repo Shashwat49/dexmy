@@ -195,15 +195,15 @@ async def _update_timer_for_presence(room) -> None:
     await _broadcast_timer_state(room)
 
 
-def _allowed_sources(room, user_id: uuid.UUID) -> list[str]:
+def _allowed_sources(room, user_id: uuid.UUID) -> list[int]:
     permissions = room.permissions.get(str(user_id), set())
     sources = []
     if "camera" in permissions:
-        sources.append("camera")
+        sources.append(api.TrackSource.CAMERA)
     if "mic" in permissions:
-        sources.append("microphone")
+        sources.append(api.TrackSource.MICROPHONE)
     if "screen_share" in permissions:
-        sources.append("screen_share")
+        sources.append(api.TrackSource.SCREEN_SHARE)
     return sources
 
 
@@ -273,6 +273,7 @@ async def _finish_screen_share_permission_change(class_session: ClassSession, ta
             "type": "permission_update",
             "permission": "screen_share",
             "granted": current_granted,
+            "pending": False,
         }
         for ws in (room.teacher_ws, room.student_ws):
             if ws:
@@ -390,6 +391,23 @@ def _deleted_stroke_ids_for_snapshot(
         if isinstance(snapshot.snapshot_data, dict)
         for stroke_id in (snapshot.snapshot_data.get("deleted_stroke_ids") or [])
     }
+
+
+def _apply_clear_action(
+    strokes: list[dict],
+    deleted_stroke_ids: set[str],
+    requested_stroke_ids: list[str] | None,
+) -> tuple[list[dict], set[str]]:
+    deleted_stroke_ids.update(
+        str(stroke["id"])
+        for stroke in strokes
+        if isinstance(stroke, dict) and stroke.get("id")
+    )
+    if isinstance(requested_stroke_ids, (list, tuple, set)):
+        deleted_stroke_ids.update(
+            str(stroke_id) for stroke_id in requested_stroke_ids if stroke_id
+        )
+    return [], deleted_stroke_ids
 
 
 @router.websocket("/ws/classroom/{session_id}")
@@ -587,12 +605,18 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                 elif not is_teacher and room.teacher_ws is peer:
                     room.teacher_ws = None
     elif msg_type == "whiteboard_event":
-        if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
-            await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
-            return
         payload = data.get("payload") or {}
         kind = payload.get("kind")
         action_id = payload.get("action_id")
+        if not is_teacher and "annotate" not in room.permissions.get(str(user.id), set()):
+            await websocket.send_json({"type": "permission_denied", "permission": "annotate"})
+            if action_id:
+                await websocket.send_json({
+                    "type": "whiteboard_event_ack",
+                    "action_id": str(action_id),
+                    "payload": None,
+                })
+            return
         if action_id:
             already_processed = db.query(WhiteboardSnapshot).filter(
                 WhiteboardSnapshot.session_id == session_id,
@@ -886,11 +910,11 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     if isinstance(removed, dict) and removed.get("id"):
                         deleted_stroke_ids.add(str(removed["id"]))
             elif kind == "clear":
-                deleted_stroke_ids.update(
-                    str(item["id"]) for item in strokes
-                    if isinstance(item, dict) and item.get("id")
+                strokes, deleted_stroke_ids = _apply_clear_action(
+                    strokes,
+                    deleted_stroke_ids,
+                    payload.get("stroke_ids"),
                 )
-                strokes = []
             snapshot_data = {
                 "strokes": strokes,
                 "deleted_stroke_ids": sorted(deleted_stroke_ids),
@@ -973,15 +997,39 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
             ))
             return
 
-        # Screen-share grants and revokes are saved and announced immediately;
-        # LiveKit's publish-source permission is applied asynchronously.
+        # Show the grant immediately, but keep screen publishing disabled until
+        # persistence and LiveKit's publish-source permission both succeed.
         if permission == PermissionType.screen_share:
+            event = {
+                "type": "permission_update",
+                "permission": permission.value,
+                "granted": granted,
+                "pending": granted,
+            }
+            for ws in (room.teacher_ws, room.student_ws):
+                if ws:
+                    try:
+                        await ws.send_json(event)
+                    except Exception:
+                        pass
             try:
                 db.add(PermissionEvent(session_id=session_id, target_user_id=target_user_id, permission=permission, granted=granted, granted_by=user.id))
                 db.commit()
             except Exception:
                 db.rollback()
                 room.permissions[key] = previous_permissions
+                rollback_event = {
+                    "type": "permission_update",
+                    "permission": permission.value,
+                    "granted": permission.value in previous_permissions,
+                    "pending": False,
+                }
+                for ws in (room.teacher_ws, room.student_ws):
+                    if ws:
+                        try:
+                            await ws.send_json(rollback_event)
+                        except Exception:
+                            pass
                 await websocket.send_json({
                     "type": "permission_sync_failed",
                     "permission": permission.value,
@@ -989,16 +1037,6 @@ async def _handle_message(data, user, is_teacher, session_id, room, db, websocke
                     "reason": "Could not save the permission change. Please try again.",
                 })
                 return
-            # Announce both grants and revokes immediately so the student UI
-            # responds without waiting for LiveKit. LiveKit publication remains
-            # synchronized separately and is the server-authoritative publish guard.
-            event = {"type": "permission_update", "permission": permission.value, "granted": granted}
-            for ws in (room.teacher_ws, room.student_ws):
-                if ws:
-                    try:
-                        await ws.send_json(event)
-                    except Exception:
-                        pass
             asyncio.create_task(_finish_screen_share_permission_change(class_session, target_user_id, room, session_id, user.id, granted))
             return
 
