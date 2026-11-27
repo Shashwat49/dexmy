@@ -41,6 +41,7 @@ export default function Packages() {
         if (!mounted || !Array.isArray(data)) return;
         setPackages(data);
         setApiLoaded(true);
+        if (!data.some((p) => p.is_active)) setError("No active packages are available right now. Please contact Dexmy.");
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(data));
         } catch {
@@ -48,8 +49,8 @@ export default function Packages() {
         }
       })
       .catch(() => {
-        if (mounted && !packages.length) {
-          setError("Unable to refresh packages right now. Showing default pricing.");
+        if (mounted) {
+          setError("Unable to verify current pricing. Checkout is disabled until package pricing can be refreshed.");
         }
       });
 
@@ -123,13 +124,13 @@ function PackageCard({ pkg, currency, canPurchase }) {
 
   return (
     <article className="rounded-2xl border border-chalk-faint bg-panel p-6 flex flex-col">
-      <div className="text-sm text-chalk-muted">{custom ? "Flexible" : `${pkg.class_count} live classes`}</div>
+      <div className="text-sm text-chalk-muted">{custom ? `Custom plan · ${pkg.class_count} classes` : `${pkg.class_count} live classes`}</div>
       <h2 className="mt-2 text-xl font-semibold">{pkg.name}</h2>
       <div className="mt-7">
         <span className="text-4xl font-semibold">{currency === "INR" ? "₹" : "$"}{price.toFixed(2).replace(/\.00$/, "")}</span>
         <span className="ml-2 text-sm text-chalk-muted">/ class</span>
       </div>
-      <p className="mt-3 text-sm text-chalk-muted">{custom ? "Build a package around your required number of classes." : `${pkg.class_count} classes at ${currency === "INR" ? "₹" : "$"}${(price * pkg.class_count).toFixed(2).replace(/\.00$/, "")} total.`}</p>
+      <p className="mt-3 text-sm text-chalk-muted">{custom ? `Currently configured for ${pkg.class_count} classes. Contact Dexmy for a different quantity.` : `${pkg.class_count} classes at ${currency === "INR" ? "₹" : "$"}${(price * pkg.class_count).toFixed(2).replace(/\.00$/, "")} total.`}</p>
       {canPurchase ? <Link to={`/checkout/package?package=${pkg.id}&currency=${currency}`} className="mt-7 inline-flex justify-center rounded-xl bg-brand-red px-4 py-3 text-sm font-semibold">Choose package</Link> : <p className="mt-7 rounded-xl border border-chalk-faint px-4 py-3 text-center text-sm text-chalk-muted">Checkout temporarily unavailable — refresh to verify current pricing.</p>}
     </article>
   );
