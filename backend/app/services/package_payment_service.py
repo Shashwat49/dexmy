@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -29,6 +30,13 @@ def get_or_create_payment(db: Session, *, payer_id: uuid.UUID, student_id: uuid.
             or existing.provider.value != provider
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key is already associated with a different payment")
+        expected_total = (package_plan.price * package_plan.class_count).quantize(Decimal("0.01"))
+        if existing.status == PaymentStatus.created and existing.amount != expected_total:
+            if existing.provider_order_id:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This checkout was created with previous pricing. Start a new checkout.")
+            existing.amount = expected_total
+            existing.package_class_count = package_plan.class_count
+            db.flush()
         return existing
 
     if provider == "razorpay" and package_plan.currency != "INR":
