@@ -1,7 +1,7 @@
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { getPackages } from "../../api/packages";
-import { createPackageCheckout, verifyRazorpayPackagePayment } from "../../api/packagePayments";
+import { createPackageCheckout, verifyRazorpayPackagePayment, getPackagePaymentStatus } from "../../api/packagePayments";
 import { getLinkedStudents } from "../../api/parents";
 import { useAuth } from "../../context/AuthContext";
 
@@ -31,6 +31,7 @@ export default function PackageCheckout() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
+  const [stripePaymentId, setStripePaymentId] = useState("");
 
   const currency = (params.get("currency") || "INR").toUpperCase();
   const id = params.get("package");
@@ -151,27 +152,58 @@ export default function PackageCheckout() {
     setProcessing(false);
   };
 
+  const wait = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  const pollStripePackageActivation = async (paymentId) => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        const statusResult = await getPackagePaymentStatus(paymentId);
+        if (statusResult.status === "paid" && statusResult.package_active) {
+          setSuccess(true);
+          setError("");
+          return;
+        }
+        if (statusResult.status === "failed") {
+          setError("Stripe could not complete this payment. Please try again or contact support if money was deducted.");
+          return;
+        }
+      } catch {
+        // A temporary network issue should not turn a potentially paid transaction into a failure.
+      }
+      if (attempt < 19) await wait(1500);
+    }
+    setError("Stripe has received the payment, but Dexmy is still waiting for server confirmation. Your package will appear after confirmation. You can check again below.");
+  };
+
   const confirmStripe = async () => {
-    if (!stripeRef.current || !elementsRef.current) return;
+    if (processing) return;
     setProcessing(true);
     setError("");
-    const { error: stripeError, paymentIntent } = await stripeRef.current.confirmPayment({
-      elements: elementsRef.current,
-      redirect: "if_required",
-    });
-    if (stripeError) {
-      setError(stripeError.message || "Stripe payment failed.");
+    try {
+      if (stripePaymentId) {
+        await pollStripePackageActivation(stripePaymentId);
+        return;
+      }
+      if (!stripeRef.current || !elementsRef.current) return;
+      const { error: stripeError, paymentIntent } = await stripeRef.current.confirmPayment({
+        elements: elementsRef.current,
+        redirect: "if_required",
+      });
+      if (stripeError) {
+        setError(stripeError.message || "Stripe payment failed.");
+        return;
+      }
+      if (paymentIntent?.id && ["succeeded", "processing"].includes(paymentIntent.status)) {
+        setStripePaymentId(paymentIntent.id);
+        await pollStripePackageActivation(paymentIntent.id);
+      } else {
+        setError("Stripe payment is not yet confirmed. Please check your payment details and try again.");
+      }
+    } catch (err) {
+      setError(err?.message || "Unable to confirm payment status. Please try again.");
+    } finally {
       setProcessing(false);
-      return;
     }
-    if (paymentIntent?.status === "succeeded") {
-      setSuccess(true);
-    } else if (paymentIntent?.status === "processing") {
-      setError("Payment submitted. Stripe is still confirming the payment; your package will be activated after confirmation.");
-    } else {
-      setError("Stripe payment is not yet confirmed. Please check your payment status.");
-    }
-    setProcessing(false);
   };
 
   const handlePayment = async () => {
@@ -254,7 +286,7 @@ export default function PackageCheckout() {
             <>
               <div ref={stripeMountRef} className="mt-6 rounded-xl border border-chalk-faint bg-panel-2 p-4" />
               <button onClick={confirmStripe} disabled={processing} className="mt-5 w-full rounded-xl bg-brand-red px-4 py-3 font-semibold disabled:opacity-50">
-                {processing ? "Processing..." : "Pay securely with Stripe"}
+                {processing ? "Checking payment..." : stripePaymentId ? "Check package activation" : "Pay securely with Stripe"}
               </button>
             </>
           ) : (
