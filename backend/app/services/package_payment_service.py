@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -41,7 +42,8 @@ def get_or_create_payment(db: Session, *, payer_id: uuid.UUID, student_id: uuid.
         package_plan_id=package_plan.id,
         student_id=student_id,
         payer_id=payer_id,
-        amount=package_plan.price,
+        amount=(Decimal(package_plan.price) * package_plan.class_count).quantize(Decimal("0.01")),
+        package_class_count=package_plan.class_count,
         currency=package_plan.currency,
         provider=provider,
         status=PaymentStatus.created,
@@ -108,7 +110,7 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
         student_id=payment.student_id,
         package_plan_id=plan.id,
         payment_id=payment.id,
-        total_classes=plan.class_count,
+        total_classes=payment.package_class_count or plan.class_count,
         classes_used=0,
         status="active",
     )
@@ -129,7 +131,7 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
     db.add(PackageCreditLedger(
         student_package_id=package.id,
         booking_id=None,
-        delta=plan.class_count,
+        delta=payment.package_class_count or plan.class_count,
         reason="purchase",
         created_by=None,
     ))
