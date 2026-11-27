@@ -10,7 +10,7 @@ from app.core.dependencies import require_role
 from app.db.session import get_db
 from app.models.booking import Booking
 from app.models.external_class_record import ExternalClassRecord
-from app.models.package import PackagePlan, StudentPackage
+from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage
 from app.models.user import User, UserRole
 from app.models.teacher import TeacherProfile
 from app.schemas.external_class_record import (
@@ -63,19 +63,22 @@ def teacher_class_students(
     The selector is intentionally not limited to students previously assigned
     to this teacher; teachers may need to record historical Meet classes.
     """
+    now = datetime.now(timezone.utc)
     rows = db.execute(
         select(StudentPackage, PackagePlan, User)
         .join(PackagePlan, PackagePlan.id == StudentPackage.package_plan_id)
         .join(User, User.id == StudentPackage.student_id)
         .where(
             StudentPackage.status == "active",
+            ((StudentPackage.is_unlimited.is_(True)) | (StudentPackage.classes_used < StudentPackage.total_classes)),
+            ((StudentPackage.expires_at.is_(None)) | (StudentPackage.expires_at > now)),
             User.role == UserRole.student,
             User.is_active.is_(True),
         )
-        .order_by(User.full_name.asc(), StudentPackage.purchased_at.desc())
+        .order_by(User.full_name.asc(), StudentPackage.expires_at.is_(None).asc(), StudentPackage.expires_at.asc(), StudentPackage.purchased_at.asc())
     ).all()
 
-    # Show each student once, choosing their most recently purchased active package.
+    # Show each student once, choosing the earliest-expiring eligible package used by booking allocation.
     result = []
     seen_student_ids = set()
     for package, plan, student in rows:
@@ -136,7 +139,7 @@ def create_teacher_record(
     if student is None or student.role != UserRole.student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    package = db.get(StudentPackage, payload.student_package_id)
+    package = db.execute(select(StudentPackage).where(StudentPackage.id == payload.student_package_id).with_for_update()).scalar_one_or_none()
     if package is None or package.student_id != student.id or package.status != "active":
         raise HTTPException(status_code=404, detail="Active student package not found")
 
@@ -146,7 +149,10 @@ def create_teacher_record(
     if payload.started_at.tzinfo is None or payload.ended_at.tzinfo is None:
         raise HTTPException(status_code=400, detail="Start and end times must include a timezone")
 
-    if payload.status == "completed" and package.classes_used >= package.total_classes:
+    if package.expires_at is not None and package.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=409, detail="This student package has expired")
+    consumes_credit = payload.status in ("completed", "no_show")
+    if consumes_credit and not package.is_unlimited and package.classes_used >= package.total_classes:
         raise HTTPException(status_code=409, detail="No remaining classes in this package")
 
     duration = max(1, math.ceil((payload.ended_at - payload.started_at).total_seconds() / 60))
@@ -165,6 +171,17 @@ def create_teacher_record(
         google_meet_link=payload.google_meet_link.strip() if payload.google_meet_link else None,
     )
     db.add(record)
+    db.flush()
+    if consumes_credit:
+        if not package.is_unlimited:
+            package.classes_used += 1
+        db.add(PackageCreditLedger(
+            student_package_id=package.id,
+            external_class_record_id=record.id,
+            delta=-1,
+            reason="external_class_debit" if payload.status == "completed" else "external_class_no_show",
+            created_by=current_user.id,
+        ))
     db.commit()
     db.refresh(record)
     return _record_read(record, db)
@@ -175,31 +192,23 @@ def student_records(
     current_user: User = Depends(require_role(UserRole.student)),
     db: Session = Depends(get_db),
 ):
-    package_row = db.execute(
+    now = datetime.now(timezone.utc)
+    package_rows = db.execute(
         select(StudentPackage, PackagePlan)
         .join(PackagePlan, PackagePlan.id == StudentPackage.package_plan_id)
-        .where(StudentPackage.student_id == current_user.id, StudentPackage.status == "active")
+        .where(
+            StudentPackage.student_id == current_user.id,
+            StudentPackage.status == "active",
+            (StudentPackage.expires_at.is_(None)) | (StudentPackage.expires_at > now),
+        )
         .order_by(StudentPackage.purchased_at.desc())
-        .limit(1)
-    ).first()
-    package = package_row[0] if package_row else None
-    plan = package_row[1] if package_row else None
+    ).all()
+    package = package_rows[0][0] if package_rows else None
+    plan = package_rows[0][1] if package_rows else None
+    total_classes = sum(row.total_classes for row, _ in package_rows)
+    completed_classes = sum(row.classes_used for row, _ in package_rows)
+    has_unlimited_package = any(row.is_unlimited for row, _ in package_rows)
 
-    # Keep the student dashboard entitlement consistent with the parent dashboard
-    # for the legacy/unlimited student account. The parent dashboard aggregates
-    # all active student packages, rather than only the latest package.
-    aggregate_package = None
-    if current_user.email.lower() == "wargod3508@gmail.com":
-        aggregate_package = db.execute(
-            select(
-                func.coalesce(func.sum(StudentPackage.total_classes), 0),
-                func.coalesce(func.sum(StudentPackage.classes_used), 0),
-            )
-            .where(
-                StudentPackage.student_id == current_user.id,
-                StudentPackage.status == "active",
-            )
-        ).one()
     student_user = aliased(User)
     teacher_user = aliased(User)
     admin_user = aliased(User)
@@ -215,30 +224,20 @@ def student_records(
         _record_read_with_users(record, student, teacher, admin)
         for record, student, teacher, admin in rows
     ]
-    if aggregate_package is not None and package and plan:
-        total_classes = int(aggregate_package[0] or 0)
-        completed_classes = int(aggregate_package[1] or 0)
+    if package and plan:
         package_data = {
             "id": package.id,
-            "name": plan.name,
+            "name": plan.name if len(package_rows) == 1 else f"{len(package_rows)} active packages",
             "total_classes": total_classes,
             "completed_classes": completed_classes,
             "remaining_classes": max(0, total_classes - completed_classes),
+            "is_unlimited": has_unlimited_package,
             "status": package.status,
             "currency": plan.currency,
             "price": float(plan.price),
         }
     else:
-        package_data = {
-            "id": package.id,
-            "name": plan.name,
-            "total_classes": package.total_classes,
-            "completed_classes": package.classes_used,
-            "remaining_classes": max(0, package.total_classes - package.classes_used),
-            "status": package.status,
-            "currency": plan.currency,
-            "price": float(plan.price),
-        } if package and plan else None
+        package_data = None
 
     return {
         "student_email": current_user.email,
