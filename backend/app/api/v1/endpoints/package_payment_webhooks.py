@@ -1,3 +1,5 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,6 +11,10 @@ from app.services import razorpay_service
 from app.services.package_payment_service import activate_package_from_payment
 
 router = APIRouter()
+
+
+def _minor_units(amount) -> int:
+    return int((Decimal(str(amount)) * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 @router.post("/razorpay/webhook")
@@ -52,7 +58,7 @@ async def razorpay_package_webhook(
         return {"received": True}
 
     order = razorpay_service.fetch_order(order_id)
-    expected_amount = int(round(float(payment.amount) * 100))
+    expected_amount = _minor_units(payment.amount)
     if order.get("amount") != expected_amount or order.get("currency") != payment.currency:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Razorpay payment amount or currency mismatch")
     if event.get("event") == "payment.captured":
