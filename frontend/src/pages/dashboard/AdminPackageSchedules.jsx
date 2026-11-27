@@ -62,25 +62,39 @@ export default function AdminPackageSchedules() {
     setLoading(true);
     setError("");
     try {
-      const [optionsResponse, schedulesResponse] = await Promise.all([
+      // Load the form options and existing schedules independently. A failure in
+      // the schedule-history query must not prevent admins from creating or
+      // validating a new schedule (and vice versa).
+      const [optionsResult, schedulesResult] = await Promise.allSettled([
         api.get("/admin/package-schedules/options"),
         api.get("/admin/package-schedules"),
       ]);
-      const nextOptions = optionsResponse.data || { packages: [], subjects: [], teachers: [] };
-      setOptions(nextOptions);
-      setSchedules(schedulesResponse.data || []);
-      setForm((current) => {
-        const packageStillExists = nextOptions.packages.some((p) => p.id === current.student_package_id);
-        const pkg = nextOptions.packages.find((p) => p.id === (packageStillExists ? current.student_package_id : nextOptions.packages[0]?.id));
-        return {
-          ...current,
-          student_package_id: pkg?.id || "",
-          subject_id: current.subject_id || String(nextOptions.subjects[0]?.id || ""),
-          class_count: pkg?.remaining_classes == null ? 32 : Math.min(120, pkg.remaining_classes),
-        };
-      });
-    } catch (e) {
-      setError(e.response?.data?.detail || "Unable to load package scheduling data.");
+
+      const loadErrors = [];
+      if (optionsResult.status === "fulfilled") {
+        const nextOptions = optionsResult.value.data || { packages: [], subjects: [], teachers: [] };
+        setOptions(nextOptions);
+        setForm((current) => {
+          const packageStillExists = nextOptions.packages.some((p) => p.id === current.student_package_id);
+          const pkg = nextOptions.packages.find((p) => p.id === (packageStillExists ? current.student_package_id : nextOptions.packages[0]?.id));
+          return {
+            ...current,
+            student_package_id: pkg?.id || "",
+            subject_id: current.subject_id || String(nextOptions.subjects[0]?.id || ""),
+            class_count: pkg?.remaining_classes == null ? 32 : Math.min(120, pkg.remaining_classes),
+          };
+        });
+      } else {
+        loadErrors.push(optionsResult.reason?.response?.data?.detail || "Unable to load student packages, subjects and teachers.");
+      }
+
+      if (schedulesResult.status === "fulfilled") {
+        setSchedules(schedulesResult.value.data || []);
+      } else {
+        loadErrors.push(schedulesResult.reason?.response?.data?.detail || "Unable to load existing package schedules. You can still create and validate a new schedule.");
+      }
+
+      setError(loadErrors.join(" "));
     } finally {
       setLoading(false);
     }
