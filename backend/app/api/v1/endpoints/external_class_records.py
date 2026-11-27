@@ -173,8 +173,6 @@ def create_teacher_record(
     db.add(record)
     db.flush()
     if consumes_credit:
-        if not package.is_unlimited:
-            package.classes_used += 1
         db.add(PackageCreditLedger(
             student_package_id=package.id,
             external_class_record_id=record.id,
