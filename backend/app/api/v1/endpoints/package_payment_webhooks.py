@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -47,7 +48,24 @@ async def razorpay_package_webhook(
     payment = db.execute(
         select(Payment).where(Payment.provider_order_id == order_id).with_for_update()
     ).scalar_one_or_none()
-    if payment is None or payment.provider.value != "razorpay":
+    if payment is None:
+        # The provider can emit the webhook before checkout commits the order ID.
+        # Razorpay's order receipt is the internal payment UUID created by Dexmy.
+        pending_order = razorpay_service.fetch_order(order_id)
+        receipt = pending_order.get("receipt")
+        try:
+            receipt_payment_id = uuid.UUID(str(receipt))
+        except (TypeError, ValueError):
+            return {"received": True}
+        payment = db.execute(
+            select(Payment).where(Payment.id == receipt_payment_id).with_for_update()
+        ).scalar_one_or_none()
+        if payment is None:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Package payment record is not committed yet")
+        if payment.provider_order_id not in (None, order_id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Razorpay order does not match the package payment")
+        payment.provider_order_id = order_id
+    if payment.provider.value != "razorpay":
         return {"received": True}
     if payment.status == PaymentStatus.paid:
         return {"received": True}
