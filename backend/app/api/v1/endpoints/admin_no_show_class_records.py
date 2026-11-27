@@ -1,6 +1,6 @@
 import math
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_admin
 from app.db.session import get_db
 from app.models.external_class_record import ExternalClassRecord
-from app.models.package import PackagePlan, StudentPackage
+from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage
 from app.models.user import User, UserRole
 from app.models.teacher import TeacherProfile
 from app.schemas.external_class_record import ExternalClassRecordRead
@@ -133,10 +133,12 @@ def create_no_show(
     if teacher is None or teacher.role != UserRole.teacher or not teacher.is_active or db.get(TeacherProfile, teacher.id) is None or not db.get(TeacherProfile, teacher.id).is_verified:
         raise HTTPException(status_code=400, detail="Only active verified teachers can be selected")
 
-    package = db.get(StudentPackage, payload.student_package_id)
+    package = db.execute(select(StudentPackage).where(StudentPackage.id == payload.student_package_id).with_for_update()).scalar_one_or_none()
     if package is None or package.student_id != student.id or package.status != "active":
         raise HTTPException(status_code=404, detail="Active student package not found")
-    if package.classes_used >= package.total_classes:
+    if package.expires_at is not None and package.expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=409, detail="This student package has expired")
+    if not package.is_unlimited and package.classes_used >= package.total_classes:
         raise HTTPException(status_code=409, detail="No remaining classes in this package")
 
     duration = max(1, math.ceil((payload.ended_at - payload.started_at).total_seconds() / 60))
@@ -156,6 +158,14 @@ def create_no_show(
         created_by_admin_id=current_user.id,
     )
     db.add(record)
+    db.flush()
+    db.add(PackageCreditLedger(
+        student_package_id=package.id,
+        external_class_record_id=record.id,
+        delta=-1,
+        reason="external_class_no_show",
+        created_by=current_user.id,
+    ))
     db.commit()
     db.refresh(record)
     return _record_read(record, db)
