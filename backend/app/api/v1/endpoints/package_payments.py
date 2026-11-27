@@ -185,15 +185,32 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
 
     if event["type"] in ("payment_intent.succeeded", "payment_intent.payment_failed"):
         intent = event["data"]["object"]
+        metadata = intent.get("metadata") or {}
         payment = db.execute(
             select(Payment).where(Payment.provider_order_id == intent["id"]).with_for_update()
         ).scalar_one_or_none()
-        
+
+        # Stripe can deliver the webhook before checkout commits provider_order_id.
+        # Resolve the pre-created payment by the signed PaymentIntent metadata so
+        # the event is not acknowledged and lost during that short race.
+        if payment is None and metadata.get("payment_id"):
+            try:
+                metadata_payment_id = uuid.UUID(metadata["payment_id"])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment metadata")
+            payment = db.execute(
+                select(Payment).where(Payment.id == metadata_payment_id).with_for_update()
+            ).scalar_one_or_none()
+            if payment is None:
+                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Package payment record is not committed yet")
+            if payment.provider_order_id not in (None, intent["id"]):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PaymentIntent does not match the package payment")
+            payment.provider_order_id = intent["id"]
+
         if payment is None:
             return {"received": True}
         if payment.provider.value != "stripe":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment provider mismatch")
-        metadata = intent.get("metadata") or {}
         if metadata.get("payment_id") and metadata["payment_id"] != str(payment.id):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment metadata mismatch")
 
