@@ -1,6 +1,9 @@
 import uuid
 from decimal import Decimal
 
+import pytest
+from fastapi import HTTPException
+
 from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage
 from app.models.payment import PaymentStatus
 from app.services.package_payment_service import activate_package_from_payment, get_or_create_payment
@@ -45,3 +48,36 @@ def test_package_checkout_stores_total_and_snapshots_class_count(db_session, see
         reason="purchase",
     ).one()
     assert purchase_ledger.delta == 50
+
+
+
+def test_legacy_underpriced_payment_cannot_activate_full_package(db_session, seed_data):
+    student = seed_data["student"]
+    plan = PackagePlan(
+        id=uuid.uuid4(),
+        name="Legacy 25 Classes Package",
+        class_count=25,
+        price=Decimal("2000.00"),
+        currency="INR",
+        is_active=True,
+    )
+    db_session.add(plan)
+    payment = __import__("app.models.payment", fromlist=["Payment"]).Payment(
+        id=uuid.uuid4(),
+        package_plan_id=plan.id,
+        student_id=student.id,
+        payer_id=student.id,
+        amount=Decimal("2000.00"),
+        currency="INR",
+        provider="razorpay",
+        status=PaymentStatus.created,
+        package_class_count=None,
+    )
+    db_session.add(payment)
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as error:
+        activate_package_from_payment(db_session, payment_id=payment.id, provider_payment_id="pay_legacy")
+
+    assert error.value.status_code == 409
+    assert db_session.query(StudentPackage).filter_by(payment_id=payment.id).count() == 0
