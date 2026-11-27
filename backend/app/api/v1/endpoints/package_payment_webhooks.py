@@ -61,6 +61,13 @@ async def razorpay_package_webhook(
     elif order.get("status") != "paid" or order.get("amount_paid") != expected_amount:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Razorpay order is not fully paid")
 
-    activate_package_from_payment(db, payment_id=payment.id, provider_payment_id=provider_payment_id)
+    try:
+        activate_package_from_payment(db, payment_id=payment.id, provider_payment_id=provider_payment_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_409_CONFLICT and "previous per-class checkout amount" in str(exc.detail):
+            payment.status = PaymentStatus.failed
+            db.commit()
+            return {"received": True}
+        raise
     db.commit()
     return {"received": True}
