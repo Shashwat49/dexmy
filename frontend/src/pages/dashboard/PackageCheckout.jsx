@@ -1,7 +1,7 @@
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { getPackages } from "../../api/packages";
-import { createPackageCheckout, verifyRazorpayPackagePayment } from "../../api/packagePayments";
+import { createPackageCheckout, verifyRazorpayPackagePayment, getPackagePaymentStatus } from "../../api/packagePayments";
 import { getLinkedStudents } from "../../api/parents";
 import { useAuth } from "../../context/AuthContext";
 
@@ -31,6 +31,8 @@ export default function PackageCheckout() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [stripeReady, setStripeReady] = useState(false);
+  const [stripePaymentId, setStripePaymentId] = useState("");
+  const [activationPending, setActivationPending] = useState(false);
 
   const currency = (params.get("currency") || "INR").toUpperCase();
   const id = params.get("package");
@@ -135,6 +137,7 @@ export default function PackageCheckout() {
       throw new Error("Stripe checkout could not be initialized.");
     }
 
+    setStripePaymentId(checkoutData.payment_id);
     const stripe = window.Stripe(checkoutData.stripe_publishable_key);
     const elements = stripe.elements({
       clientSecret: checkoutData.stripe_client_secret,
@@ -151,27 +154,54 @@ export default function PackageCheckout() {
     setProcessing(false);
   };
 
+  const checkStripeActivation = async (attempts = 1) => {
+    if (!stripePaymentId) return false;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const status = await getPackagePaymentStatus(stripePaymentId);
+        if (status.status === "paid" && status.package_active) {
+          setActivationPending(false);
+          setSuccess(true);
+          return true;
+        }
+        if (status.status === "failed") {
+          setActivationPending(false);
+          setError("Stripe could not complete the payment. Please try again.");
+          return false;
+        }
+      } catch {
+        // The webhook may still be processing; retry briefly before showing a pending state.
+      }
+      if (attempt < attempts - 1) await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    setActivationPending(true);
+    setError("Stripe has accepted the payment, but Dexmy is still confirming package activation. Please recheck in a moment; do not pay again.");
+    return false;
+  };
+
   const confirmStripe = async () => {
     if (!stripeRef.current || !elementsRef.current) return;
     setProcessing(true);
     setError("");
-    const { error: stripeError, paymentIntent } = await stripeRef.current.confirmPayment({
-      elements: elementsRef.current,
-      redirect: "if_required",
-    });
-    if (stripeError) {
-      setError(stripeError.message || "Stripe payment failed.");
+    try {
+      const { error: stripeError, paymentIntent } = await stripeRef.current.confirmPayment({
+        elements: elementsRef.current,
+        redirect: "if_required",
+      });
+      if (stripeError) {
+        setError(stripeError.message || "Stripe payment failed.");
+        return;
+      }
+      if (paymentIntent?.status === "succeeded" || paymentIntent?.status === "processing") {
+        await checkStripeActivation(8);
+      } else {
+        setError("Stripe payment is not yet confirmed. Please check your payment status.");
+      }
+    } catch (err) {
+      setError(err?.message || "Unable to confirm the payment status.");
+    } finally {
       setProcessing(false);
-      return;
     }
-    if (paymentIntent?.status === "succeeded") {
-      setSuccess(true);
-    } else if (paymentIntent?.status === "processing") {
-      setError("Payment submitted. Stripe is still confirming the payment; your package will be activated after confirmation.");
-    } else {
-      setError("Stripe payment is not yet confirmed. Please check your payment status.");
-    }
-    setProcessing(false);
   };
 
   const handlePayment = async () => {
@@ -215,7 +245,7 @@ export default function PackageCheckout() {
     );
   }
 
-  const total = Number(pkg.price);
+  const total = Number(pkg.price) * Number(pkg.class_count);
   const isParent = user?.role === "parent";
   const isStripe = currency === "USD";
 
@@ -225,6 +255,7 @@ export default function PackageCheckout() {
         <Link to="/packages" className="text-sm text-chalk-muted">← Packages</Link>
         <h1 className="mt-4 text-3xl font-semibold">Checkout</h1>
         {error && <div className="mt-6 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 text-sm">{error}</div>}
+        {activationPending && <button type="button" onClick={() => checkStripeActivation(1)} disabled={processing} className="mt-3 text-sm font-semibold text-brand-gold underline disabled:opacity-50">Recheck package activation</button>}
 
         {isParent && (
           <div className="mt-6 rounded-2xl border border-chalk-faint bg-panel p-5">
@@ -245,7 +276,7 @@ export default function PackageCheckout() {
         <div className="mt-7 rounded-2xl border border-chalk-faint bg-panel p-6">
           <div className="flex justify-between gap-5">
             <div><h2 className="font-semibold">{pkg.name}</h2><p className="mt-1 text-sm text-chalk-muted">{pkg.class_count} classes</p></div>
-            <div className="text-right"><p className="text-xl font-semibold">{currency === "INR" ? "₹" : "$"}{total.toFixed(2)}</p></div>
+            <div className="text-right"><p className="text-xl font-semibold">{currency === "INR" ? "₹" : "$"}{total.toFixed(2)}</p><p className="mt-1 text-xs text-chalk-muted">{currency === "INR" ? "₹" : "$"}{Number(pkg.price).toFixed(2)} per class</p></div>
           </div>
           <div className="my-6 border-t border-chalk-faint" />
           <div className="flex justify-between"><span className="text-chalk-muted">Package total</span><strong>{currency === "INR" ? "₹" : "$"}{total.toFixed(2)}</strong></div>
