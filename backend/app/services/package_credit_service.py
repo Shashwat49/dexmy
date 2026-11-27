@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage
+from app.models.payment import Payment
 
 
 class PackageCreditService:
@@ -109,6 +110,10 @@ class PackageCreditService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Package plan for the active student package could not be found.",
             )
+        if package.payment_id is not None and package.total_classes > 0:
+            payment = db.get(Payment, package.payment_id)
+            if payment is not None and payment.amount is not None:
+                return package, ledger, Decimal(payment.amount) / package.total_classes
         return package, ledger, plan.price
 
     @staticmethod
