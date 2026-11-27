@@ -160,9 +160,12 @@ def verify_package_razorpay(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment verification failed")
 
     order = razorpay_service.fetch_order(payload.razorpay_order_id)
-    expected_amount = int(round(float(payment.amount) * 100))
+    provider_payment = razorpay_service.fetch_payment(payload.razorpay_payment_id)
+    expected_amount = _minor_units(payment.amount)
     if order.get("amount") != expected_amount or order.get("currency") != payment.currency:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment amount or currency does not match the package")
+    if provider_payment.get("order_id") != payload.razorpay_order_id or provider_payment.get("status") != "captured" or provider_payment.get("amount") != expected_amount or provider_payment.get("currency") != payment.currency:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Razorpay has not confirmed a captured payment for this order")
 
     activate_package_from_payment(db, payment_id=payment.id, provider_payment_id=payload.razorpay_payment_id)
     db.commit()
@@ -200,7 +203,7 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
                 db.commit()
                 return {"received": True}
                 
-            expected_amount = int(round(float(payment.amount) * 100))
+            expected_amount = _minor_units(payment.amount)
             if intent.get("amount") != expected_amount or intent.get("currency") != payment.currency.lower():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment amount or currency mismatch")
             activate_package_from_payment(db, payment_id=payment.id, provider_payment_id=intent["id"])
