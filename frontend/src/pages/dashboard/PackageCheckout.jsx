@@ -108,6 +108,14 @@ export default function PackageCheckout() {
         email: user.email || "",
         contact: user.phone || "",
       },
+      // Razorpay Standard Checkout reports user dismissal through modal.ondismiss.
+      // The "modal.closed" event is not a supported Checkout event.
+      modal: {
+        ondismiss: () => {
+          setProcessing(false);
+          setError("Payment window closed. No payment was completed. You can try again.");
+        },
+      },
     };
 
     const paymentObject = new window.Razorpay(options);
@@ -115,7 +123,6 @@ export default function PackageCheckout() {
       setError(response?.error?.description || "Payment failed.");
       setProcessing(false);
     });
-    paymentObject.on("modal.closed", () => setProcessing(false));
     paymentObject.open();
   };
 
