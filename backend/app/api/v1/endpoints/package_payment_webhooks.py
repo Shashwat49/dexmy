@@ -55,6 +55,11 @@ async def razorpay_package_webhook(
     expected_amount = int(round(float(payment.amount) * 100))
     if order.get("amount") != expected_amount or order.get("currency") != payment.currency:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Razorpay payment amount or currency mismatch")
+    if event.get("event") == "payment.captured":
+        if payment_entity.get("status") != "captured" or payment_entity.get("amount") != expected_amount or payment_entity.get("currency") != payment.currency:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Razorpay captured payment details do not match")
+    elif order.get("status") != "paid" or order.get("amount_paid") != expected_amount:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Razorpay order is not fully paid")
 
     activate_package_from_payment(db, payment_id=payment.id, provider_payment_id=provider_payment_id)
     db.commit()
