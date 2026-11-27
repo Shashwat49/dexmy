@@ -1,5 +1,5 @@
 import uuid
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dependencies import get_current_user
 from app.db.session import get_db
-from app.models.package import PackagePlan
+from app.models.package import PackagePlan, StudentPackage
 from app.models.payment import Payment, PaymentStatus
 from app.models.student import ParentStudentLink
 from app.models.user import User, UserRole
@@ -21,6 +21,10 @@ from app.services import razorpay_service, stripe_service
 from app.services.package_payment_service import activate_package_from_payment, get_or_create_payment, get_package_plan
 
 router = APIRouter()
+
+
+def _minor_units(amount) -> int:
+    return int((Decimal(str(amount)) * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def _resolve_student_id(current_user: User, requested_student_id: uuid.UUID | None, db: Session) -> uuid.UUID:
@@ -88,7 +92,7 @@ def package_checkout(
                 payment,
                 plan,
                 razorpay_order_id=payment.provider_order_id,
-                razorpay_amount=int(round(float(payment.amount) * 100)),
+                razorpay_amount=_minor_units(payment.amount),
             )
         intent = stripe_service.retrieve_payment_intent(payment.provider_order_id)
         return _response_for_payment(
@@ -100,7 +104,7 @@ def package_checkout(
 
     try:
         if payload.provider == "razorpay":
-            amount_paise = int(round(float(plan.price) * 100))
+            amount_paise = _minor_units(payment.amount)
             order = razorpay_service.create_order(amount_paise, "INR", receipt=str(payment.id))
             payment.provider_order_id = order["id"]
             db.commit()
@@ -182,10 +186,15 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
             select(Payment).where(Payment.provider_order_id == intent["id"]).with_for_update()
         ).scalar_one_or_none()
         
-        if payment is not None and payment.status != PaymentStatus.paid:
-            if payment.provider.value != "stripe":
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment provider mismatch")
-                
+        if payment is None:
+            return {"received": True}
+        if payment.provider.value != "stripe":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment provider mismatch")
+        metadata = intent.get("metadata") or {}
+        if metadata.get("payment_id") and metadata["payment_id"] != str(payment.id):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment metadata mismatch")
+
+        if payment.status != PaymentStatus.paid:
             if event["type"] == "payment_intent.payment_failed":
                 payment.status = PaymentStatus.failed
                 db.commit()
@@ -198,6 +207,23 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
             db.commit()
 
     return {"received": True}
+
+
+@router.get("/{payment_id}/status")
+def get_package_payment_status(
+    payment_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    payment = db.get(Payment, payment_id)
+    if payment is None or payment.package_plan_id is None or not _can_access_payment(current_user, payment, db):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    package = db.get(StudentPackage, payment.package_id) if payment.package_id else None
+    return {
+        "status": payment.status.value,
+        "package_active": bool(package and package.status == "active"),
+        "payment_id": str(payment.id),
+    }
 
 
 @router.get("/history")
