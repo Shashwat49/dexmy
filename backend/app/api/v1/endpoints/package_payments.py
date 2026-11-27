@@ -99,7 +99,7 @@ def package_checkout(
             payment,
             plan,
             stripe_client_secret=intent.client_secret,
-            stripe_amount=int(round(float(payment.amount) * 100)),
+            stripe_amount=_minor_units(payment.amount),
         )
 
     try:
@@ -115,7 +115,7 @@ def package_checkout(
                 razorpay_amount=amount_paise,
             )
 
-        amount_cents = int(round(float(plan.price) * 100))
+        amount_cents = _minor_units(payment.amount)
         intent = stripe_service.create_payment_intent(
             amount_cents,
             "usd",
