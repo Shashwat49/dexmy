@@ -206,7 +206,14 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
             expected_amount = _minor_units(payment.amount)
             if intent.get("amount") != expected_amount or intent.get("currency") != payment.currency.lower():
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment amount or currency mismatch")
-            activate_package_from_payment(db, payment_id=payment.id, provider_payment_id=intent["id"])
+            try:
+                activate_package_from_payment(db, payment_id=payment.id, provider_payment_id=intent["id"])
+            except HTTPException as exc:
+                if exc.status_code == status.HTTP_409_CONFLICT and "previous per-class checkout amount" in str(exc.detail):
+                    payment.status = PaymentStatus.failed
+                    db.commit()
+                    return {"received": True}
+                raise
             db.commit()
 
     return {"received": True}
