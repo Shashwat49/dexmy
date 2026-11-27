@@ -26,6 +26,7 @@ export default function Packages() {
   const [packages, setPackages] = useState(getCachedPackages);
   const [currency, setCurrency] = useState("INR");
   const [error, setError] = useState("");
+  const [apiLoaded, setApiLoaded] = useState(false);
   const freeClassLimitReached =
     new URLSearchParams(window.location.search).get("reason") ===
     "free-class-limit";
@@ -39,6 +40,7 @@ export default function Packages() {
       .then((data) => {
         if (!mounted || !Array.isArray(data)) return;
         setPackages(data);
+        setApiLoaded(true);
         try {
           localStorage.setItem(CACHE_KEY, JSON.stringify(data));
         } catch {
@@ -61,6 +63,7 @@ export default function Packages() {
     if (active.length) return active;
     return DEFAULTS.map((p) => ({
       ...p,
+      is_fallback: true,
       currency,
       price: currency === "INR" ? p.inr : p.usd,
     }));
@@ -105,7 +108,7 @@ export default function Packages() {
         {error && <p className="mt-8 text-center text-sm text-chalk-muted">{error}</p>}
 
         <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((p) => <PackageCard key={`${p.name}-${p.currency}`} pkg={p} currency={currency} />)}
+          {visible.map((p) => <PackageCard key={`${p.name}-${p.currency}`} pkg={p} currency={currency} canPurchase={apiLoaded && !p.is_fallback} />)}
         </div>
 
         <p className="mt-10 text-center text-xs text-chalk-muted">The price shown is per class. Your selected package total is calculated at checkout.</p>
@@ -114,7 +117,7 @@ export default function Packages() {
   );
 }
 
-function PackageCard({ pkg, currency }) {
+function PackageCard({ pkg, currency, canPurchase }) {
   const price = Number(pkg.price ?? (currency === "INR" ? pkg.inr : pkg.usd));
   const custom = pkg.is_custom || !pkg.class_count;
 
@@ -127,7 +130,7 @@ function PackageCard({ pkg, currency }) {
         <span className="ml-2 text-sm text-chalk-muted">/ class</span>
       </div>
       <p className="mt-3 text-sm text-chalk-muted">{custom ? "Build a package around your required number of classes." : `${pkg.class_count} classes at ${currency === "INR" ? "₹" : "$"}${(price * pkg.class_count).toFixed(2).replace(/\.00$/, "")} total.`}</p>
-      <Link to={`/checkout/package?package=${pkg.id || "custom"}&currency=${currency}`} className="mt-7 inline-flex justify-center rounded-xl bg-brand-red px-4 py-3 text-sm font-semibold">Choose package</Link>
+      {canPurchase ? <Link to={`/checkout/package?package=${pkg.id}&currency=${currency}`} className="mt-7 inline-flex justify-center rounded-xl bg-brand-red px-4 py-3 text-sm font-semibold">Choose package</Link> : <p className="mt-7 rounded-xl border border-chalk-faint px-4 py-3 text-center text-sm text-chalk-muted">Checkout temporarily unavailable — refresh to verify current pricing.</p>}
     </article>
   );
 }
