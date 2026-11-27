@@ -1,6 +1,6 @@
-# Dexmy Payment Architecture & Student Package Purchase System (Task 4)
+# Dexmy Payment Architecture & Student Package Purchase System
 
-This document provides complete technical documentation for the audited, hardened, and verified payment architecture connecting the student package purchase flow with Razorpay, Stripe, backend idempotency, and admin finance.
+This document describes the package purchase flow, provider verification, entitlement activation, and credit accounting. Production readiness still depends on applying the migrations, running the test suite, and verifying live provider configuration.
 
 ---
 
@@ -30,7 +30,7 @@ flowchart TD
 
 ### A. Initiation (`POST /api/v1/payments/packages/checkout`)
 1. Student or Parent requests checkout with `package_plan_id`, `provider` (`razorpay` or `stripe`), and an `idempotency_key` (UUID).
-2. **Server-Side Price Authority**: The server reads `package_plans.price` directly from the database. The client cannot pass or alter the payable amount.
+2. **Server-Side Price Authority**: `package_plans.price` is the per-class rate. The server calculates the payable amount as `price × class_count`, stores that total in `payments.amount`, and snapshots `package_class_count`. The client cannot pass or alter the payable amount.
 3. **Idempotency Check**: If the `idempotency_key` was already used:
    - Returns the existing `Payment` record if payload matches.
    - Raises `409 Conflict` if metadata or plan differs.
@@ -43,7 +43,7 @@ flowchart TD
 2. Validates ownership: only the paying user or linked student/parent can verify.
 3. If already marked `paid`, immediately returns `{"status": "already_confirmed"}`.
 4. Cryptographically verifies HMAC SHA-256 signature using `RAZORPAY_KEY_SECRET`.
-5. Verifies server-side with Razorpay API (`fetch_order`) that the order amount and currency match expected values.
+5. Verifies server-side with Razorpay API (`fetch_order` and `fetch_payment`) that the order amount/currency match and the specific payment is captured.
 6. Calls `activate_package_from_payment`.
 
 ### C. Webhook Flow (`POST /api/v1/payments/packages/razorpay/webhook`)
@@ -62,7 +62,14 @@ flowchart TD
 - `package_plans`: Stores active tutoring packages (`class_count`, `price`, `currency`, `is_active`).
 - `payments`: Records every payment intent and transaction lifecycle (`amount`, `currency`, `status`, `provider`, `provider_order_id`, `provider_payment_id`, `idempotency_key`, `student_id`, `payer_id`, `package_plan_id`, `package_id`).
 - `student_packages`: Entity representing active purchased packages credited to a student (`total_classes`, `classes_used`, `status`, `payment_id`).
-- `package_credit_ledgers`: Detailed audit log of every credit additions/deductions (`delta`, `reason`, `booking_id`, `created_at`).
+- `package_credit_ledger`: Detailed audit log of credit additions/deductions (`delta`, `reason`, `booking_id`, `external_class_record_id`, `created_at`).
+
+### Migrations
+
+- `004_student_package_payment_unique.sql`: ensures a payment activates at most one student package.
+- `006_package_payment_and_external_class_credit_fixes.sql`: adds `payments.package_class_count` and a unique nullable `package_credit_ledger.external_class_record_id` link for Meet-record debits.
+
+Run migration 006 before deploying the backend version that uses these columns.
 
 ### Migration `004_student_package_payment_unique.sql`
 ```sql
@@ -71,6 +78,11 @@ ALTER TABLE student_packages ADD CONSTRAINT uq_student_package_payment_id UNIQUE
 ```
 
 ---
+
+
+### Google Meet class records and package credits
+
+The database trigger installed by migration 003 is the authoritative updater for `student_packages.classes_used`. Migration 006 updates it to charge both completed Meet records and student no-shows, while preserving unlimited-package behavior. The teacher and admin no-show endpoints add a matching `package_credit_ledger.external_class_record_id` entry in the same transaction. Do not increment `classes_used` again in application code for these records; that would double-charge the student.
 
 ## 4. Idempotency, Concurrency & Transaction Safety
 
@@ -102,7 +114,7 @@ To guarantee **exactly-once activation**:
     "payment_id": "uuid",
     "package_plan_id": "uuid",
     "provider": "razorpay",
-    "amount": "15000.00",
+    "amount": "97500.00",
     "currency": "INR",
     "razorpay_order_id": "order_xxx",
     "razorpay_key_id": "rzp_test_xxx",
@@ -127,7 +139,7 @@ To guarantee **exactly-once activation**:
   { "status": "confirmed" } // or {"status": "already_confirmed"}
   ```
 
-### 3. Student Payment History
+### 3. Package Payment Status\n- **Endpoint**: `GET /api/v1/payments/packages/{payment_id}/status`\n- **Auth**: Original payer or parent linked to the purchased student\n- **Purpose**: Confirms both the payment state and whether the package is active; the Stripe UI must wait for this confirmation.\n\n### 4. Student Payment History
 - **Endpoint**: `GET /api/v1/payments/packages/history`
 - **Auth**: Bearer Token (Student or Parent)
 - **Response** (`200 OK`):
@@ -146,7 +158,7 @@ To guarantee **exactly-once activation**:
   ]
   ```
 
-### 4. Admin Finance Payments List
+### 5. Admin Finance Payments List
 - **Endpoint**: `GET /api/v1/admin/finance/payments?page=1&page_size=50`
 - **Auth**: Bearer Token (Admin / Finance Manager with `payment.read` permission)
 - **Response** (`200 OK`):
@@ -177,10 +189,10 @@ To guarantee **exactly-once activation**:
 
 1. **Checkout (`/checkout/package?package=:id&currency=:currency`)**:
    - Fetches active package plan details.
-   - Price calculation displays pure package price from backend (`Number(pkg.price)`).
+   - Price display shows the per-class rate and `price × class_count` total; checkout is disabled when only fallback/cached pricing is available.
    - Dynamically loads Razorpay checkout script.
    - Seamlessly handles `loading`, `initiated`, `failed`, `success`, and `409 already processed`.
-   - On success, renders clear confirmation showing classes credited and direct navigation to Dashboard.
+   - Razorpay success follows server verification. Stripe success waits for the authenticated payment-status endpoint to confirm both a paid payment and an active package; the browser PaymentIntent result alone is not treated as activation.
 2. **Student Dashboard (`/dashboard/student`)**:
    - Preserves subject-wise balance rules for configured student accounts (`ayansh.abhilash@gmail.com`, `wargod3508@gmail.com`, `sskUsagm@gmail.com`).
    - For all normal students, displays **Total classes**, **Completed classes**, and **Remaining classes** synchronized from package and Meet records.
@@ -191,11 +203,12 @@ To guarantee **exactly-once activation**:
 
 ---
 
-## 7. Automated Testing & Verification
+## 7. Automated Testing
 
 - **Concurrency & Race Condition Suite**: `backend/tests/test_package_payment_concurrency.py`
+- **Package Amount / Entitlement Snapshot**: `backend/tests/test_package_purchase_amounts.py`
   - Spawns multi-threaded worker simulations executing concurrent verification and webhook requests targeting the same `payment_id`.
-  - Verifies that exactly one `StudentPackage` and one `PackageCreditLedger` entry are committed.
+  - Verifies that exactly one `StudentPackage` and one `PackageCreditLedger` entry are committed. Package amount tests verify per-class multiplication and ensure a later plan edit cannot change the class count purchased.
   - Confirms subsequent threads safely receive the existing package or raise `409 Conflict`.
 - **Security & Tampering Guards**:
   - Manipulated amounts or currencies trigger `400 Bad Request`.

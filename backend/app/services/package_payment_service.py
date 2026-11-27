@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -28,6 +29,13 @@ def get_or_create_payment(db: Session, *, payer_id: uuid.UUID, student_id: uuid.
             or existing.provider.value != provider
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key is already associated with a different payment")
+        expected_total = (package_plan.price * package_plan.class_count).quantize(Decimal("0.01"))
+        if existing.status == PaymentStatus.created and existing.amount != expected_total:
+            if existing.provider_order_id:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This checkout was created with previous pricing. Start a new checkout.")
+            existing.amount = expected_total
+            existing.package_class_count = package_plan.class_count
+            db.flush()
         return existing
 
     if provider == "razorpay" and package_plan.currency != "INR":
@@ -41,7 +49,8 @@ def get_or_create_payment(db: Session, *, payer_id: uuid.UUID, student_id: uuid.
         package_plan_id=package_plan.id,
         student_id=student_id,
         payer_id=payer_id,
-        amount=package_plan.price,
+        amount=(Decimal(package_plan.price) * package_plan.class_count).quantize(Decimal("0.01")),
+        package_class_count=package_plan.class_count,
         currency=package_plan.currency,
         provider=provider,
         status=PaymentStatus.created,
@@ -93,6 +102,10 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
     plan = db.get(PackagePlan, payment.package_plan_id)
     if plan is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Package plan no longer exists")
+    if payment.package_class_count is None:
+        legacy_expected_total = (plan.price * plan.class_count).quantize(Decimal("0.01"))
+        if payment.amount != legacy_expected_total:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This payment was created with the previous per-class checkout amount and cannot activate a full package. Contact Dexmy support for reconciliation.")
 
     payment.status = PaymentStatus.paid
     if provider_payment_id:
@@ -108,7 +121,7 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
         student_id=payment.student_id,
         package_plan_id=plan.id,
         payment_id=payment.id,
-        total_classes=plan.class_count,
+        total_classes=payment.package_class_count or plan.class_count,
         classes_used=0,
         status="active",
     )
@@ -129,7 +142,7 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
     db.add(PackageCreditLedger(
         student_package_id=package.id,
         booking_id=None,
-        delta=plan.class_count,
+        delta=payment.package_class_count or plan.class_count,
         reason="purchase",
         created_by=None,
     ))

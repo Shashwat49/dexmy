@@ -35,6 +35,16 @@ def fetch_order(order_id: str) -> dict:
     return response.json()
 
 
+def fetch_payment(payment_id: str) -> dict:
+    response = requests.get(
+        f"{RAZORPAY_BASE_URL}/payments/{payment_id}",
+        auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET),
+        timeout=10,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
 def verify_signature(order_id: str, payment_id: str, signature: str) -> bool:
     payload = f"{order_id}|{payment_id}".encode()
     expected = hmac.new(settings.RAZORPAY_KEY_SECRET.encode(), payload, hashlib.sha256).hexdigest()

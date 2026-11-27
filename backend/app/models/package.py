@@ -46,6 +46,7 @@ class PackageCreditLedger(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     student_package_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("student_packages.id", ondelete="RESTRICT"), nullable=False, index=True)
     booking_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="RESTRICT"), nullable=True, index=True)
+    external_class_record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("external_class_records.id", ondelete="RESTRICT"), nullable=True, unique=True)
     delta: Mapped[int] = mapped_column(Integer, nullable=False)
     reason: Mapped[str] = mapped_column(String(50), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
