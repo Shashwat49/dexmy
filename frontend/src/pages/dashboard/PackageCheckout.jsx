@@ -15,6 +15,14 @@ const loadScript = (src, id) => new Promise((resolve) => {
   document.body.appendChild(script);
 });
 
+const assertCheckoutTotal = (checkoutData, pkg) => {
+  const displayedTotal = Number(pkg.price) * Number(pkg.class_count);
+  const serverTotal = Number(checkoutData.amount);
+  if (!Number.isFinite(serverTotal) || Math.abs(serverTotal - displayedTotal) > 0.009) {
+    throw new Error("Package pricing changed since this page loaded. Refresh the page to review the current total before paying.");
+  }
+};
+
 export default function PackageCheckout() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -82,6 +90,8 @@ export default function PackageCheckout() {
       student_id: studentId,
     });
 
+    assertCheckoutTotal(checkoutData, pkg);
+
     const options = {
       key: checkoutData.razorpay_key_id,
       amount: checkoutData.razorpay_amount,
@@ -133,6 +143,7 @@ export default function PackageCheckout() {
       student_id: studentId,
     });
 
+    assertCheckoutTotal(checkoutData, pkg);
     if (!checkoutData.stripe_client_secret || !checkoutData.stripe_publishable_key) {
       throw new Error("Stripe checkout could not be initialized.");
     }
