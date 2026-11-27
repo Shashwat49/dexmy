@@ -1,6 +1,5 @@
 import uuid
 from decimal import Decimal
-from decimal import Decimal
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -103,6 +102,10 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
     plan = db.get(PackagePlan, payment.package_plan_id)
     if plan is None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Package plan no longer exists")
+    if payment.package_class_count is None:
+        legacy_expected_total = (plan.price * plan.class_count).quantize(Decimal("0.01"))
+        if payment.amount != legacy_expected_total:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This payment was created with the previous per-class checkout amount and cannot activate a full package. Contact Dexmy support for reconciliation.")
 
     payment.status = PaymentStatus.paid
     if provider_payment_id:
