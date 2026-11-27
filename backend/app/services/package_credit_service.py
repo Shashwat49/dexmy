@@ -109,7 +109,7 @@ class PackageCreditService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Package plan for the active student package could not be found.",
             )
-        return package, ledger, plan.price / package.total_classes
+        return package, ledger, plan.price
 
     @staticmethod
     def refund(db: Session, *, student_package_id: UUID, booking_id: UUID, created_by: UUID | None = None) -> PackageCreditLedger:
