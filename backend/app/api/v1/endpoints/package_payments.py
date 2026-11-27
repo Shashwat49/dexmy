@@ -210,7 +210,6 @@ def get_package_payment_status(
     if (
         payment is None
         or payment.package_plan_id is None
-        or payment.package_id is None and payment.booking_id is not None
         or not _can_access_payment(current_user, payment, db)
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package payment not found")
