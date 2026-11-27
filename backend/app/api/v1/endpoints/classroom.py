@@ -351,8 +351,11 @@ async def delete_whiteboard_page(session_id: uuid.UUID, page_id: uuid.UUID, back
     ).delete(synchronize_session=False)
     db.delete(target)
     db.flush()
-    _reorder_pages_without_unique_conflicts(remaining)
-    db.flush()
+    # The full page set was already moved to unique negative positions above.
+    # The target row is now deleted, so the remaining negative positions are
+    # unique and the positive range is free. Assign final positions directly;
+    # re-running the helper here can collide with another row's temporary
+    # negative position while SQLAlchemy flushes the updates.
     for position, page in enumerate(remaining, 1):
         page.position = position
     db.commit()
