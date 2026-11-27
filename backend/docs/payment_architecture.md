@@ -79,6 +79,11 @@ ALTER TABLE student_packages ADD CONSTRAINT uq_student_package_payment_id UNIQUE
 
 ---
 
+
+### Google Meet class records and package credits
+
+The database trigger installed by migration 003 is the authoritative updater for `student_packages.classes_used`. Migration 006 updates it to charge both completed Meet records and student no-shows, while preserving unlimited-package behavior. The teacher and admin no-show endpoints add a matching `package_credit_ledger.external_class_record_id` entry in the same transaction. Do not increment `classes_used` again in application code for these records; that would double-charge the student.
+
 ## 4. Idempotency, Concurrency & Transaction Safety
 
 To guarantee **exactly-once activation**:
@@ -134,7 +139,7 @@ To guarantee **exactly-once activation**:
   { "status": "confirmed" } // or {"status": "already_confirmed"}
   ```
 
-### 3. Student Payment History
+### 3. Package Payment Status\n- **Endpoint**: `GET /api/v1/payments/packages/{payment_id}/status`\n- **Auth**: Original payer or parent linked to the purchased student\n- **Purpose**: Confirms both the payment state and whether the package is active; the Stripe UI must wait for this confirmation.\n\n### 4. Student Payment History
 - **Endpoint**: `GET /api/v1/payments/packages/history`
 - **Auth**: Bearer Token (Student or Parent)
 - **Response** (`200 OK`):
@@ -153,7 +158,7 @@ To guarantee **exactly-once activation**:
   ]
   ```
 
-### 4. Admin Finance Payments List
+### 5. Admin Finance Payments List
 - **Endpoint**: `GET /api/v1/admin/finance/payments?page=1&page_size=50`
 - **Auth**: Bearer Token (Admin / Finance Manager with `payment.read` permission)
 - **Response** (`200 OK`):
