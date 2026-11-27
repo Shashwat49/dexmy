@@ -34,6 +34,8 @@ class Payment(Base):
     package_plan_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("package_plans.id", ondelete="RESTRICT"), nullable=True, index=True
     )
+    # Snapshot the purchased quantity so later plan edits cannot change an existing entitlement.
+    package_class_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     student_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True, index=True
     )
