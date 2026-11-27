@@ -5,7 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage
-from app.models.payment import PaymentStatus
+from app.models.payment import Payment, PaymentStatus
 from app.services.package_payment_service import activate_package_from_payment, get_or_create_payment
 
 
@@ -62,7 +62,7 @@ def test_legacy_underpriced_payment_cannot_activate_full_package(db_session, see
         is_active=True,
     )
     db_session.add(plan)
-    payment = __import__("app.models.payment", fromlist=["Payment"]).Payment(
+    payment = Payment(
         id=uuid.uuid4(),
         package_plan_id=plan.id,
         student_id=student.id,
