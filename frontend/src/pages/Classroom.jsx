@@ -885,6 +885,17 @@ export default function Classroom() {
       liveRef.current.delete(entry.stroke.id);
       committedRef.current.delete(entry.stroke.id);
       deletedStrokeIdsRef.current.add(entry.stroke.id);
+      // Broadcast the visual undo over LiveKit immediately. The reliable
+      // WebSocket action below remains the source of truth for persistence,
+      // but waiting for its database ACK made the student see Undo several
+      // seconds after the teacher.
+      publishControl({
+        kind: "whiteboard_undo",
+        stroke_id: entry.stroke.id,
+        page_number: entry.page_number,
+        page_id: pageId,
+        undo_entry_id: entry.id,
+      });
       queueWhiteboardAction({
         kind: "stroke_delete",
         stroke_id: entry.stroke.id,
