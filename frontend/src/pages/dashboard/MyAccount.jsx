@@ -100,17 +100,25 @@ function PaymentHistory() {
 
   const downloadInvoice = async (payment) => {
     setDownloadingId(payment.id);
+    let url;
+    let link;
     try {
       const blob = await getPackageInvoice(payment.id);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
+      url = URL.createObjectURL(blob);
+      link = document.createElement("a");
       link.href = url;
       link.download = `dexmy-invoice-${payment.id}.pdf`;
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      document.body.appendChild(link);
+      link.click();
     } catch (e) {
       setError(e.response?.data?.detail || "Unable to download this invoice.");
     } finally {
-      setDownloadingId("");
+      try {
+        link?.remove();
+      } finally {
+        if (url) window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setDownloadingId("");
+      }
     }
   };
 
