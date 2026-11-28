@@ -9,6 +9,8 @@ class PackageCheckoutRequest(BaseModel):
     provider: str = Field(pattern="^(razorpay|stripe)$")
     idempotency_key: uuid.UUID
     student_id: uuid.UUID | None = None
+    currency: str | None = Field(default=None, pattern="^(INR|USD)$")
+    selected_subject_id: int | None = Field(default=None, ge=1)
 
 
 class PackageCheckoutResponse(BaseModel):

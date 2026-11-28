@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { getPackages } from "../../api/packages";
 import { createPackageCheckout, verifyRazorpayPackagePayment, getPackagePaymentStatus } from "../../api/packagePayments";
 import { getLinkedStudents } from "../../api/parents";
+import { buildPackageCheckoutPayload } from "../../utils/packageCheckoutPayload";
 import { useAuth } from "../../context/AuthContext";
 
 const loadScript = (src, id) => new Promise((resolve) => {
@@ -44,6 +45,7 @@ export default function PackageCheckout() {
 
   const currency = (params.get("currency") || "INR").toUpperCase();
   const id = params.get("package");
+  const selectedSubjectId = params.get("subject");
 
   useEffect(() => {
     let cancelled = false;
@@ -83,12 +85,14 @@ export default function PackageCheckout() {
     const loaded = await loadScript("https://checkout.razorpay.com/v1/checkout.js", "razorpay-checkout-sdk");
     if (!loaded) throw new Error("Razorpay SDK failed to load. Please check your connection.");
 
-    const checkoutData = await createPackageCheckout({
-      package_plan_id: pkg.id,
+    const checkoutData = await createPackageCheckout(buildPackageCheckoutPayload({
+      packagePlanId: pkg.id,
       provider: "razorpay",
-      idempotency_key: crypto.randomUUID(),
-      student_id: studentId,
-    });
+      idempotencyKey: crypto.randomUUID(),
+      studentId,
+      currency,
+      selectedSubjectId,
+    }));
 
     assertCheckoutTotal(checkoutData, pkg);
 
@@ -143,12 +147,14 @@ export default function PackageCheckout() {
     if (!loaded) throw new Error("Stripe SDK failed to load. Please check your connection.");
     if (!window.Stripe) throw new Error("Stripe SDK is unavailable.");
 
-    const checkoutData = await createPackageCheckout({
-      package_plan_id: pkg.id,
+    const checkoutData = await createPackageCheckout(buildPackageCheckoutPayload({
+      packagePlanId: pkg.id,
       provider: "stripe",
-      idempotency_key: crypto.randomUUID(),
-      student_id: studentId,
-    });
+      idempotencyKey: crypto.randomUUID(),
+      studentId,
+      currency,
+      selectedSubjectId,
+    }));
 
     assertCheckoutTotal(checkoutData, pkg);
     if (!checkoutData.stripe_client_secret || !checkoutData.stripe_publishable_key) {
@@ -224,7 +230,8 @@ export default function PackageCheckout() {
 
   const handlePayment = async () => {
     if (!user) {
-      navigate(`/login?next=${encodeURIComponent(`/checkout/package?package=${pkg.id}&currency=${currency}`)}`);
+      const subjectQuery = selectedSubjectId ? `&subject=${encodeURIComponent(selectedSubjectId)}` : "";
+      navigate(`/login?next=${encodeURIComponent(`/checkout/package?package=${pkg.id}&currency=${currency}${subjectQuery}`)}`);
       return;
     }
     const studentId = resolveStudentId();
@@ -270,7 +277,7 @@ export default function PackageCheckout() {
   return (
     <Page>
       <div className="max-w-xl mx-auto">
-        <Link to="/packages" className="text-sm text-chalk-muted">← Packages</Link>
+        <Link to={selectedSubjectId ? `/packages?subject=${encodeURIComponent(selectedSubjectId)}&currency=${currency}` : "/packages"} className="text-sm text-chalk-muted">← Packages</Link>
         <h1 className="mt-4 text-3xl font-semibold">Checkout</h1>
         {error && <div className="mt-6 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 px-4 py-3 text-sm">{error}</div>}
         {activationPending && <button type="button" onClick={() => checkStripeActivation(1)} disabled={processing} className="mt-3 text-sm font-semibold text-brand-gold underline disabled:opacity-50">Recheck package activation</button>}

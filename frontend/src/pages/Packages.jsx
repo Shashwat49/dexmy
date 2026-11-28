@@ -2,136 +2,105 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import SEO from "../components/SEO";
 import { getPackages } from "../api/packages";
+import { getSubjects } from "../api/subjects";
+import { getPackagesForSelection } from "../utils/packageSelection";
 
-const DEFAULTS = [
-  { class_count: 25, name: "25 Classes Package", inr: 2000, usd: 20 },
-  { class_count: 50, name: "50 Classes Package", inr: 1950, usd: 19.5 },
-  { class_count: 75, name: "75 Classes Package", inr: 1900, usd: 19 },
-  { class_count: 100, name: "100 Classes Package", inr: 1850, usd: 18.5 },
-  { class_count: 25, name: "Customize Your Package", inr: 2000, usd: 20, is_custom: true },
-];
-
-const CACHE_KEY = "dexmy_packages_cache";
-
-function getCachedPackages() {
-  try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    return cached ? JSON.parse(cached) : [];
-  } catch {
-    return [];
-  }
-}
 
 export default function Packages() {
-  const [packages, setPackages] = useState(getCachedPackages);
-  const [currency, setCurrency] = useState("INR");
+  const [packages, setPackages] = useState([]);
+  const [subjects, setSubjects] = useState([]);
+  const [selectedSubjectId, setSelectedSubjectId] = useState(() => new URLSearchParams(window.location.search).get("subject") || "");
+  const [currency, setCurrency] = useState(() => {
+    const requestedCurrency = new URLSearchParams(window.location.search).get("currency");
+    return ["INR", "USD"].includes(requestedCurrency) ? requestedCurrency : "";
+  });
   const [error, setError] = useState("");
-  const [apiLoaded, setApiLoaded] = useState(false);
-  const freeClassLimitReached =
-    new URLSearchParams(window.location.search).get("reason") ===
-    "free-class-limit";
+  const [loading, setLoading] = useState(true);
+  const freeClassLimitReached = new URLSearchParams(window.location.search).get("reason") === "free-class-limit";
 
   useEffect(() => {
     let mounted = true;
-
-    // Refresh pricing in the background. The page already has cached/default
-    // data, so the API request never blocks the first paint.
-    getPackages()
-      .then((data) => {
-        if (!mounted || !Array.isArray(data)) return;
-        setPackages(data);
-        setApiLoaded(true);
-        if (!data.some((p) => p.is_active)) setError("No active packages are available right now. Please contact Dexmy.");
-        try {
-          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-        } catch {
-          // Ignore storage failures; the page still works normally.
-        }
+    Promise.all([getSubjects(), getPackages()])
+      .then(([subjectData, packageData]) => {
+        if (!mounted) return;
+        setSubjects(Array.isArray(subjectData) ? subjectData : []);
+        setPackages(Array.isArray(packageData) ? packageData : []);
       })
-      .catch(() => {
-        if (mounted) {
-          setError("Unable to verify current pricing. Checkout is disabled until package pricing can be refreshed.");
-        }
-      });
-
-    return () => {
-      mounted = false;
-    };
+      .catch(() => { if (mounted) setError("Unable to load subjects or verify current package pricing. Please refresh to try again."); })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
   }, []);
 
-  const visible = useMemo(() => {
-    const active = packages.filter((p) => p.is_active && p.currency === currency);
-    if (active.length) return active;
-    return DEFAULTS.map((p) => ({
-      ...p,
-      is_fallback: true,
-      currency,
-      price: currency === "INR" ? p.inr : p.usd,
-    }));
-  }, [packages, currency]);
+  const selectedSubject = subjects.find((subject) => String(subject.id) === selectedSubjectId);
+  const visible = useMemo(
+    () => getPackagesForSelection(packages, selectedSubjectId, currency),
+    [packages, selectedSubjectId, currency],
+  );
 
   return (
     <div className="min-h-screen bg-void text-chalk">
       <SEO title="Packages | Dexmy" description="Explore Dexmy tutoring class packages and per-class pricing." path="/packages" />
       <header className="border-b border-chalk-faint px-6 py-5">
-        <div className="mx-auto max-w-6xl flex items-center justify-between gap-4">
-          <Link to="/" aria-label="Dexmy home" className="inline-flex items-center shrink-0">
-            <img src="/dexmy-logo-bg-removed.png" alt="Dexmy" className="h-9 sm:h-10 w-auto object-contain" />
-          </Link>
-          <Link to="/" className="inline-flex items-center rounded-xl border border-chalk-faint bg-panel px-4 py-2.5 text-sm font-semibold text-chalk-muted hover:text-chalk hover:border-brand-gold transition-colors">
-            Back to Home
-          </Link>
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
+          <Link to="/" aria-label="Dexmy home" className="inline-flex shrink-0 items-center"><img src="/dexmy-logo-bg-removed.png" alt="Dexmy" className="h-9 w-auto object-contain sm:h-10" /></Link>
+          <Link to="/dashboard" className="inline-flex items-center rounded-xl border border-chalk-faint bg-panel px-4 py-2.5 text-sm font-semibold text-chalk-muted transition-colors hover:border-brand-gold hover:text-chalk">Back to Dashboard</Link>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-14">
-        <div className="text-center max-w-2xl mx-auto">
+      <main className="mx-auto max-w-6xl px-5 py-10 sm:px-6 sm:py-14">
+        <div className="mx-auto max-w-2xl text-center">
           <p className="text-sm font-semibold uppercase tracking-widest text-brand-red">Explore Packages</p>
-          <h1 className="mt-3 text-4xl md:text-5xl font-semibold">Choose your learning package</h1>
-          <p className="mt-4 text-chalk-muted">Simple per-class pricing. Pick the package that fits your learning goals.</p>
-          <div className="mt-7 inline-flex rounded-xl border border-chalk-faint bg-panel p-1">
-            <button onClick={() => setCurrency("INR")} className={`px-5 py-2 rounded-lg text-sm font-semibold ${currency === "INR" ? "bg-brand-red text-white" : "text-chalk-muted"}`}>INR ₹</button>
-            <button onClick={() => setCurrency("USD")} className={`px-5 py-2 rounded-lg text-sm font-semibold ${currency === "USD" ? "bg-brand-red text-white" : "text-chalk-muted"}`}>USD $</button>
-          </div>
+          <h1 className="mt-3 text-3xl font-semibold sm:text-5xl">Choose your learning package</h1>
+          <p className="mt-4 text-chalk-muted">Start with a subject, then choose the currency you want to pay in.</p>
         </div>
 
-        {freeClassLimitReached && (
-          <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-brand-gold/40 bg-brand-gold/10 px-6 py-5 text-center">
-            <p className="text-base font-semibold text-brand-gold">
-              You’ve exhausted your 2 free classes.
-            </p>
-            <p className="mt-1 text-sm leading-6 text-chalk-muted">
-              You’ve used all 2 free classes available with your Dexmy account. Please choose a package below to continue booking classes.
-            </p>
+        {freeClassLimitReached && <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-brand-gold/40 bg-brand-gold/10 px-6 py-5 text-center"><p className="font-semibold text-brand-gold">You’ve exhausted your 2 free classes.</p><p className="mt-1 text-sm leading-6 text-chalk-muted">Choose a package below to continue booking classes.</p></div>}
+        {error && <div role="alert" className="mx-auto mt-8 max-w-3xl rounded-xl border border-red-400/30 bg-red-500/10 px-5 py-4 text-center text-sm text-red-300">{error}</div>}
+
+        <section aria-labelledby="subject-heading" className="mt-10">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 id="subject-heading" className="text-lg font-semibold"><span className="mr-2 text-brand-gold">1</span>Choose a subject or course</h2>
+            {selectedSubject && <button type="button" onClick={() => { setSelectedSubjectId(""); setCurrency(""); }} className="text-sm font-semibold text-brand-gold underline underline-offset-4">Edit subject</button>}
           </div>
-        )}
+          {loading ? <p className="rounded-xl border border-chalk-faint bg-panel p-5 text-sm text-chalk-muted" role="status">Loading subjects and packages…</p>
+            : subjects.length === 0 ? <p className="rounded-xl border border-chalk-faint bg-panel p-5 text-sm text-chalk-muted">No subjects are currently available. Please check back later.</p>
+              : <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{subjects.map((subject) => {
+                const selected = selectedSubjectId === String(subject.id);
+                return <button key={subject.id} type="button" aria-pressed={selected} onClick={() => { setSelectedSubjectId(String(subject.id)); setCurrency(""); }} className={`min-h-20 rounded-xl border p-5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-gold ${selected ? "border-brand-gold bg-brand-gold/10" : "border-chalk-faint bg-panel hover:border-chalk-muted"}`}>
+                  <span className="font-semibold">{subject.name}</span>{subject.description && <span className="mt-2 block text-sm leading-5 text-chalk-muted">{subject.description}</span>}
+                </button>;
+              })}</div>}
+        </section>
 
-        {error && <p className="mt-8 text-center text-sm text-chalk-muted">{error}</p>}
+        {selectedSubject && <section aria-labelledby="currency-heading" className="mt-10">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <h2 id="currency-heading" className="text-lg font-semibold"><span className="mr-2 text-brand-gold">2</span>Choose currency</h2>
+            <button type="button" onClick={() => setCurrency("")} className="text-sm font-semibold text-brand-gold underline underline-offset-4">Edit currency</button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[{ code: "INR", label: "INR · Indian rupee", symbol: "₹" }, { code: "USD", label: "USD · US dollar", symbol: "$" }].map((option) => <button key={option.code} type="button" aria-pressed={currency === option.code} onClick={() => setCurrency(option.code)} className={`rounded-xl border px-5 py-4 text-left font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-gold ${currency === option.code ? "border-brand-gold bg-brand-gold/10" : "border-chalk-faint bg-panel hover:border-chalk-muted"}`}><span aria-hidden="true" className="mr-3 text-brand-gold">{option.symbol}</span>{option.label}</button>)}
+          </div>
+        </section>}
 
-        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((p) => <PackageCard key={`${p.name}-${p.currency}`} pkg={p} currency={currency} canPurchase={apiLoaded && !p.is_fallback} />)}
-        </div>
-
-        <p className="mt-10 text-center text-xs text-chalk-muted">The price shown is per class. Your selected package total is calculated at checkout.</p>
+        {selectedSubject && currency && <section aria-labelledby="plans-heading" className="mt-10">
+          <div className="mb-5"><p className="text-sm text-chalk-muted">{selectedSubject.name} · {currency}</p><h2 id="plans-heading" className="mt-1 text-2xl font-semibold">Available packages</h2></div>
+          {visible.length ? <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{visible.map((pkg) => <PackageCard key={pkg.id} pkg={pkg} currency={currency} subjectId={selectedSubjectId} />)}</div>
+            : <p className="rounded-xl border border-chalk-faint bg-panel p-6 text-sm leading-6 text-chalk-muted">There are no active packages for {selectedSubject.name} in {currency} yet. Choose another currency or subject, or check back later.</p>}
+          {visible.length > 0 && <p className="mt-8 text-center text-xs text-chalk-muted">Prices are per class. Your package total is calculated at checkout. Unassigned legacy plans remain available until administrators assign subjects.</p>}
+        </section>}
       </main>
     </div>
   );
 }
 
-function PackageCard({ pkg, currency, canPurchase }) {
-  const price = Number(pkg.price ?? (currency === "INR" ? pkg.inr : pkg.usd));
+function PackageCard({ pkg, currency, subjectId }) {
+  const price = Number(pkg.price);
   const custom = pkg.is_custom || !pkg.class_count;
-
-  return (
-    <article className="rounded-2xl border border-chalk-faint bg-panel p-6 flex flex-col">
-      <div className="text-sm text-chalk-muted">{custom ? `Custom plan · ${pkg.class_count} classes` : `${pkg.class_count} live classes`}</div>
-      <h2 className="mt-2 text-xl font-semibold">{pkg.name}</h2>
-      <div className="mt-7">
-        <span className="text-4xl font-semibold">{currency === "INR" ? "₹" : "$"}{price.toFixed(2).replace(/\.00$/, "")}</span>
-        <span className="ml-2 text-sm text-chalk-muted">/ class</span>
-      </div>
-      <p className="mt-3 text-sm text-chalk-muted">{custom ? `Currently configured for ${pkg.class_count} classes. Contact Dexmy for a different quantity.` : `${pkg.class_count} classes at ${currency === "INR" ? "₹" : "$"}${(price * pkg.class_count).toFixed(2).replace(/\.00$/, "")} total.`}</p>
-      {canPurchase ? <Link to={`/checkout/package?package=${pkg.id}&currency=${currency}`} className="mt-7 inline-flex justify-center rounded-xl bg-brand-red px-4 py-3 text-sm font-semibold">Choose package</Link> : <p className="mt-7 rounded-xl border border-chalk-faint px-4 py-3 text-center text-sm text-chalk-muted">Checkout temporarily unavailable — refresh to verify current pricing.</p>}
-    </article>
-  );
+  return <article className="flex flex-col rounded-2xl border border-chalk-faint bg-panel p-6">
+    <div className="text-sm text-chalk-muted">{custom ? `Custom plan · ${pkg.class_count} classes` : `${pkg.class_count} live classes`}</div>
+    <h3 className="mt-2 text-xl font-semibold">{pkg.name}</h3>
+    <div className="mt-7"><span className="text-4xl font-semibold">{currency === "INR" ? "₹" : "$"}{price.toFixed(2).replace(/\.00$/, "")}</span><span className="ml-2 text-sm text-chalk-muted">/ class</span></div>
+    <p className="mt-3 text-sm text-chalk-muted">{custom ? `Currently configured for ${pkg.class_count} classes.` : `${pkg.class_count} classes at ${currency === "INR" ? "₹" : "$"}${(price * pkg.class_count).toFixed(2).replace(/\.00$/, "")} total.`}</p>
+    <Link to={`/checkout/package?package=${encodeURIComponent(pkg.id)}&currency=${currency}&subject=${encodeURIComponent(subjectId)}`} className="mt-7 inline-flex justify-center rounded-xl bg-brand-red px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-gold">Choose package</Link>
+  </article>;
 }

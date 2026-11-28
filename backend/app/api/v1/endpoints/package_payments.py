@@ -1,5 +1,5 @@
 import uuid
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
@@ -19,7 +19,12 @@ from app.schemas.package_payment import (
 )
 from app.services import razorpay_service, stripe_service
 from app.services.invoice_pdf import render_payment_invoice
-from app.services.package_payment_service import activate_package_from_payment, get_or_create_payment, get_package_plan
+from app.services.package_payment_service import (
+    activate_package_from_payment,
+    get_or_create_payment,
+    get_package_plan,
+    validate_package_selection,
+)
 
 router = APIRouter()
 
@@ -74,6 +79,7 @@ def package_checkout(
 ):
     student_id = _resolve_student_id(current_user, payload.student_id, db)
     plan = get_package_plan(db, payload.package_plan_id)
+    validate_package_selection(db, plan, currency=payload.currency, subject_id=payload.selected_subject_id)
 
     payment = get_or_create_payment(
         db,
