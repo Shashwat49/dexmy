@@ -4,10 +4,14 @@ import { getSafePostAuthPath } from "./postAuthPath.js";
 
 globalThis.window = { location: { origin: "https://dexmy.test" } };
 
-test("preserves supported local purchase and demo routes", () => {
+test("preserves supported local purchase and demo routes including selected subject", () => {
   assert.equal(getSafePostAuthPath("/dashboard/student/book"), "/dashboard/student/book");
   assert.equal(
-    getSafePostAuthPath("/checkout/package?package=plan-1&currency=usd"),
+    getSafePostAuthPath("/checkout/package?package=plan-1&currency=usd&subject=12"),
+    "/checkout/package?package=plan-1&currency=USD&subject=12",
+  );
+  assert.equal(
+    getSafePostAuthPath("/checkout/package?package=plan-1&currency=usd&subject=bad"),
     "/checkout/package?package=plan-1&currency=USD",
   );
 });

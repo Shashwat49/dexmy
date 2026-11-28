@@ -8,6 +8,18 @@ from sqlalchemy.orm import Session
 
 from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage
 from app.models.payment import Payment, PaymentStatus
+from app.models.teacher import Subject
+
+
+def validate_package_selection(db: Session, package_plan: PackagePlan, *, currency: str | None, subject_id: int | None) -> None:
+    if currency is not None and currency != package_plan.currency:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected currency does not match the package currency")
+    if subject_id is None:
+        return
+    if db.get(Subject, subject_id) is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Selected subject does not exist")
+    if package_plan.subjects and subject_id not in {subject.id for subject in package_plan.subjects}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Package is not available for the selected subject")
 
 
 def get_package_plan(db: Session, package_plan_id: uuid.UUID) -> PackagePlan:
