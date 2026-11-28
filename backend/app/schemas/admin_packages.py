@@ -13,6 +13,7 @@ class PackagePlanCreate(BaseModel):
     currency: str = Field(default="INR", min_length=3, max_length=3)
     is_custom: bool = False
     is_active: bool = True
+    subject_ids: list[int] = Field(default_factory=list)
 
     @field_validator("currency")
     @classmethod
@@ -36,6 +37,7 @@ class PackagePlanUpdate(BaseModel):
     currency: str | None = Field(default=None, min_length=3, max_length=3)
     is_custom: bool | None = None
     is_active: bool | None = None
+    subject_ids: list[int] | None = None
 
     @field_validator("currency")
     @classmethod
@@ -53,6 +55,11 @@ class PackagePlanUpdate(BaseModel):
         return value.strip() if value is not None else None
 
 
+class PackageSubjectRead(BaseModel):
+    id: int
+    name: str
+
+
 class PackagePlanRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -64,5 +71,7 @@ class PackagePlanRead(BaseModel):
     currency: str
     is_custom: bool
     is_active: bool
+    subject_ids: list[int]
+    subjects: list[PackageSubjectRead]
     created_at: datetime
     updated_at: datetime

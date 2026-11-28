@@ -25,6 +25,8 @@ def list_public_packages(db: Session = Depends(get_db)):
             "currency": p.currency,
             "is_custom": p.is_custom,
             "is_active": p.is_active,
+            "subject_ids": sorted(subject.id for subject in p.subjects),
+            "subjects": [{"id": subject.id, "name": subject.name} for subject in p.subjects],
         }
         for p in packages
     ]
