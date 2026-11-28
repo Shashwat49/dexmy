@@ -41,7 +41,7 @@ export default function Hero() {
 
       <div className="relative z-[3] flex gap-4 flex-wrap justify-center">
         <Link
-          to="/login"
+          to="/login?next=%2Fdashboard%2Fstudent%2Fbook"
           className="btn-demo-pulse bg-brand-gold text-[#2C1E04] text-base font-bold px-8 py-4 rounded-lg hover:bg-[#FFC94D] transition-colors"
         >
           Book a Free Demo

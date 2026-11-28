@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.origins import get_allowed_frontend_origins
 from app.services.class_reminder_service import process_due_class_reminders
 
 logger = logging.getLogger(__name__)
@@ -40,17 +41,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
 
-# The frontend is served from the production custom domain, the Vercel
-# deployment domain, and localhost during development. Keep the configured
-# origin as well so existing deployments remain compatible.
-allowed_origins = {
-    settings.FRONTEND_ORIGIN.rstrip("/"),
-    "https://dexmyedu.com",
-    "https://www.dexmyedu.com",
-    "https://dexmy.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-}
+# Keep CORS and CSRF on the same exact-origin allowlist.
+allowed_origins = get_allowed_frontend_origins()
 
 app.add_middleware(
     CORSMiddleware,

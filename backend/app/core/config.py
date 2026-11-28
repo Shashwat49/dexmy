@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     # Keep the legacy single-origin setting for compatibility. The API also
     # accepts the production custom domain and Vercel domain in main.py.
     FRONTEND_ORIGIN: str = "https://dexmyedu.com"
+    # Comma-separated exact frontend origins for production and Vercel previews.
+    FRONTEND_ORIGINS: str = ""
 
     # Scheduled class reminder email delivery. Disabled until production SMTP
     # credentials and the reminder-delivery SQL migration are configured.

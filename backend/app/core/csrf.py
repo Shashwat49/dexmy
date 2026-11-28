@@ -4,6 +4,7 @@ from fastapi import HTTPException, Request, Response, status
 
 from app.core.config import settings
 from app.core.cookies import cookie_samesite, cookie_secure
+from app.core.origins import get_allowed_frontend_origins, normalize_origin
 
 CSRF_HEADER_NAME = "X-CSRF-Token"
 
@@ -45,15 +46,8 @@ def validate_csrf(request: Request) -> None:
 
     origin = request.headers.get("origin")
     if origin:
-        allowed_origins = {
-            settings.FRONTEND_ORIGIN.rstrip("/"),
-            "https://dexmyedu.com",
-            "https://www.dexmyedu.com",
-            "https://dexmy.vercel.app",
-            "http://localhost:5173",
-            "http://localhost:3000",
-        }
-        if origin.rstrip("/") not in allowed_origins:
+        normalized_origin = normalize_origin(origin)
+        if normalized_origin not in get_allowed_frontend_origins():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Untrusted request origin",

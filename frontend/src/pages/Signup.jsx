@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { useAuth } from "../context/AuthContext";
+import { getSafePostAuthPath } from "../utils/postAuthPath";
 
 const ROLES = [
   { value: "student", label: "Student" },
@@ -49,7 +50,8 @@ export default function Signup() {
     e.preventDefault(); setError("");
     try {
       const createdUser = await signup({ role, full_name: fullName, email, phone: `${countryCode}${phone}`, password });
-      navigate(createdUser.role === "teacher" ? "/dashboard/teacher/profile" : "/dashboard");
+      const safeNext = getSafePostAuthPath(searchParams.get("next"));
+      navigate(createdUser.role === "student" && safeNext ? safeNext : (createdUser.role === "teacher" ? "/dashboard/teacher/profile" : "/dashboard"));
     } catch (err) {
       const detail = err.response?.data?.detail;
       setError(Array.isArray(detail) ? (detail[0]?.msg || "Please check the information you entered.") : typeof detail === "string" ? detail : "Couldn't create your account — please try again.");
@@ -67,6 +69,6 @@ export default function Signup() {
       {error&&<p className="text-brand-red text-sm">{error}</p>}
       <button type="submit" disabled={loading} className="w-full bg-brand-red hover:bg-brand-red-dark transition-colors rounded-lg py-2.5 font-semibold text-sm disabled:opacity-50">{loading?"Creating account…":"Create account"}</button>
     </form>
-    <p className="text-center text-sm text-chalk-muted mt-6">Already have an account? <Link to="/login" className="text-brand-gold font-medium hover:underline">Log in</Link></p>
+    <p className="text-center text-sm text-chalk-muted mt-6">Already have an account? <Link to={searchParams.get("next") ? `/login?next=${encodeURIComponent(searchParams.get("next"))}` : "/login"} className="text-brand-gold font-medium hover:underline">Log in</Link></p>
   </AuthLayout>;
 }

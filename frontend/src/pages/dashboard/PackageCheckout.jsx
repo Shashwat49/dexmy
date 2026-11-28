@@ -224,7 +224,7 @@ export default function PackageCheckout() {
 
   const handlePayment = async () => {
     if (!user) {
-      navigate(`/login?next=/checkout/package?package=${pkg.id}&currency=${currency}`);
+      navigate(`/login?next=${encodeURIComponent(`/checkout/package?package=${pkg.id}&currency=${currency}`)}`);
       return;
     }
     const studentId = resolveStudentId();
