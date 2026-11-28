@@ -69,6 +69,7 @@ def test_admin_assignment_race_condition(client, seed_data, auth_headers, db_ses
         student_id=student.id,
         subject_id=subject.id,
         scheduled_at=slot_time,
+        booking_ends_at=slot_time + timedelta(minutes=55),
         status="confirmed",
         teacher_assignment_status="pending",
         duration_minutes=55

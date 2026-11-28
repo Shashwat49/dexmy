@@ -7,13 +7,13 @@ This document describes the architectural flow, database constraints, and API be
 The booking system handles real-time concurrency by moving all conflict resolution and validation down to the database level, ensuring that race conditions cannot bypass the system rules regardless of how many requests are fired simultaneously.
 
 ### Core Database Constraints
-We employ **PostgreSQL EXCLUDE USING GIST** constraints to provide physical guarantees against double-booking.
+We employ **PostgreSQL EXCLUDE USING GIST** constraints to provide physical guarantees against double-booking. Both constraints use the stored generated `booking_time_range` (`tsrange`) column. It converts `scheduled_at` to UTC before adding `duration_minutes`, avoiding PostgreSQL's non-immutable `timestamptz + interval` expression restriction while keeping overlap checks timezone-consistent.
 
 - **Student Conflict Protection**:
   ```sql
   EXCLUDE USING GIST (
       student_id WITH =,
-      tstzrange(scheduled_at, scheduled_at + (duration_minutes * interval '1 minute')) WITH &&
+      booking_time_range WITH &&
   )
   WHERE (status NOT IN ('cancelled', 'completed', 'no_show'))
   ```
@@ -40,6 +40,7 @@ A booking transitions through several states, categorized under two main pillars
 1. **pending** — Default state when a booking is created. No teacher is assigned yet.
 2. **assigned** — A teacher has been successfully allocated to the booking.
 3. **failed** — The system or admin could not find a suitable teacher.
+4. **discarded** — An admin discarded the pending assignment request.
 
 ---
 
@@ -90,4 +91,4 @@ To verify the concurrency logic, run the test suite:
 pip install -r backend/requirements-dev.txt
 pytest backend/tests/test_booking_concurrency.py
 ```
-*(Ensure your `.env` contains a valid `DATABASE_URL` pointing to a PostgreSQL database, as SQLite does not support `tstzrange` or `GIST` constraints).*
+*(Ensure your `.env` contains a valid `DATABASE_URL` pointing to PostgreSQL. SQLite does not support generated PostgreSQL range columns or GiST exclusion constraints.)*
