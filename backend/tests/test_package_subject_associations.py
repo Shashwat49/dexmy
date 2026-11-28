@@ -215,6 +215,7 @@ def test_credit_consumption_rechecks_package_subject_against_booking(db_session)
         id=uuid.uuid4(),
         student_id=student.id,
         subject_id=science.id,
+        student_package_id=package.id,
         scheduled_at=datetime(2026, 12, 1, 10, 0, tzinfo=timezone.utc),
         booking_ends_at=datetime(2026, 12, 1, 10, 55, tzinfo=timezone.utc),
         duration_minutes=55,
