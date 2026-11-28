@@ -7,11 +7,20 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import require_permission
 from app.db.session import get_db
 from app.models.package import PackagePlan
+from app.models.teacher import Subject
 from app.models.user import User
 from app.schemas.admin_packages import PackagePlanCreate, PackagePlanRead, PackagePlanUpdate
 from app.services.audit_service import record_admin_action
 
 router = APIRouter()
+
+
+def _resolve_subjects(db: Session, subject_ids: list[int]) -> list[Subject]:
+    unique_ids = set(subject_ids)
+    subjects = db.execute(select(Subject).where(Subject.id.in_(unique_ids))).scalars().all() if unique_ids else []
+    if len(subjects) != len(unique_ids):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="One or more subjects do not exist")
+    return sorted(subjects, key=lambda subject: subject.name)
 
 
 @router.get("", response_model=list[PackagePlanRead])
@@ -41,7 +50,8 @@ def create_package_plan(
     if duplicate:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A package with this name and currency already exists")
 
-    package = PackagePlan(**payload.model_dump())
+    package = PackagePlan(**payload.model_dump(exclude={"subject_ids"}))
+    package.subjects = _resolve_subjects(db, payload.subject_ids)
     db.add(package)
     db.flush()
     record_admin_action(
@@ -50,7 +60,7 @@ def create_package_plan(
         action="package.create",
         resource_type="package_plan",
         resource_id=package.id,
-        new_values={"name": package.name, "class_count": package.class_count, "price": str(package.price), "currency": package.currency},
+        new_values={"name": package.name, "class_count": package.class_count, "price": str(package.price), "currency": package.currency, "subject_ids": package.subject_ids},
     )
     db.commit()
     db.refresh(package)
@@ -74,9 +84,13 @@ def update_package_plan(
         "price": str(package.price),
         "currency": package.currency,
         "is_active": package.is_active,
+        "subject_ids": package.subject_ids,
     }
 
     changes = payload.model_dump(exclude_unset=True)
+    subject_ids = changes.pop("subject_ids", None)
+    if subject_ids is not None:
+        package.subjects = _resolve_subjects(db, subject_ids)
     if "name" in changes or "currency" in changes:
         name = changes.get("name", package.name)
         currency = changes.get("currency", package.currency)
@@ -101,7 +115,7 @@ def update_package_plan(
         resource_type="package_plan",
         resource_id=package.id,
         old_values=old_values,
-        new_values={"name": package.name, "class_count": package.class_count, "price": str(package.price), "currency": package.currency, "is_active": package.is_active},
+        new_values={"name": package.name, "class_count": package.class_count, "price": str(package.price), "currency": package.currency, "is_active": package.is_active, "subject_ids": package.subject_ids},
     )
     db.commit()
     db.refresh(package)

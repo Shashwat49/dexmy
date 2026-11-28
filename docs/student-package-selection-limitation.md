@@ -1,23 +1,26 @@
-# Student package-tab selection: data-model prerequisite
+# Student package-tab selection: Phase 1 data-model foundation
 
-## Decision
+## Status
 
-The guided subject/course → currency → package flow is not safe to implement against the current catalogue. The public catalogue can list active plans and filter them by `currency`, but there is no plan-to-subject/course relationship with which the UI could accurately filter plans after a subject is selected. Adding a subject picker and then showing the same plans for every selection would imply a restriction that the checkout and package entitlement do not enforce.
+Phase 1 adds an optional many-to-many association between package plans and subjects. Administrators can assign or remove subjects through the existing package API and admin form, and the public catalogue returns each plan's `subject_ids` and subject `{id, name}` records. The additive migration creates only the association table; it does not assign subjects to existing plans or change plan records, entitlements, pricing, checkout, or payment behavior. Plans with no associations remain valid. Student-facing subject selection is intentionally out of scope.
 
-No frontend selection flow, backend behavior, database migration, package price, payment/provider processing, or entitlement logic is changed by this note.
+## Why student selection remains deferred
 
-## What the current code supports
+The guided subject/course → currency → package flow can now use an explicit plan-to-subject relationship, but Phase 1 does not add student-facing selection, enforce subject restrictions during checkout or bookings, or change entitlement behavior. That follow-up must filter real active plan records by subject and currency and validate the chosen plan before payment; an empty association remains unrestricted rather than guessed.
 
-- `PackagePlan` stores `name`, `class_count`, `price`, `currency`, `is_custom`, and `is_active`. It has no `subject_id`, course identifier, or subject relationship.
-- The public package endpoint returns those plan fields. The admin package endpoint and form create and update the same fields; there is no subject/course assignment in admin configuration.
-- `Subject` is a separate catalogue. Its current package-related relationship is absent. Existing uses of subjects concern teachers, bookings, and class records, not package plans.
-- Checkout receives a package plan ID, fetches that plan, and derives its amount and currency from the plan. The frontend includes a selected currency in the checkout URL and only loads a plan whose currency matches it. Payment-provider selection follows the plan currency.
-- The pricing migration defines existing INR and USD rate structures, including the custom row. These should remain authoritative and unchanged. The schema also contains student package entitlements that must remain unaffected.
+Phase 1 does not change package prices, currency logic, checkout, payment providers, or entitlements.
 
-## Smallest safe follow-up
+## What Phase 1 supports
 
-Add an explicit package-plan-to-subject association (a many-to-many table is the least assumptive shape if plans can cover more than one subject), expose it in the public catalogue, and let administrators assign subjects to plans. Then the student flow can filter actual active plan records by selected subject and selected currency, pass both selections through the checkout URL, and verify the selected plan/currency against current catalogue data before payment. Keep the existing plan IDs, prices, labels, and purchase/credit behavior intact; do not rewrite manually assigned/free packages or existing entitlements. Decide separately whether a purchased entitlement is subject-restricted before changing booking or package-credit behavior.
+- `PackagePlan` has an optional many-to-many relationship with `Subject` through `package_plan_subjects`.
+- The public package endpoint keeps its existing fields and adds `subject_ids` and `subjects` (`id` and `name`). An empty association is returned for unassigned plans and remains valid for catalogue and checkout.
+- The admin package endpoint and form create, replace, and clear subject assignments. IDs are validated against existing subjects; omitting `subject_ids` on update leaves assignments unchanged.
+- Existing plan IDs, names, INR/USD pricing and currency logic, free/manual packages, package credits, bookings, class records, classroom behavior, checkout, and payment providers remain unchanged.
+
+## Next phase
+
+The guided subject/course → currency → package student flow must filter active plans using the explicit association and selected currency, and checkout validation must use current catalogue data. Decide separately whether a purchased entitlement is subject-restricted before changing booking or package-credit behavior.
 
 ## Verification boundary
 
-Because no selection behavior can be implemented accurately with the current relationships, selection, currency-filtering-by-subject, selection persistence, and invalid-selection tests must be added with that follow-up rather than testing a nonfunctional UI-only approximation. The existing frontend build and backend test suite can still be run to ensure this documentation-only change is clean.
+Phase 1 does not implement student selection, selection persistence, filtering by subject, or subject enforcement in checkout, bookings, or entitlements.

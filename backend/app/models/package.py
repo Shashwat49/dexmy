@@ -2,11 +2,21 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Table, Text, Column, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.models.teacher import Subject
+
+
+package_plan_subjects = Table(
+    "package_plan_subjects",
+    Base.metadata,
+    Column("package_plan_id", UUID(as_uuid=True), ForeignKey("package_plans.id", ondelete="CASCADE"), primary_key=True),
+    Column("subject_id", Integer, ForeignKey("subjects.id", ondelete="CASCADE"), primary_key=True),
+)
+Index("ix_package_plan_subjects_subject_id", package_plan_subjects.c.subject_id)
 
 
 class PackagePlan(Base):
@@ -22,6 +32,11 @@ class PackagePlan(Base):
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    subjects: Mapped[list[Subject]] = relationship(secondary=package_plan_subjects, order_by=Subject.name)
+
+    @property
+    def subject_ids(self) -> list[int]:
+        return [subject.id for subject in self.subjects]
 
 
 class StudentPackage(Base):
