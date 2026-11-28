@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -214,8 +215,8 @@ def test_credit_consumption_rechecks_package_subject_against_booking(db_session)
         id=uuid.uuid4(),
         student_id=student.id,
         subject_id=science.id,
-        scheduled_at=__import__("datetime").datetime(2026, 12, 1, 10, 0, tzinfo=__import__("datetime").timezone.utc),
-        booking_ends_at=__import__("datetime").datetime(2026, 12, 1, 10, 55, tzinfo=__import__("datetime").timezone.utc),
+        scheduled_at=datetime(2026, 12, 1, 10, 0, tzinfo=timezone.utc),
+        booking_ends_at=datetime(2026, 12, 1, 10, 55, tzinfo=timezone.utc),
         duration_minutes=55,
         status=BookingStatus.confirmed,
         price=Decimal("200.00"),
