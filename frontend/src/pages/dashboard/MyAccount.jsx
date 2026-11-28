@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import DashboardLayout from "../../components/dashboard/DashboardLayout";
 import { getMyStudentProfile, updateMyStudentProfile } from "../../api/students";
-import { getPackagePaymentHistory } from "../../api/packagePayments";
+import { getPackagePaymentHistory, getPackageInvoice } from "../../api/packagePayments";
 import { CalendarIcon, GearIcon, BookIcon } from "../../components/dashboard/icons";
 
 const NAV = [
@@ -89,6 +89,7 @@ function PaymentHistory() {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [downloadingId, setDownloadingId] = useState("");
 
   useEffect(() => {
     getPackagePaymentHistory()
@@ -96,6 +97,22 @@ function PaymentHistory() {
       .catch((e) => setError(e.response?.data?.detail || "Unable to load payment history."))
       .finally(() => setLoading(false));
   }, []);
+
+  const downloadInvoice = async (payment) => {
+    setDownloadingId(payment.id);
+    try {
+      const blob = await getPackageInvoice(payment.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `dexmy-invoice-${payment.id}.pdf`;
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setError(e.response?.data?.detail || "Unable to download this invoice.");
+    } finally {
+      setDownloadingId("");
+    }
+  };
 
   if (loading) return <div className="py-8 text-center text-sm text-chalk-muted">Loading payment history…</div>;
   if (error) return <div className="rounded-xl border border-brand-red/30 bg-brand-red/10 px-4 py-3 text-sm text-brand-red">{error}</div>;
@@ -114,6 +131,7 @@ function PaymentHistory() {
               <th className="px-5 py-4">Provider</th>
               <th className="px-5 py-4">Status</th>
               <th className="px-5 py-4">Reference ID</th>
+              <th className="px-5 py-4">Invoice</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-chalk-faint">
@@ -132,6 +150,7 @@ function PaymentHistory() {
                   </span>
                 </td>
                 <td className="px-5 py-4 font-mono text-xs text-chalk-muted">{p.provider_payment_id || p.id}</td>
+                <td className="px-5 py-4">{p.invoice_available && <button type="button" onClick={() => downloadInvoice(p)} disabled={downloadingId === p.id} className="font-semibold text-brand-gold underline disabled:opacity-50">{downloadingId === p.id ? "Preparing…" : "Download PDF"}</button>}</td>
               </tr>
             ))}
           </tbody>

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import AuthLayout from "../components/AuthLayout";
 import { useAuth } from "../context/AuthContext";
 import { getMyTeacherProfile } from "../api/teachers";
+import { getSafePostAuthPath } from "../utils/postAuthPath";
 
 const DASHBOARD_BY_ROLE = {
   teacher: "/dashboard/teacher",
@@ -36,6 +37,8 @@ function teacherProfileComplete(profile) {
 export default function Login() {
   const { login, logout, loading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const nextPath = getSafePostAuthPath(searchParams.get("next"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -68,7 +71,7 @@ export default function Login() {
         return;
       }
 
-      navigate(DASHBOARD_BY_ROLE[user.role] || "/dashboard");
+      navigate(user.role === "student" && nextPath ? nextPath : (DASHBOARD_BY_ROLE[user.role] || "/dashboard"));
     } catch (err) {
       setError(
         err.code === "ECONNABORTED"
@@ -97,7 +100,7 @@ export default function Login() {
       </form>
 
       <p className="text-center text-sm mt-4"><Link to="/forgot-password" className="text-brand-gold font-medium hover:underline">Forgot password?</Link></p>
-      <p className="text-center text-sm text-chalk-muted mt-6">New to Dexmy? <Link to="/signup" className="text-brand-gold font-medium hover:underline">Create an account</Link></p>
+      <p className="text-center text-sm text-chalk-muted mt-6">New to Dexmy? <Link to={nextPath ? `/signup?next=${encodeURIComponent(nextPath)}` : "/signup"} className="text-brand-gold font-medium hover:underline">Create an account</Link></p>
     </AuthLayout>
   );
 }

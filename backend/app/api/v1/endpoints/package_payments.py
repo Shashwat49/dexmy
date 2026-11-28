@@ -1,7 +1,7 @@
 import uuid
 from decimal import Decimal, ROUND_HALF_UP
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from app.schemas.package_payment import (
     PackageRazorpayVerifyRequest,
 )
 from app.services import razorpay_service, stripe_service
+from app.services.invoice_pdf import render_payment_invoice
 from app.services.package_payment_service import activate_package_from_payment, get_or_create_payment, get_package_plan
 
 router = APIRouter()
@@ -236,6 +237,32 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
     return {"received": True}
 
 
+@router.get("/{payment_id}/invoice.pdf")
+def download_package_invoice(
+    payment_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    payment = db.get(Payment, payment_id)
+    if payment is None or payment.package_plan_id is None or not _can_access_payment(current_user, payment, db):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
+    if payment.status != PaymentStatus.paid:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An invoice is available only for a confirmed payment")
+
+    payer = db.get(User, payment.payer_id)
+    student = db.get(User, payment.student_id) if payment.student_id else None
+    pdf = render_payment_invoice(
+        payment,
+        payer_name=payer.full_name if payer else "Account holder",
+        student_name=student.full_name if student else None,
+    )
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="dexmy-invoice-{payment.id}.pdf"'},
+    )
+
+
 @router.get("/{payment_id}/status")
 def get_package_payment_status(
     payment_id: uuid.UUID,
@@ -290,6 +317,7 @@ def get_payment_history(
             "provider": payment.provider.value if hasattr(payment.provider, "value") else str(payment.provider),
             "provider_payment_id": payment.provider_payment_id or payment.provider_order_id,
             "status": payment.status.value if hasattr(payment.status, "value") else str(payment.status),
+            "invoice_available": payment.package_plan_id is not None and payment.status == PaymentStatus.paid,
             "created_at": payment.created_at.isoformat() if payment.created_at else None,
         })
     return items
