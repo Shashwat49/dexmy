@@ -42,11 +42,16 @@ class PackageCreditService:
     @staticmethod
     def consume(db: Session, *, student_package_id: UUID, booking_id: UUID, created_by: UUID | None = None) -> PackageCreditLedger:
         package = PackageCreditService._lock_package(db, student_package_id)
-        booking_subject_id = db.execute(
-            select(Booking.subject_id).where(Booking.id == booking_id)
-        ).scalar_one_or_none()
-        if booking_subject_id is not None and not PackageCreditService._plan_allows_subject(
-            db, package_plan_id=package.package_plan_id, subject_id=booking_subject_id
+        booking = db.get(Booking, booking_id)
+        if booking is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+        if booking.student_id != package.student_id or booking.student_package_id != package.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This package is not assigned to the student booking.",
+            )
+        if not PackageCreditService._plan_allows_subject(
+            db, package_plan_id=package.package_plan_id, subject_id=booking.subject_id
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
