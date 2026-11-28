@@ -40,6 +40,30 @@ class PackageCreditService:
         ).scalar_one()
 
     @staticmethod
+    def _package_allows_subject(db: Session, *, package: StudentPackage, subject_id: int) -> bool:
+        if package.selected_subject_id is not None and package.selected_subject_id != subject_id:
+            return False
+        return PackageCreditService._plan_allows_subject(
+            db, package_plan_id=package.package_plan_id, subject_id=subject_id
+        )
+
+    @staticmethod
+    def get_class_price(db: Session, package: StudentPackage) -> Decimal:
+        """Return the purchased per-class amount, preserving legacy plan-rate behavior."""
+        if package.payment_id is not None and package.total_classes > 0:
+            payment = db.get(Payment, package.payment_id)
+            if payment is not None and payment.amount is not None:
+                return Decimal(payment.amount) / package.total_classes
+
+        plan = db.get(PackagePlan, package.package_plan_id)
+        if plan is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Package plan for the active student package could not be found.",
+            )
+        return Decimal(plan.price)
+
+    @staticmethod
     def consume(db: Session, *, student_package_id: UUID, booking_id: UUID, created_by: UUID | None = None) -> PackageCreditLedger:
         package = PackageCreditService._lock_package(db, student_package_id)
         booking = db.get(Booking, booking_id)
@@ -50,8 +74,8 @@ class PackageCreditService:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This package is not assigned to the student booking.",
             )
-        if not PackageCreditService._plan_allows_subject(
-            db, package_plan_id=package.package_plan_id, subject_id=booking.subject_id
+        if not PackageCreditService._package_allows_subject(
+            db, package=package, subject_id=booking.subject_id
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -111,7 +135,10 @@ class PackageCreditService:
                 package_plan_subjects.c.package_plan_id == StudentPackage.package_plan_id,
                 package_plan_subjects.c.subject_id == subject_id,
             )
-            query = query.where(or_(~has_subject_restrictions, has_requested_subject))
+            query = query.where(
+                or_(StudentPackage.selected_subject_id.is_(None), StudentPackage.selected_subject_id == subject_id),
+                or_(~has_subject_restrictions, has_requested_subject),
+            )
         package = db.execute(
             query.order_by(
                 StudentPackage.expires_at.is_(None).asc(),
@@ -161,10 +188,8 @@ class PackageCreditService:
                 detail="Package plan for the active student package could not be found.",
             )
         if package.payment_id is not None and package.total_classes > 0:
-            payment = db.get(Payment, package.payment_id)
-            if payment is not None and payment.amount is not None:
-                return package, ledger, Decimal(payment.amount) / package.total_classes
-        return package, ledger, plan.price
+            return package, ledger, PackageCreditService.get_class_price(db, package)
+        return package, ledger, Decimal(plan.price)
 
     @staticmethod
     def refund(db: Session, *, student_package_id: UUID, booking_id: UUID, created_by: UUID | None = None) -> PackageCreditLedger:

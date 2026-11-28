@@ -109,7 +109,7 @@ def create_package_aware_booking(
         if plan is None:
             db.rollback()
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Package plan not found.")
-        price = plan.price / package.total_classes
+        price = PackageCreditService.get_class_price(db, package)
 
     try:
         booking = create_booking_atomic(

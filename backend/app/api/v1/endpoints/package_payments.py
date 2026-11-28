@@ -33,6 +33,11 @@ def _minor_units(amount) -> int:
     return int((Decimal(str(amount)) * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
+def _payment_provider(payment: Payment) -> str:
+    provider = payment.provider
+    return provider.value if hasattr(provider, "value") else str(provider)
+
+
 def _resolve_student_id(current_user: User, requested_student_id: uuid.UUID | None, db: Session) -> uuid.UUID:
     if current_user.role == UserRole.student:
         if requested_student_id is not None and requested_student_id != current_user.id:
@@ -59,7 +64,7 @@ def _response_for_payment(payment: Payment, plan, *, razorpay_order_id=None, str
     return PackageCheckoutResponse(
         payment_id=payment.id,
         package_plan_id=plan.id,
-        provider=payment.provider.value,
+        provider=_payment_provider(payment),
         amount=Decimal(str(payment.amount)),
         currency=payment.currency,
         razorpay_order_id=razorpay_order_id,
@@ -88,13 +93,14 @@ def package_checkout(
         package_plan=plan,
         provider=payload.provider,
         idempotency_key=payload.idempotency_key,
+        selected_subject_id=payload.selected_subject_id,
     )
 
     if payment.status == PaymentStatus.paid:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This package payment has already been completed")
 
     if payment.provider_order_id:
-        if payment.provider.value == "razorpay":
+        if _payment_provider(payment) == "razorpay":
             return _response_for_payment(
                 payment,
                 plan,
@@ -157,7 +163,11 @@ def verify_package_razorpay(
     db: Session = Depends(get_db),
 ):
     payment = db.get(Payment, payload.payment_id)
-    if payment is None or payment.provider.value != "razorpay" or not _can_access_payment(current_user, payment, db):
+    if (
+        payment is None
+        or _payment_provider(payment) != "razorpay"
+        or not _can_access_payment(current_user, payment, db)
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment not found")
     if payment.status == PaymentStatus.paid:
         return {"status": "already_confirmed"}
@@ -216,7 +226,7 @@ async def package_stripe_webhook(request: Request, db: Session = Depends(get_db)
 
         if payment is None:
             return {"received": True}
-        if payment.provider.value != "stripe":
+        if _payment_provider(payment) != "stripe":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment provider mismatch")
         if metadata.get("payment_id") and metadata["payment_id"] != str(payment.id):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payment metadata mismatch")
@@ -284,6 +294,74 @@ def get_package_payment_status(
         "package_active": bool(package and package.status == "active"),
         "payment_id": str(payment.id),
     }
+
+
+@router.get("/entitlements")
+def list_package_entitlements(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return itemized package balances for a student or their linked parent."""
+    if current_user.role == UserRole.student:
+        student_ids = [current_user.id]
+    elif current_user.role == UserRole.parent:
+        student_ids = db.scalars(
+            select(ParentStudentLink.student_id).where(ParentStudentLink.parent_id == current_user.id)
+        ).all()
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students and parents can view package entitlements",
+        )
+
+    if not student_ids:
+        return {"items": []}
+
+    rows = db.execute(
+        select(StudentPackage, PackagePlan, User.full_name, Payment)
+        .join(PackagePlan, PackagePlan.id == StudentPackage.package_plan_id)
+        .join(User, User.id == StudentPackage.student_id)
+        .outerjoin(Payment, Payment.id == StudentPackage.payment_id)
+        .where(StudentPackage.student_id.in_(student_ids))
+        .order_by(StudentPackage.purchased_at.desc(), StudentPackage.id.asc())
+    ).all()
+
+    items = []
+    for package, plan, student_name, payment in rows:
+        subject_ids = sorted(subject.id for subject in plan.subjects)
+        subjects = sorted(
+            ({"id": subject.id, "name": subject.name} for subject in plan.subjects),
+            key=lambda subject: subject["name"].casefold(),
+        )
+        items.append({
+            "id": str(package.id),
+            "student_id": str(package.student_id),
+            "student_name": student_name,
+            "payment_id": str(package.payment_id) if package.payment_id else None,
+            "package_plan_id": str(package.package_plan_id),
+            "package_name": plan.name,
+            "selected_subject_id": package.selected_subject_id,
+            "subject_ids": subject_ids,
+            "subjects": subjects,
+            "total_classes": package.total_classes,
+            "classes_used": package.classes_used,
+            "classes_remaining": (
+                None if package.is_unlimited else max(0, package.total_classes - package.classes_used)
+            ),
+            "is_unlimited": package.is_unlimited,
+            "progress_percent": (
+                None
+                if package.is_unlimited or package.total_classes <= 0
+                else min(100, round(package.classes_used * 100 / package.total_classes, 1))
+            ),
+            "status": package.status,
+            "purchased_at": package.purchased_at.isoformat() if package.purchased_at else None,
+            "expires_at": package.expires_at.isoformat() if package.expires_at else None,
+            "amount": str(payment.amount) if payment else None,
+            "currency": payment.currency if payment else plan.currency,
+        })
+
+    return {"items": items}
 
 
 @router.get("/history")

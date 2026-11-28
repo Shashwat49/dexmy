@@ -45,7 +45,18 @@ class StudentPackage(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     student_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     package_plan_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("package_plans.id", ondelete="RESTRICT"), nullable=False)
-    payment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True, unique=True)
+    payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("payments.id", ondelete="RESTRICT", name="fk_student_packages_payment_id_payments"),
+        nullable=True,
+        unique=True,
+    )
+    selected_subject_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("subjects.id", ondelete="RESTRICT", name="fk_student_packages_selected_subject_id_subjects"),
+        nullable=True,
+        index=True,
+    )
     total_classes: Mapped[int] = mapped_column(Integer, nullable=False)
     classes_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_unlimited: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

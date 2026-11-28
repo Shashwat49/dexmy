@@ -26,6 +26,14 @@ TEST_DATABASE_URL = os.environ["DATABASE_URL"]
 engine = create_engine(TEST_DATABASE_URL, pool_pre_ping=True)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
+def _drop_test_schema():
+    """Remove the raw-SQL audit table before dropping ORM-managed tables."""
+    with engine.begin() as conn:
+        conn.execute(sa.text('DROP TABLE IF EXISTS "booking_assignment_audits"'))
+    Base.metadata.drop_all(bind=engine)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_database():
     """
@@ -33,7 +41,7 @@ def setup_test_database():
     Runs raw SQL migrations to ensure the DB schema and constraints match production.
     """
     # Create tables that are in Base.metadata
-    Base.metadata.drop_all(bind=engine)
+    _drop_test_schema()
     Base.metadata.create_all(bind=engine)
     
     # Run the raw sql migration file to apply DB-specific constraints (e.g. EXCLUDE USING GIST)
@@ -60,7 +68,7 @@ def setup_test_database():
     yield
 
     # Teardown
-    Base.metadata.drop_all(bind=engine)
+    _drop_test_schema()
 
 @pytest.fixture(scope="function")
 def db_session():

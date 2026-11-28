@@ -17,7 +17,7 @@ def test_concurrent_package_activation(db_session, seed_data):
         id=uuid.uuid4(),
         name="Test 50 Classes",
         class_count=50,
-        price=Decimal("15000.00"),
+        price=Decimal("300.00"),
         currency="INR"
     )
     db_session.add(plan)
@@ -28,7 +28,8 @@ def test_concurrent_package_activation(db_session, seed_data):
         package_plan_id=plan.id,
         student_id=student.id,
         payer_id=student.id,
-        amount=plan.price,
+        amount=Decimal("15000.00"),
+        package_class_count=50,
         currency=plan.currency,
         provider="razorpay",
         status=PaymentStatus.created,
@@ -36,6 +37,7 @@ def test_concurrent_package_activation(db_session, seed_data):
     )
     db_session.add(payment)
     db_session.commit()
+    payment_id = payment.id
 
     # We need separate sessions for concurrent tests because SQLAlchemy sessions are not thread-safe.
     # The fixture db_session is a single session. We will use the SessionLocal factory from the app.
@@ -44,11 +46,12 @@ def test_concurrent_package_activation(db_session, seed_data):
     def activate_worker():
         db = SessionLocal()
         try:
-            return activate_package_from_payment(
-                db=db, 
-                payment_id=payment.id, 
+            package = activate_package_from_payment(
+                db=db,
+                payment_id=payment_id,
                 provider_payment_id="pay_test_123"
             )
+            return package.id
         except HTTPException as e:
             return e
         finally:
@@ -59,19 +62,16 @@ def test_concurrent_package_activation(db_session, seed_data):
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         results = list(executor.map(lambda _: activate_worker(), range(3)))
 
-    # Evaluate results:
-    # Exactly ONE should succeed and return a StudentPackage
-    # The others should either return the SAME StudentPackage (if they hit the 'status == paid' early return)
-    # or raise a 409 Conflict (if they hit the IntegrityError catch)
-    
+    # Exactly ONE should succeed and return the same package identifier.
+    # Other requests may also return that identifier after observing activation.
     packages_created = 0
     conflicts = 0
     package_ids = set()
 
     for res in results:
-        if isinstance(res, StudentPackage):
+        if isinstance(res, uuid.UUID):
             packages_created += 1
-            package_ids.add(res.id)
+            package_ids.add(res)
         elif isinstance(res, HTTPException) and res.status_code == 409:
             conflicts += 1
 
@@ -84,13 +84,13 @@ def test_concurrent_package_activation(db_session, seed_data):
     db_session.expire_all()
     
     # 1. Payment status updated
-    updated_payment = db_session.get(Payment, payment.id)
+    updated_payment = db_session.get(Payment, payment_id)
     assert updated_payment.status == PaymentStatus.paid
     assert updated_payment.provider_payment_id == "pay_test_123"
     
     # 2. Exactly ONE StudentPackage created for this payment
     student_packages = db_session.execute(
-        select(StudentPackage).where(StudentPackage.payment_id == payment.id)
+        select(StudentPackage).where(StudentPackage.payment_id == payment_id)
     ).scalars().all()
     assert len(student_packages) == 1
     
