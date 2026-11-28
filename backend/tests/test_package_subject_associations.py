@@ -1,9 +1,14 @@
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.models.package import PackagePlan
+from fastapi import HTTPException
+
+from app.models.booking import Booking, BookingStatus
+from app.models.package import PackagePlan, StudentPackage
 from app.models.teacher import Subject
 from app.models.user import User, UserRole
+from app.services.package_credit_service import PackageCreditService
 
 
 def _super_admin(db_session):
@@ -107,3 +112,129 @@ def test_association_metadata_and_migration_are_additive():
     assert 'op.drop_table("package_plan_subjects")' in source
     assert "student_packages" not in source
     assert "package_plans" not in source.split("def downgrade():", 1)[1]
+
+
+
+def _student(db_session):
+    student = User(
+        id=uuid.uuid4(),
+        email=f"package-student-{uuid.uuid4()}@test.com",
+        password_hash="unused",
+        role=UserRole.student,
+        full_name="Package Student",
+        is_active=True,
+        email_verified=True,
+    )
+    db_session.add(student)
+    db_session.flush()
+    return student
+
+
+def _student_package(db_session, student, plan, *, total_classes=25):
+    package = StudentPackage(
+        id=uuid.uuid4(),
+        student_id=student.id,
+        package_plan_id=plan.id,
+        total_classes=total_classes,
+        classes_used=0,
+        is_unlimited=False,
+        status="active",
+    )
+    db_session.add(package)
+    db_session.flush()
+    return package
+
+
+def test_subject_restricted_package_is_not_selected_for_another_subject(db_session):
+    student = _student(db_session)
+    math = _create_subject(db_session, "Math")
+    science = _create_subject(db_session, "Science")
+    plan = PackagePlan(
+        name="Math only",
+        class_count=25,
+        price=Decimal("5000.00"),
+        currency="INR",
+        subjects=[math],
+    )
+    db_session.add(plan)
+    db_session.flush()
+    _student_package(db_session, student, plan)
+    db_session.commit()
+
+    try:
+        PackageCreditService.select_active_package_for_student(
+            db_session,
+            student_id=student.id,
+            subject_id=science.id,
+        )
+        assert False, "A Math-only package must not be selected for Science."
+    except HTTPException as exc:
+        assert exc.status_code == 402
+        assert "this subject" in exc.detail.lower()
+
+
+def test_unassigned_legacy_package_remains_valid_for_any_subject(db_session):
+    student = _student(db_session)
+    science = _create_subject(db_session, "Science")
+    legacy_plan = PackagePlan(
+        name="Legacy unrestricted",
+        class_count=25,
+        price=Decimal("5000.00"),
+        currency="INR",
+        subjects=[],
+    )
+    db_session.add(legacy_plan)
+    db_session.flush()
+    legacy_package = _student_package(db_session, student, legacy_plan)
+    db_session.commit()
+
+    selected = PackageCreditService.select_active_package_for_student(
+        db_session,
+        student_id=student.id,
+        subject_id=science.id,
+    )
+
+    assert selected.id == legacy_package.id
+
+
+def test_credit_consumption_rechecks_package_subject_against_booking(db_session):
+    student = _student(db_session)
+    math = _create_subject(db_session, "Math")
+    science = _create_subject(db_session, "Science")
+    math_plan = PackagePlan(
+        name="Math only",
+        class_count=25,
+        price=Decimal("5000.00"),
+        currency="INR",
+        subjects=[math],
+    )
+    db_session.add(math_plan)
+    db_session.flush()
+    package = _student_package(db_session, student, math_plan)
+    booking = Booking(
+        id=uuid.uuid4(),
+        student_id=student.id,
+        subject_id=science.id,
+        student_package_id=package.id,
+        scheduled_at=datetime(2026, 12, 1, 10, 0, tzinfo=timezone.utc),
+        booking_ends_at=datetime(2026, 12, 1, 10, 55, tzinfo=timezone.utc),
+        duration_minutes=55,
+        status=BookingStatus.confirmed,
+        price=Decimal("200.00"),
+    )
+    db_session.add(booking)
+    db_session.commit()
+
+    try:
+        PackageCreditService.consume(
+            db_session,
+            student_package_id=package.id,
+            booking_id=booking.id,
+            created_by=student.id,
+        )
+        assert False, "A Math-only package must not debit for a Science booking."
+    except HTTPException as exc:
+        assert exc.status_code == 409
+    db_session.rollback()
+    db_session.refresh(package)
+    assert package.classes_used == 0

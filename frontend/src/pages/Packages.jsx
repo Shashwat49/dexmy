@@ -16,7 +16,9 @@ export default function Packages() {
   });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const freeClassLimitReached = new URLSearchParams(window.location.search).get("reason") === "free-class-limit";
+  const searchParams = new URLSearchParams(window.location.search);
+  const freeClassLimitReached = searchParams.get("reason") === "free-class-limit";
+  const subjectPackageRequired = searchParams.get("reason") === "subject-package-required";
 
   useEffect(() => {
     let mounted = true;
@@ -55,6 +57,7 @@ export default function Packages() {
         </div>
 
         {freeClassLimitReached && <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-brand-gold/40 bg-brand-gold/10 px-6 py-5 text-center"><p className="font-semibold text-brand-gold">You’ve exhausted your 2 free classes.</p><p className="mt-1 text-sm leading-6 text-chalk-muted">Choose a package below to continue booking classes.</p></div>}
+        {subjectPackageRequired && <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-brand-gold/40 bg-brand-gold/10 px-6 py-5 text-center"><p className="font-semibold text-brand-gold">Choose a package for this subject.</p><p className="mt-1 text-sm leading-6 text-chalk-muted">Your current active packages do not include this subject, or have no remaining credits. Select a package below to continue.</p></div>}
         {error && <div role="alert" className="mx-auto mt-8 max-w-3xl rounded-xl border border-red-400/30 bg-red-500/10 px-5 py-4 text-center text-sm text-red-300">{error}</div>}
 
         <section aria-labelledby="subject-heading" className="mt-10">

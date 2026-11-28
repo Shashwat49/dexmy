@@ -13,16 +13,17 @@ export const getAvailableSlots = (subjectId) =>
 // Free bookings remain free; paid bookings consume one active package credit.
 // If no package credits are available, send the student directly to the
 // packages page with a reason so the page can explain why they were redirected.
-export const createBooking = (subjectId, scheduledAt) =>
+export const createBooking = (subjectId, scheduledAt, idempotencyKey) =>
   api
     .post("/bookings/package", {
       subject_id: subjectId,
       scheduled_at: scheduledAt,
+      idempotency_key: idempotencyKey,
     })
     .then((r) => r.data)
     .catch((err) => {
       if (err.response?.status === 402) {
-        window.location.assign("/packages?reason=free-class-limit");
+        window.location.assign(`/packages?reason=subject-package-required&subject=${encodeURIComponent(subjectId)}`);
       }
       throw err;
     });

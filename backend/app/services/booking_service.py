@@ -457,17 +457,14 @@ def create_booking_atomic(
     # --------------------------------------------------------
 
     if idempotency_key is not None:
-
         existing = (
             db.query(Booking)
-            .filter(
-                Booking.idempotency_key
-                == idempotency_key,
-            )
+            .filter(Booking.idempotency_key == idempotency_key)
             .first()
         )
-
         if existing is not None:
+            if existing.student_id != student_id:
+                raise ValueError("This idempotency key is already in use.")
             return existing
 
     # --------------------------------------------------------
@@ -495,6 +492,19 @@ def create_booking_atomic(
         .with_for_update()
     )
 
+    # Re-check after acquiring the student lock. A concurrent retry may have
+    # inserted the booking while this request was waiting for the same lock.
+    if idempotency_key is not None:
+        existing = (
+            db.query(Booking)
+            .filter(Booking.idempotency_key == idempotency_key)
+            .first()
+        )
+        if existing is not None:
+            if existing.student_id != student_id:
+                raise ValueError("This idempotency key is already in use.")
+            return existing
+
     # --------------------------------------------------------
     # Re-validate inside the lock.
     #
@@ -518,7 +528,6 @@ def create_booking_atomic(
     # Create the booking.
     # --------------------------------------------------------
 
-    booking_end = scheduled_at + timedelta(minutes=CLASS_DURATION_MINUTES)
     booking_end = scheduled_at + timedelta(minutes=CLASS_DURATION_MINUTES)
 
     booking = Booking(

@@ -3,10 +3,11 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage
+from app.models.booking import Booking
+from app.models.package import PackageCreditLedger, PackagePlan, StudentPackage, package_plan_subjects
 from app.models.payment import Payment
 
 
@@ -25,8 +26,37 @@ class PackageCreditService:
         return package
 
     @staticmethod
+    def _plan_allows_subject(db: Session, *, package_plan_id: UUID, subject_id: int) -> bool:
+        has_subject_restrictions = db.execute(
+            select(exists().where(package_plan_subjects.c.package_plan_id == package_plan_id))
+        ).scalar_one()
+        if not has_subject_restrictions:
+            return True
+        return db.execute(
+            select(exists().where(
+                package_plan_subjects.c.package_plan_id == package_plan_id,
+                package_plan_subjects.c.subject_id == subject_id,
+            ))
+        ).scalar_one()
+
+    @staticmethod
     def consume(db: Session, *, student_package_id: UUID, booking_id: UUID, created_by: UUID | None = None) -> PackageCreditLedger:
         package = PackageCreditService._lock_package(db, student_package_id)
+        booking = db.get(Booking, booking_id)
+        if booking is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+        if booking.student_id != package.student_id or booking.student_package_id != package.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This package is not assigned to the student booking.",
+            )
+        if not PackageCreditService._plan_allows_subject(
+            db, package_plan_id=package.package_plan_id, subject_id=booking.subject_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This package is not valid for the subject selected for this booking.",
+            )
         if package.status != "active":
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Student package is not active")
         if package.expires_at is not None and package.expires_at <= datetime.now(timezone.utc):
@@ -58,18 +88,32 @@ class PackageCreditService:
         return ledger
 
     @staticmethod
-    def select_active_package_for_student(db: Session, *, student_id: UUID) -> StudentPackage:
-        """Lock and select the earliest-expiring eligible package."""
+    def select_active_package_for_student(
+        db: Session, *, student_id: UUID, subject_id: int | None = None
+    ) -> StudentPackage:
+        """Lock the earliest-expiring active package that covers the requested subject.
+
+        Plans with no subject associations are legacy plans and remain valid for
+        every subject. Once a plan has associations, only those subjects qualify.
+        """
         now = datetime.now(timezone.utc)
-        package = db.execute(
-            select(StudentPackage)
-            .where(
+        query = select(StudentPackage).where(
                 StudentPackage.student_id == student_id,
                 StudentPackage.status == "active",
                 (StudentPackage.is_unlimited.is_(True)) | (StudentPackage.classes_used < StudentPackage.total_classes),
                 (StudentPackage.expires_at.is_(None)) | (StudentPackage.expires_at > now),
             )
-            .order_by(
+        if subject_id is not None:
+            has_subject_restrictions = exists().where(
+                package_plan_subjects.c.package_plan_id == StudentPackage.package_plan_id
+            )
+            has_requested_subject = exists().where(
+                package_plan_subjects.c.package_plan_id == StudentPackage.package_plan_id,
+                package_plan_subjects.c.subject_id == subject_id,
+            )
+            query = query.where(or_(~has_subject_restrictions, has_requested_subject))
+        package = db.execute(
+            query.order_by(
                 StudentPackage.expires_at.is_(None).asc(),
                 StudentPackage.expires_at.asc(),
                 StudentPackage.purchased_at.asc(),
@@ -82,7 +126,10 @@ class PackageCreditService:
         if package is None:
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail="No active package credits are available for this booking.",
+                detail=(
+                    "No active package credits are available for this subject. "
+                    "Choose a package for this subject to continue booking."
+                ),
             )
         return package
 
@@ -93,9 +140,12 @@ class PackageCreditService:
         student_id: UUID,
         booking_id: UUID,
         created_by: UUID | None = None,
+        subject_id: int | None = None,
     ) -> tuple[StudentPackage, PackageCreditLedger, Decimal]:
         """Consume one credit from the student's best eligible package."""
-        package = PackageCreditService.select_active_package_for_student(db, student_id=student_id)
+        package = PackageCreditService.select_active_package_for_student(
+            db, student_id=student_id, subject_id=subject_id
+        )
         ledger = PackageCreditService.consume(
             db,
             student_package_id=package.id,

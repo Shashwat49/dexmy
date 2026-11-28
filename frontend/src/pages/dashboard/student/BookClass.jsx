@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import DashboardLayout from "../../../components/dashboard/DashboardLayout";
@@ -51,13 +51,14 @@ function formatSlotTime(dateString) {
   ).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
+    timeZone: "Asia/Kolkata",
   });
 }
 
 
 function formatTomorrow(dateString) {
   const date = new Date(
-    `${dateString}T00:00:00`
+    `${dateString}T00:00:00Z`
   );
 
   return date.toLocaleDateString(
@@ -67,6 +68,7 @@ function formatTomorrow(dateString) {
       month: "long",
       day: "numeric",
       year: "numeric",
+      timeZone: "UTC",
     }
   );
 }
@@ -74,6 +76,7 @@ function formatTomorrow(dateString) {
 
 export default function BookClass() {
   const navigate = useNavigate();
+  const idempotencyKeyRef = useRef(null);
 
   const [subjects, setSubjects] =
     useState([]);
@@ -215,6 +218,7 @@ export default function BookClass() {
   function handleSubjectSelect(subject) {
     setSelectedSubject(subject);
     setSelectedSlot(null);
+    idempotencyKeyRef.current = null;
     setSuccess(null);
     setError("");
   }
@@ -242,7 +246,8 @@ export default function BookClass() {
       const createdBooking =
         await createBooking(
           selectedSubject.id,
-          selectedSlot.start
+          selectedSlot.start,
+          idempotencyKeyRef.current || (idempotencyKeyRef.current = window.crypto.randomUUID())
         );
 
       setSuccess(
@@ -340,6 +345,7 @@ export default function BookClass() {
                         "long",
                       day:
                         "numeric",
+                      timeZone: "Asia/Kolkata",
                     }
                   )}
                 </p>
@@ -387,6 +393,7 @@ export default function BookClass() {
                 type="button"
                 onClick={() => {
                   setSuccess(null);
+                  idempotencyKeyRef.current = null;
                   setSelectedSubject(null);
                   setSelectedSlot(null);
                   setSlotData(null);
@@ -677,11 +684,10 @@ export default function BookClass() {
                         disabled={
                           !slot.available
                         }
-                        onClick={() =>
-                          setSelectedSlot(
-                            slot
-                          )
-                        }
+                        onClick={() => {
+                          setSelectedSlot(slot);
+                          idempotencyKeyRef.current = null;
+                        }}
                         className={`rounded-xl border px-4 py-4 text-center transition-all ${
                           !slot.available
                             ? "cursor-not-allowed border-chalk-faint bg-panel-2 opacity-40"

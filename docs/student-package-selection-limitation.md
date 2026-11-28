@@ -1,26 +1,35 @@
-# Student package-tab selection: Phase 1 data-model foundation
+# Student package selection and subject entitlements
 
 ## Status
 
-Phase 1 adds an optional many-to-many association between package plans and subjects. Administrators can assign or remove subjects through the existing package API and admin form, and the public catalogue returns each plan's `subject_ids` and subject `{id, name}` records. The additive migration creates only the association table; it does not assign subjects to existing plans or change plan records, entitlements, pricing, checkout, or payment behavior. Plans with no associations remain valid. Student-facing subject selection is intentionally out of scope.
+Phases 1–3 are implemented.
 
-## Why student selection remains deferred
+- **Phase 1 — Plan/subject association:** `package_plan_subjects` links package plans to the subjects they cover. Admins can assign or clear associations, and the public catalogue returns subject IDs and names.
+- **Phase 2 — Guided discovery:** students choose a subject/course, currency, and an eligible package. The selected subject and currency are carried through login and checkout, and checkout validates them against the current plan.
+- **Phase 3 — Booking-time enforcement:** after the two free subject demos have been used, booking selects an active package that covers the requested subject and consumes one credit. Credit consumption checks the booking subject again before debiting the package. Cancellation restores the package credit through the existing ledger/refund flow.
 
-The guided subject/course → currency → package flow can now use an explicit plan-to-subject relationship, but Phase 1 does not add student-facing selection, enforce subject restrictions during checkout or bookings, or change entitlement behavior. That follow-up must filter real active plan records by subject and currency and validate the chosen plan before payment; an empty association remains unrestricted rather than guessed.
+## Compatibility rules
 
-Phase 1 does not change package prices, currency logic, checkout, payment providers, or entitlements.
+- A plan with one or more subject associations is restricted to those subjects.
+- A legacy plan with no associated subjects remains unrestricted. This is intentional compatibility behavior, not an inferred subject assignment.
+- Free demo classes remain separate from purchased package credits: at most two different subjects can be used for free, and the same subject cannot consume a second free demo.
+- Existing package IDs, class counts, prices, currencies, payment providers, and payment activation behavior are unchanged.
+- Teacher assignment remains an admin workflow. Student booking does not expose teacher selection.
+- Booking and Meet-record lifecycle behavior remains otherwise unchanged.
 
-## What Phase 1 supports
+## Booking behavior
 
-- `PackagePlan` has an optional many-to-many relationship with `Subject` through `package_plan_subjects`.
-- The public package endpoint keeps its existing fields and adds `subject_ids` and `subjects` (`id` and `name`). An empty association is returned for unassigned plans and remains valid for catalogue and checkout.
-- The admin package endpoint and form create, replace, and clear subject assignments. IDs are validated against existing subjects; omitting `subject_ids` on update leaves assignments unchanged.
-- Existing plan IDs, names, INR/USD pricing and currency logic, free/manual packages, package credits, bookings, class records, classroom behavior, checkout, and payment providers remain unchanged.
+When a student has used the free class for a subject, the booking endpoint selects the earliest-expiring active package with remaining credits whose plan covers that subject. An associated plan that does not include the requested subject is skipped. If no eligible package exists, the API returns HTTP 402 and the student is redirected to the package catalogue with the requested subject preselected.
 
-## Next phase
+The package credit is debited in the same database transaction as booking creation and classroom-session creation. If booking creation fails, the debit is rolled back. Cancellation uses the existing idempotent credit-refund ledger operation.
 
-The guided subject/course → currency → package student flow must filter active plans using the explicit association and selected currency, and checkout validation must use current catalogue data. Decide separately whether a purchased entitlement is subject-restricted before changing booking or package-credit behavior.
+## Concurrency and retry safety
+
+- Booking entitlement checks are serialized with a row lock on the student record, so two simultaneous requests cannot both claim the same free-subject entitlement.
+- Client booking requests include a stable idempotency key; retries after a lost response return the existing booking rather than creating a duplicate or charging another credit.
+- Idempotency keys are checked against the authenticated student to prevent a key from exposing another student's booking.
+- Package selection and debit lock the package row and revalidate remaining credits.
 
 ## Verification boundary
 
-Phase 1 does not implement student selection, selection persistence, filtering by subject, or subject enforcement in checkout, bookings, or entitlements.
+The new tests cover subject-restricted package selection, unrestricted legacy-package compatibility, and a second subject check at credit consumption. The existing shared-database booking migration limitation is separate; run the full database-backed suite only against a disposable PostgreSQL database because the current test fixture drops and recreates tables.
