@@ -54,6 +54,7 @@ def test_assign_unqualified_teacher_fails(client, seed_data, auth_headers, db_se
         student_id=student.id,
         subject_id=new_subject.id,
         scheduled_at=slot_time,
+        booking_ends_at=slot_time + timedelta(minutes=55),
         status="confirmed",
         teacher_assignment_status="pending",
         duration_minutes=55
