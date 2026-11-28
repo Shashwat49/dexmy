@@ -31,14 +31,25 @@ def get_package_plan(db: Session, package_plan_id: uuid.UUID) -> PackagePlan:
     return plan
 
 
-def get_or_create_payment(db: Session, *, payer_id: uuid.UUID, student_id: uuid.UUID, package_plan: PackagePlan, provider: str, idempotency_key: uuid.UUID) -> Payment:
+def get_or_create_payment(
+    db: Session,
+    *,
+    payer_id: uuid.UUID,
+    student_id: uuid.UUID,
+    package_plan: PackagePlan,
+    provider: str,
+    idempotency_key: uuid.UUID,
+    selected_subject_id: int | None = None,
+) -> Payment:
     existing = db.execute(select(Payment).where(Payment.idempotency_key == idempotency_key)).scalar_one_or_none()
     if existing is not None:
+        existing_provider = getattr(existing.provider, "value", existing.provider)
         if (
             existing.payer_id != payer_id
             or existing.student_id != student_id
             or existing.package_plan_id != package_plan.id
-            or existing.provider.value != provider
+            or existing_provider != provider
+            or existing.selected_subject_id != selected_subject_id
         ):
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key is already associated with a different payment")
         expected_total = (package_plan.price * package_plan.class_count).quantize(Decimal("0.01"))
@@ -63,6 +74,7 @@ def get_or_create_payment(db: Session, *, payer_id: uuid.UUID, student_id: uuid.
         payer_id=payer_id,
         amount=(Decimal(package_plan.price) * package_plan.class_count).quantize(Decimal("0.01")),
         package_class_count=package_plan.class_count,
+        selected_subject_id=selected_subject_id,
         currency=package_plan.currency,
         provider=provider,
         status=PaymentStatus.created,
@@ -78,11 +90,13 @@ def get_or_create_payment(db: Session, *, payer_id: uuid.UUID, student_id: uuid.
         ).scalar_one_or_none()
         if existing is None:
             raise
+        existing_provider = getattr(existing.provider, "value", existing.provider)
         if (
             existing.payer_id != payer_id
             or existing.student_id != student_id
             or existing.package_plan_id != package_plan.id
-            or existing.provider.value != provider
+            or existing_provider != provider
+            or existing.selected_subject_id != selected_subject_id
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -133,6 +147,7 @@ def activate_package_from_payment(db: Session, *, payment_id: uuid.UUID, provide
         student_id=payment.student_id,
         package_plan_id=plan.id,
         payment_id=payment.id,
+        selected_subject_id=payment.selected_subject_id,
         total_classes=payment.package_class_count or plan.class_count,
         classes_used=0,
         status="active",

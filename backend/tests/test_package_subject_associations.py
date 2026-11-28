@@ -6,6 +6,7 @@ from fastapi import HTTPException
 
 from app.models.booking import Booking, BookingStatus
 from app.models.package import PackagePlan, StudentPackage
+from app.models.payment import Payment, PaymentStatus
 from app.models.teacher import Subject
 from app.models.user import User, UserRole
 from app.services.package_credit_service import PackageCreditService
@@ -98,6 +99,26 @@ def test_public_catalogue_keeps_unassigned_plans_and_adds_subject_details(client
     assert catalogue["Science USD"]["is_custom"] is True
 
 
+def test_purchase_subject_scope_migrations_are_additive_and_repeatable():
+    from pathlib import Path
+
+    versions = Path(__file__).parents[1] / "alembic" / "versions" / "20261128_student_package_subject_scope.py"
+    sql_file = Path(__file__).parents[1] / "sql_migrations" / "008_student_package_subject_scope.sql"
+    version_source = versions.read_text(encoding="utf-8")
+    sql_source = sql_file.read_text(encoding="utf-8")
+
+    assert 'down_revision = "20261128_package_plan_subjects"' in version_source
+    assert 'op.add_column("payments"' in version_source
+    assert 'op.add_column("student_packages"' in version_source
+    assert 'op.drop_column("payments", "selected_subject_id")' in version_source
+    assert 'op.drop_column("student_packages", "selected_subject_id")' in version_source
+    assert "ADD COLUMN IF NOT EXISTS selected_subject_id" in sql_source
+    assert "CREATE INDEX IF NOT EXISTS" in sql_source
+    assert "ON DELETE RESTRICT" in sql_source
+    assert "DROP TABLE" not in sql_source.upper()
+    assert "UPDATE " not in sql_source.upper()
+
+
 def test_association_metadata_and_migration_are_additive():
     from pathlib import Path
 
@@ -171,6 +192,100 @@ def test_subject_restricted_package_is_not_selected_for_another_subject(db_sessi
     except HTTPException as exc:
         assert exc.status_code == 402
         assert "this subject" in exc.detail.lower()
+
+
+def test_purchased_subject_is_saved_and_enforced_per_entitlement(db_session):
+    from app.services.package_payment_service import activate_package_from_payment
+
+    student = _student(db_session)
+    math = _create_subject(db_session, "Math")
+    science = _create_subject(db_session, "Science")
+    plan = PackagePlan(
+        name="Flexible subject plan",
+        class_count=25,
+        price=Decimal("2000.00"),
+        currency="INR",
+        subjects=[math, science],
+    )
+    db_session.add(plan)
+    db_session.flush()
+    payment = Payment(
+        id=uuid.uuid4(),
+        package_plan_id=plan.id,
+        package_class_count=25,
+        selected_subject_id=math.id,
+        student_id=student.id,
+        payer_id=student.id,
+        amount=Decimal("50000.00"),
+        currency="INR",
+        provider="razorpay",
+        status=PaymentStatus.created,
+    )
+    db_session.add(payment)
+    db_session.commit()
+
+    package = activate_package_from_payment(db_session, payment_id=payment.id, provider_payment_id="pay_subject_scope")
+    db_session.commit()
+
+    assert package.selected_subject_id == math.id
+    assert PackageCreditService.select_active_package_for_student(
+        db_session, student_id=student.id, subject_id=math.id
+    ).id == package.id
+    try:
+        PackageCreditService.select_active_package_for_student(
+            db_session, student_id=student.id, subject_id=science.id
+        )
+        assert False, "A subject-scoped purchase must not be selected for another subject."
+    except HTTPException as exc:
+        assert exc.status_code == 402
+
+
+def test_entitlement_endpoint_returns_itemized_purchase_snapshot(client, db_session, auth_headers):
+    student = _student(db_session)
+    math = _create_subject(db_session, "Math")
+    plan = PackagePlan(
+        name="25 Class Package",
+        class_count=25,
+        price=Decimal("2000.00"),
+        currency="INR",
+        subjects=[math],
+    )
+    db_session.add(plan)
+    db_session.flush()
+    payment = Payment(
+        id=uuid.uuid4(),
+        package_plan_id=plan.id,
+        package_class_count=25,
+        selected_subject_id=math.id,
+        student_id=student.id,
+        payer_id=student.id,
+        amount=Decimal("50000.00"),
+        currency="INR",
+        provider="razorpay",
+        status=PaymentStatus.paid,
+    )
+    db_session.add(payment)
+    db_session.flush()
+    package = _student_package(db_session, student, plan)
+    package.payment_id = payment.id
+    package.selected_subject_id = math.id
+    package.classes_used = 4
+    db_session.commit()
+
+    response = client.get(
+        "/api/v1/payments/packages/entitlements",
+        headers=auth_headers(str(student.id), "student"),
+    )
+
+    assert response.status_code == 200, response.text
+    item = response.json()["items"][0]
+    assert item["id"] == str(package.id)
+    assert item["selected_subject_id"] == math.id
+    assert item["subjects"] == [{"id": math.id, "name": "Math"}]
+    assert item["total_classes"] == 25
+    assert item["classes_used"] == 4
+    assert item["classes_remaining"] == 21
+    assert item["amount"] == "50000.00"
 
 
 def test_unassigned_legacy_package_remains_valid_for_any_subject(db_session):
