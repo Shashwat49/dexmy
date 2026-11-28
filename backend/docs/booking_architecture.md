@@ -40,6 +40,7 @@ A booking transitions through several states, categorized under two main pillars
 1. **pending** — Default state when a booking is created. No teacher is assigned yet.
 2. **assigned** — A teacher has been successfully allocated to the booking.
 3. **failed** — The system or admin could not find a suitable teacher.
+4. **discarded** — An admin discarded the pending assignment request.
 
 ---
 
