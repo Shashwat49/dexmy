@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
@@ -57,16 +58,27 @@ def create_package_aware_booking(
     if subject is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found.")
 
-    try:
-        scheduled_at = validate_requested_slot(payload.scheduled_at)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    # Serialize entitlement checks for this student. Without this lock, two
+    # simultaneous requests for different slots could both claim the same
+    # free subject entitlement before either inserts its usage row.
+    db.execute(select(User.id).where(User.id == current_user.id).with_for_update()).scalar_one()
 
-    # Idempotent retries must never consume another credit.
+    # Idempotency is scoped to the authenticated student. Check it after the
+    # lock so a retry racing with the original request returns the same booking.
     if payload.idempotency_key is not None:
         existing = db.query(Booking).filter(Booking.idempotency_key == payload.idempotency_key).first()
         if existing is not None:
+            if existing.student_id != current_user.id:
+                db.rollback()
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This idempotency key is already in use.")
+            db.rollback()
             return _booking_response(db, existing)
+
+    try:
+        scheduled_at = validate_requested_slot(payload.scheduled_at)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     is_free, _ = get_free_class_status(
         db=db,
@@ -78,10 +90,15 @@ def create_package_aware_booking(
     if is_free:
         price = 0
     else:
-        package = PackageCreditService.select_active_package_for_student(
-            db,
-            student_id=current_user.id,
-        )
+        try:
+            package = PackageCreditService.select_active_package_for_student(
+                db,
+                student_id=current_user.id,
+                subject_id=payload.subject_id,
+            )
+        except HTTPException:
+            db.rollback()
+            raise
         if package is None:
             db.rollback()
             raise HTTPException(
